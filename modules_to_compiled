@@ -8,7 +8,7 @@ CROSS_COMPILE=/media/ICS/home-ics/Android/kernel/Toolchain/linaro4.7-2013.02-01/
 #Linux 4.4.3
 #CROSS_COMPILE=/media/Alf/home/alf/android/system/prebuilt/linux-x86/toolchain/arm-eabi-4.4.3/bin/arm-eabi-
 
-KERNEL_DIR=/media/ICS/home-ics/Android/kernel/Test-gammel-usb--kernel-new-kgsl-ginger2-6-35
+KERNEL_DIR=/media/ICS/home-ics/Android/kernel/ny_test_kernel
 
 VENDOR_TI_WLAN=/media/Alf/home/alf/android/system/vendor/semc/shakira/vendor_ti_wlan
 
