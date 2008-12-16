@@ -28,6 +28,7 @@
 
 
 struct device;
+struct device_private;
 struct device_driver;
 struct driver_private;
 struct class;
@@ -371,6 +372,8 @@ struct device {
 	struct klist_node	knode_driver;
 	struct klist_node	knode_bus;
 	struct device		*parent;
+
+	struct device_private	*p;
 
 	struct kobject kobj;
 		
