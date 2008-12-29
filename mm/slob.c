@@ -65,6 +65,7 @@
 #include <linux/module.h>
 #include <linux/rcupdate.h>
 #include <linux/list.h>
+#include <trace/kmemtrace.h>
 #include <asm/atomic.h>
 
 /*
