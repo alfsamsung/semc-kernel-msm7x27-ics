@@ -66,8 +66,6 @@ struct class_private {
 /**
  * struct device_private - structure to hold the private to the driver core portions of the device structure.
  *
- * @klist_children - klist containing all children of this device
- * @knode_parent - node in sibling list
  * @driver_data - private pointer for driver specific info.  Will turn into a
  * list soon.
  * @device - pointer back to the struct class that this structure is
@@ -76,13 +74,9 @@ struct class_private {
  * Nothing outside of the driver core should ever touch these fields.
  */
 struct device_private {
-	struct klist klist_children;
-	struct klist_node knode_parent;
 	void *driver_data;
 	struct device *device;
 };
-#define to_device_private_parent(obj)	\
-	container_of(obj, struct device_private, knode_parent)
 
 extern int device_private_init(struct device *dev);
 
