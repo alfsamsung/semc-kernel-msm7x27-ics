@@ -63,23 +63,6 @@ struct class_private {
 #define to_class(obj)	\
 	container_of(obj, struct class_private, class_subsys.kobj)
 
-/**
- * struct device_private - structure to hold the private to the driver core portions of the device structure.
- *
- * @driver_data - private pointer for driver specific info.  Will turn into a
- * list soon.
- * @device - pointer back to the struct class that this structure is
- * associated with.
- *
- * Nothing outside of the driver core should ever touch these fields.
- */
-struct device_private {
-	void *driver_data;
-	struct device *device;
-};
-
-extern int device_private_init(struct device *dev);
-
 /* initialisation functions */
 extern int devices_init(void);
 extern int buses_init(void);
