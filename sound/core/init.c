@@ -132,8 +132,9 @@ static inline int init_info_for_card(struct snd_card *card)
  *  Returns kmallocated snd_card structure. Creates the ALSA control interface
  *  (which is blocked until snd_card_register function is called).
  */
-struct snd_card *snd_card_new(int idx, const char *xid,
-			 struct module *module, int extra_size)
+int snd_card_create(int idx, const char *xid,
+                    struct module *module, int extra_size,
+                    struct snd_card **card_ret)
 {
 	struct snd_card *card;
 	int err, idx2;
@@ -141,13 +142,10 @@ struct snd_card *snd_card_new(int idx, const char *xid,
 	if (extra_size < 0)
 		extra_size = 0;
 	card = kzalloc(sizeof(*card) + extra_size, GFP_KERNEL);
-	if (card == NULL)
-		return NULL;
-	if (xid) {
-		if (!snd_info_check_reserved_words(xid))
-			goto __error;
+	if (!card)
+		return -ENOMEM;
+	if (xid) 
 		strlcpy(card->id, xid, sizeof(card->id));
-	}
 	err = 0;
 	mutex_lock(&snd_card_mutex);
 	if (idx < 0) {
@@ -212,16 +210,17 @@ struct snd_card *snd_card_new(int idx, const char *xid,
 	}
 	if (extra_size > 0)
 		card->private_data = (char *)card + sizeof(struct snd_card);
-	return card;
+	*card_ret = card;
+        return 0;
 
       __error_ctl:
 	snd_device_free_all(card, SNDRV_DEV_CMD_PRE);
       __error:
 	kfree(card);
-      	return NULL;
+      	return err;
 }
 
-EXPORT_SYMBOL(snd_card_new);
+EXPORT_SYMBOL(snd_card_create);
 
 /* return non-zero if a card is already locked */
 int snd_card_locked(int card)

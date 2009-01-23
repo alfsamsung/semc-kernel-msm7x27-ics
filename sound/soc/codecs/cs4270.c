@@ -371,7 +371,7 @@ static int cs4270_hw_params(struct snd_pcm_substream *substream,
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_device *socdev = rtd->socdev;
-	struct snd_soc_codec *codec = socdev->codec;
+	struct snd_soc_codec *codec = socdev->card->codec;
 	struct cs4270_private *cs4270 = codec->private_data;
 	int ret;
 	unsigned int i;
@@ -676,6 +676,8 @@ static int cs4270_probe(struct platform_device *pdev)
 		printk(KERN_ERR "cs4270: Could not allocate codec structure\n");
 		return -ENOMEM;
 	}
+	codec = &cs4270->codec;
+	socdev->card->codec = codec;
 
 	mutex_init(&codec->mutex);
 	INIT_LIST_HEAD(&codec->dapm_widgets);
@@ -748,7 +750,9 @@ error_free_codec:
 
 static int cs4270_remove(struct platform_device *pdev)
 {
-	struct snd_soc_device *socdev = platform_get_drvdata(pdev);
+	struct snd_soc_device *socdev = i2c_get_clientdata(i2c_client);
+	struct snd_soc_codec *codec = socdev->card->codec;
+        struct cs4270_private *cs4270 = codec->private_data;
 
 	snd_soc_free_pcms(socdev);
 
