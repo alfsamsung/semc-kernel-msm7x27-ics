@@ -45,6 +45,7 @@
 #include <linux/proc_fs.h>
 #include <linux/mount.h>
 #include <linux/security.h>
+#include <linux/ima.h>
 #include <linux/syscalls.h>
 #include <linux/tsacct_kern.h>
 #include <linux/cn_proc.h>
@@ -125,6 +126,9 @@ SYSCALL_DEFINE1(uselib, const char __user *, library)
 
 	error = inode_permission(nd.path.dentry->d_inode,
 				 MAY_READ | MAY_EXEC | MAY_OPEN);
+	if (error)
+		goto exit;
+	error = ima_path_check(&nd.path, MAY_READ | MAY_EXEC | MAY_OPEN);
 	if (error)
 		goto exit;
 
@@ -674,6 +678,9 @@ struct file *open_exec(const char *name)
 	err = inode_permission(nd.path.dentry->d_inode, MAY_EXEC | MAY_OPEN);
 	if (err)
 		goto out_path_put;
+	err = ima_path_check(&nd.path, MAY_EXEC | MAY_OPEN);
+	if (err)
+		goto out_path_put;
 
 	file = nameidata_to_filp(&nd, O_RDONLY|O_LARGEFILE);
 	if (IS_ERR(file))
@@ -1185,6 +1192,9 @@ int search_binary_handler(struct linux_binprm *bprm,struct pt_regs *regs)
 	struct linux_binfmt *fmt;
 
 	retval = security_bprm_check(bprm);
+	if (retval)
+		return retval;
+	retval = ima_bprm_check(bprm);
 	if (retval)
 		return retval;
 
