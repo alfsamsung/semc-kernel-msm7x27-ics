@@ -898,7 +898,7 @@ void ccw_device_move_to_orphanage(struct work_struct *work)
 	 * Note: device_move() changes cdev->dev.parent
 	 */
 	ret = device_move(&cdev->dev, &css->pseudo_subchannel->dev,
-               DPM_ORDER_NONE);
+		DPM_ORDER_NONE);
 	if (ret) {
 		CIO_MSG_EVENT(0, "Moving device 0.%x.%04x to orphanage failed "
 			      "(ret=%d)!\n", cdev->private->dev_id.ssid,
