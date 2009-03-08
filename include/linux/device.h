@@ -383,8 +383,14 @@ struct device {
 	struct bus_type	*bus;		/* type of bus device is on */
 	struct device_driver *driver;	/* which driver has allocated this
 					   device */
-	void		*platform_data;	/* Platform specific data, device
-					   core doesn't touch it */
+	void		*driver_data;	/* data private to the driver */
+
+	void		*platform_data;	/* We will remove platform_data
+					   field if all platform devices
+					   pass its platform specific data
+					   from platform_device->platform_data,
+					   other kind of devices should not
+					   use platform_data. */
 	struct dev_pm_info	power;
 
 #ifdef CONFIG_NUMA
