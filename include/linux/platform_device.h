@@ -21,10 +21,8 @@ struct platform_device {
 	u32		num_resources;
 	struct resource	* resource;
 	const struct platform_device_id *id_entry;
-	void		*platform_data;
 
 	struct platform_device_id	*id_entry;
-
 };
 
 #define platform_get_device_id(pdev)    ((pdev)->id_entry)
