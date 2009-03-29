@@ -1122,7 +1122,7 @@ int cifs_mkdir(struct inode *inode, struct dentry *direntry, int mode)
 			goto mkdir_out;
 		}
 
-		mode &= ~current->fs->umask;
+		mode &= ~current_umask();
 		rc = CIFSPOSIXCreate(xid, pTcon, SMB_O_DIRECTORY | SMB_O_CREAT,
 				mode, NULL /* netfid */, pInfo, &oplock,
 				full_path, cifs_sb->local_nls,
@@ -1200,7 +1200,7 @@ mkdir_get_info:
 		if ((direntry->d_inode) && (direntry->d_inode->i_nlink < 2))
 				set_nlink(direntry->d_inode, 2);
 
-		mode &= ~current->fs->umask;
+		mode &= ~current_umask();
 		/* must turn on setgid bit if parent dir has it */
 		if (inode->i_mode & S_ISGID)
 			mode |= S_ISGID;

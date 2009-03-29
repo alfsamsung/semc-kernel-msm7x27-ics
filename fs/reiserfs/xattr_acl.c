@@ -389,7 +389,7 @@ reiserfs_inherit_default_acl(struct inode *dir, struct dentry *dentry,
 	} else {
 	      apply_umask:
 		/* no ACL, apply umask */
-		inode->i_mode &= ~current->fs->umask;
+		inode->i_mode &= ~current_umask();
 	}
 
 	return err;
