@@ -2517,7 +2517,4 @@ void __init mmap_init(void)
 
 	ret = percpu_counter_init(&vm_committed_as, 0);
 	VM_BUG_ON(ret);
-	vm_area_cachep = kmem_cache_create("vm_area_struct",
-			sizeof(struct vm_area_struct), 0,
-			SLAB_PANIC, NULL);
 }

@@ -1234,7 +1234,7 @@ static inline void setup_per_cpu_pageset(void) {}
 #endif
 
 /* nommu.c */
-extern atomic_t mmap_pages_allocated;
+extern atomic_long_t mmap_pages_allocated;
 extern int nommu_shrink_inode_mappings(struct inode *, size_t, size_t);
 
 /* prio_tree.c */
