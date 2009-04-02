@@ -514,24 +514,7 @@ struct signal_struct {
 
 	struct list_head cpu_timers[3];
 
-	/* job control IDs */
-
-	/*
-	 * pgrp and session fields are deprecated.
-	 * use the task_session_Xnr and task_pgrp_Xnr routines below
-	 */
-
-	union {
-		pid_t pgrp __deprecated;
-		pid_t __pgrp;
-	};
-
 	struct pid *tty_old_pgrp;
-
-	union {
-		pid_t session __deprecated;
-		pid_t __session;
-	};
 
 	/* boolean value for session group leader */
 	int leader;
@@ -1553,16 +1536,6 @@ static inline int rt_task(struct task_struct *p)
 	return rt_prio(p->prio);
 }
 
-static inline void set_task_session(struct task_struct *tsk, pid_t session)
-{
-	tsk->signal->__session = session;
-}
-
-static inline void set_task_pgrp(struct task_struct *tsk, pid_t pgrp)
-{
-	tsk->signal->__pgrp = pgrp;
-}
-
 static inline struct pid *task_pid(struct task_struct *task)
 {
 	return task->pids[PIDTYPE_PID].pid;
@@ -1624,32 +1597,33 @@ static inline pid_t task_tgid_vnr(struct task_struct *tsk)
 	return pid_vnr(task_tgid(tsk));
 }
 
-
-static inline pid_t task_pgrp_nr(struct task_struct *tsk)
+static inline pid_t task_pgrp_nr_ns(struct task_struct *tsk,
+					struct pid_namespace *ns)
 {
-	return tsk->signal->__pgrp;
+	return __task_pid_nr_ns(tsk, PIDTYPE_PGID, ns);
 }
-
-pid_t task_pgrp_nr_ns(struct task_struct *tsk, struct pid_namespace *ns);
 
 static inline pid_t task_pgrp_vnr(struct task_struct *tsk)
 {
 	return pid_vnr(task_pgrp(tsk));
 }
 
-
-static inline pid_t task_session_nr(struct task_struct *tsk)
+static inline pid_t task_session_nr_ns(struct task_struct *tsk,
+					struct pid_namespace *ns)
 {
-	return tsk->signal->__session;
+	return __task_pid_nr_ns(tsk, PIDTYPE_SID, ns);
 }
-
-pid_t task_session_nr_ns(struct task_struct *tsk, struct pid_namespace *ns);
 
 static inline pid_t task_session_vnr(struct task_struct *tsk)
 {
 	return pid_vnr(task_session(tsk));
 }
 
+/* obsolete, do not use */
+static inline pid_t task_pgrp_nr(struct task_struct *tsk)
+{
+	return task_pgrp_nr_ns(tsk, &init_pid_ns);
+}
 
 /**
  * pid_alive - check that a task structure is not stale
