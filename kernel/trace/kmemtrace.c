@@ -6,14 +6,16 @@
  * Copyright (C) 2008 Frederic Weisbecker <fweisbec@gmail.com>
  */
 
-#include <linux/dcache.h>
-#include <linux/debugfs.h>
-#include <linux/fs.h>
+#include <linux/tracepoint.h>
 #include <linux/seq_file.h>
-#include <trace/kmemtrace.h>
+#include <linux/debugfs.h>
+#include <linux/dcache.h>
+#include <linux/fs.h>
 
-#include "trace.h"
+#include <linux/kmemtrace.h>
+
 #include "trace_output.h"
+#include "trace.h"
 
 /* Select an alternative, minimalistic output than the original one */
 #define TRACE_KMEM_OPT_MINIMAL	0x1
