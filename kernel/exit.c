@@ -47,7 +47,7 @@
 #include <linux/task_io_accounting_ops.h>
 #include <linux/tracehook.h>
 #include <linux/init_task.h>
-#include <trace/sched.h>
+#include <trace/events/sched.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>

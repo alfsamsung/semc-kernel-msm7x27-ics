@@ -17,6 +17,10 @@
 #include <linux/kernel_stat.h>
 #include <linux/rculist.h>
 #include <linux/hash.h>
+#include <linux/bootmem.h>
+
+#define CREATE_TRACE_POINTS
+#include <trace/events/irq.h>
 
 #include "internals.h"
 
