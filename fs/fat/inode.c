@@ -454,6 +454,9 @@ static void fat_put_super(struct super_block *sb)
 
 	lock_kernel();
 	
+	if (sb->s_dirt)
+		fat_write_super(sb);
+
 	if (sbi->nls_disk) {
 		unload_nls(sbi->nls_disk);
 		sbi->nls_disk = NULL;

@@ -312,8 +312,6 @@ void generic_shutdown_super(struct super_block *sb)
 		/* bad name - it should be evict_inodes() */
 		invalidate_inodes(sb);
 		
-		if (sop->write_super && sb->s_dirt)
-			sop->write_super(sb);
 		if (sop->put_super)
 			sop->put_super(sb);
 
