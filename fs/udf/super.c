@@ -2064,6 +2064,9 @@ static void udf_put_super(struct super_block *sb)
 	struct udf_sb_info *sbi;
 
 	sbi = UDF_SB(sb);
+
+	lock_kernel();
+
 	if (sbi->s_vat_inode)
 		iput(sbi->s_vat_inode);
 	if (sbi->s_partitions)
@@ -2079,6 +2082,8 @@ static void udf_put_super(struct super_block *sb)
 	kfree(sbi->s_partmaps);
 	kfree(sb->s_fs_info);
 	sb->s_fs_info = NULL;
+
+	unlock_kernel();
 }
 
 static int udf_statfs(struct dentry *dentry, struct kstatfs *buf)

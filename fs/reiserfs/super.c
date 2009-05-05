@@ -468,6 +468,8 @@ static void reiserfs_put_super(struct super_block *s)
 	struct reiserfs_transaction_handle th;
 	th.t_trans_id = 0;
 
+	lock_kernel();
+
 	if (s->s_dirt)
 		reiserfs_write_super(s);
 
@@ -504,7 +506,7 @@ static void reiserfs_put_super(struct super_block *s)
 	kfree(s->s_fs_info);
 	s->s_fs_info = NULL;
 
-	return;
+	unlock_kernel();
 }
 
 static struct kmem_cache *reiserfs_inode_cachep;

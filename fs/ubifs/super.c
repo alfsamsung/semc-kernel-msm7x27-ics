@@ -1664,6 +1664,9 @@ static void ubifs_put_super(struct super_block *sb)
 
 	ubifs_msg("un-mount UBI device %d, volume %d", c->vi.ubi_num,
 		  c->vi.vol_id);
+
+	lock_kernel();
+
 	/*
 	 * The following asserts are only valid if there has not been a failure
 	 * of the media. For example, there will be dirty inodes if we failed
@@ -1730,6 +1733,8 @@ static void ubifs_put_super(struct super_block *sb)
 	ubi_close_volume(c->ubi);
 	mutex_unlock(&c->umount_mutex);
 	kfree(c);
+
+	unlock_kernel();
 }
 
 static int ubifs_remount_fs(struct super_block *sb, int *flags, char *data)

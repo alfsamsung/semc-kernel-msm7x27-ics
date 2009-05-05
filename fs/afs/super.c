@@ -441,7 +441,11 @@ static void afs_put_super(struct super_block *sb)
 
 	_enter("");
 
+	lock_kernel();
+
 	afs_put_volume(as->volume);
+
+	unlock_kernel();
 
 	_leave("");
 }
