@@ -1442,7 +1442,7 @@ int compat_do_execve(char * filename,
 	if (!bprm)
 		goto out_files;
 
-	retval = mutex_lock_interruptible(&current->cred_exec_mutex);
+	retval = mutex_lock_interruptible(&current->cred_guard_mutex);
 	if (retval < 0)
 		goto out_free;
 
@@ -1502,7 +1502,7 @@ int compat_do_execve(char * filename,
 
 	/* execve succeeded */
 	current->fs->in_exec = 0;
-	mutex_unlock(&current->cred_exec_mutex);
+	mutex_unlock(&current->cred_guard_mutex);
 	acct_update_integrals(current);
 	free_bprm(bprm);
 	if (displaced)
@@ -1524,7 +1524,7 @@ out_unmark:
 		current->fs->in_exec = 0;
 
 out_unlock:
-	mutex_unlock(&current->cred_exec_mutex);
+	mutex_unlock(&current->cred_guard_mutex);
 
 out_free:
 	free_bprm(bprm);
