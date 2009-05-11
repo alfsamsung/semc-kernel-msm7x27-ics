@@ -793,17 +793,13 @@ static void device_remove_class_symlinks(struct device *dev)
 int dev_set_name(struct device *dev, const char *fmt, ...)
 {
 	va_list vargs;
-	char *s;
+	int err;
 
 	va_start(vargs, fmt);
-	vsnprintf(dev->bus_id, sizeof(dev->bus_id), fmt, vargs);
+	err = kobject_set_name_vargs(&dev->kobj, fmt, vargs);
 	va_end(vargs);
 
-	/* ewww... some of these buggers have / in the name... */
-	while ((s = strchr(dev->bus_id, '/')))
-		*s = '!';
-
-	return 0;
+	return err;
 }
 EXPORT_SYMBOL_GPL(dev_set_name);
 
@@ -855,6 +851,17 @@ static void device_remove_sys_dev_entry(struct device *dev)
 	}
 }
 
+int device_private_init(struct device *dev)
+{
+	dev->p = kzalloc(sizeof(*dev->p), GFP_KERNEL);
+	if (!dev->p)
+		return -ENOMEM;
+	dev->p->device = dev;
+	klist_init(&dev->p->klist_children, klist_children_get,
+		   klist_children_put);
+	return 0;
+}
+
 /**
  * device_add - add device to device hierarchy.
  * @dev: device.
@@ -880,12 +887,23 @@ int device_add(struct device *dev)
 	if (!dev)
 		goto done;
 
-	/* Temporarily support init_name if it is set.
-	 * It will override bus_id for now */
-	if (dev->init_name)
-		dev_set_name(dev, "%s", dev->init_name);
+	if (!dev->p) {
+		error = device_private_init(dev);
+		if (error)
+			goto done;
+	}
 
-	if (!strlen(dev->bus_id))
+	/*
+	 * for statically allocated devices, which should all be converted
+	 * some day, we need to initialize the name. We prevent reading back
+	 * the name, and force the use of dev_name()
+	 */
+	if (dev->init_name) {
+		dev_set_name(dev, "%s", dev->init_name);
+		dev->init_name = NULL;
+	}
+	
+	if (!dev_name(dev))
 		goto done;
 
 	pr_debug("device: '%s': %s\n", dev_name(dev), __func__);
@@ -1189,6 +1207,9 @@ int device_for_each_child(struct device *parent, void *data,
 	struct klist_iter i;
 	struct device *child;
 	int error = 0;
+	
+	if (!parent->p)
+		return 0;
 
 	klist_iter_init(&parent->p->klist_children, &i);
 	while ((child = next_device(&i)) && !error)
@@ -1413,7 +1434,9 @@ struct device *device_create_vargs(struct class *class, struct device *parent,
 	dev->release = device_create_release;
 	dev_set_drvdata(dev, drvdata);
 
-	vsnprintf(dev->bus_id, BUS_ID_SIZE, fmt, args);
+	retval = kobject_set_name_vargs(&dev->kobj, fmt, args);
+	if (retval)
+		goto error;
 	retval = device_register(dev);
 	if (retval)
 		goto error;
@@ -1517,19 +1540,14 @@ int device_rename(struct device *dev, char *new_name)
 		old_class_name = make_class_name(dev->class->name, &dev->kobj);
 #endif
 
-	old_device_name = kmalloc(BUS_ID_SIZE, GFP_KERNEL);
+	old_device_name = kstrdup(dev_name(dev), GFP_KERNEL);
 	if (!old_device_name) {
 		error = -ENOMEM;
 		goto out;
 	}
-	strlcpy(old_device_name, dev->bus_id, BUS_ID_SIZE);
-	strlcpy(dev->bus_id, new_name, BUS_ID_SIZE);
-
 	error = kobject_rename(&dev->kobj, new_name);
-	if (error) {
-		strlcpy(dev->bus_id, old_device_name, BUS_ID_SIZE);
+	if (error)
 		goto out;
-	}
 
 #ifdef CONFIG_SYSFS_DEPRECATED
 	if (old_class_name) {

@@ -2454,7 +2454,7 @@ static int msm72k_probe(struct platform_device *pdev)
 	ui->gadget.ops = &msm72k_ops;
 	ui->gadget.is_dualspeed = 1;
 	device_initialize(&ui->gadget.dev);
-	strcpy(ui->gadget.dev.bus_id, "gadget");
+	dev_set_name(&ui->gadget.dev, "gadget");
 	ui->gadget.dev.parent = &pdev->dev;
 	ui->gadget.dev.dma_mask = pdev->dev.dma_mask;
 
