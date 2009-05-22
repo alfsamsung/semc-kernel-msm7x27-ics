@@ -69,6 +69,8 @@ deps_config := \
 	fs/ext3/Kconfig \
 	fs/ext2/Kconfig \
 	fs/Kconfig \
+	drivers/staging/zcache/Kconfig \
+	drivers/staging/zram/Kconfig \
 	drivers/staging/ramzswap/Kconfig \
 	drivers/staging/android/Kconfig \
 	drivers/staging/epl/Kconfig \

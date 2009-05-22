@@ -1198,6 +1198,8 @@ struct super_block {
 	 * generic_show_options()
 	 */
 	char *s_options;
+	
+	int cleancache_poolid;	
 
 	/*
 	 * storage for asynchronous operations
