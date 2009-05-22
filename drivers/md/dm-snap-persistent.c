@@ -280,7 +280,7 @@ static int read_header(struct pstore *ps, int *new_snapshot)
 	 */
 	if (!ps->snap->chunk_size) {
 		ps->snap->chunk_size = max(DM_CHUNK_SIZE_DEFAULT_SECTORS,
-		    bdev_hardsect_size(ps->snap->cow->bdev) >> 9);
+		    bdev_logical_block_size(ps->snap->cow->bdev) >> 9);
 		ps->snap->chunk_mask = ps->snap->chunk_size - 1;
 		ps->snap->chunk_shift = ffs(ps->snap->chunk_size) - 1;
 		chunk_size_supplied = 0;

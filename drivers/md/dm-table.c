@@ -110,7 +110,8 @@ static void combine_restrictions_low(struct io_restrictions *lhs,
 	lhs->max_hw_segments =
 		min_not_zero(lhs->max_hw_segments, rhs->max_hw_segments);
 
-	lhs->hardsect_size = max(lhs->hardsect_size, rhs->hardsect_size);
+	lhs->logical_block_size = max(lhs->logical_block_size,
+				      rhs->logical_block_size);
 
 	lhs->max_segment_size =
 		min_not_zero(lhs->max_segment_size, rhs->max_segment_size);
@@ -532,7 +533,8 @@ void dm_set_device_limits(struct dm_target *ti, struct block_device *bdev)
 	rs->max_hw_segments =
 		min_not_zero(rs->max_hw_segments, q->max_hw_segments);
 
-	rs->hardsect_size = max(rs->hardsect_size, q->hardsect_size);
+	rs->logical_block_size = max(rs->logical_block_size,
+				     queue_logical_block_size(q));
 
 	rs->max_segment_size =
 		min_not_zero(rs->max_segment_size, q->max_segment_size);
@@ -544,7 +546,7 @@ void dm_set_device_limits(struct dm_target *ti, struct block_device *bdev)
 		min_not_zero(rs->seg_boundary_mask,
 			     q->seg_boundary_mask);
 
-	rs->bounce_pfn = min_not_zero(rs->bounce_pfn, q->bounce_pfn);
+	rs->bounce_pfn = min_not_zero(rs->bounce_pfn, queue_bounce_pfn(q));
 
 	rs->no_cluster |= !test_bit(QUEUE_FLAG_CLUSTER, &q->queue_flags);
 }
@@ -686,8 +688,8 @@ static void check_for_valid_limits(struct io_restrictions *rs)
 		rs->max_phys_segments = MAX_PHYS_SEGMENTS;
 	if (!rs->max_hw_segments)
 		rs->max_hw_segments = MAX_HW_SEGMENTS;
-	if (!rs->hardsect_size)
-		rs->hardsect_size = 1 << SECTOR_SHIFT;
+	if (!rs->logical_block_size)
+		rs->logical_block_size = 1 << SECTOR_SHIFT;
 	if (!rs->max_segment_size)
 		rs->max_segment_size = MAX_SEGMENT_SIZE;
 	if (!rs->seg_boundary_mask)
@@ -888,12 +890,11 @@ void dm_table_set_restrictions(struct dm_table *t, struct request_queue *q)
 	blk_queue_max_sectors(q, t->limits.max_sectors);
 	q->max_phys_segments = t->limits.max_phys_segments;
 	q->max_hw_segments = t->limits.max_hw_segments;
-	q->hardsect_size = t->limits.hardsect_size;
+	q->logical_block_size = t->limits.logical_block_size;
 	q->max_segment_size = t->limits.max_segment_size;
 	q->max_hw_sectors = t->limits.max_hw_sectors;
 	q->seg_boundary_mask = t->limits.seg_boundary_mask;
-	q->bounce_pfn = t->limits.bounce_pfn;
-
+	
 	if (t->limits.no_cluster)
 		queue_flag_clear_unlocked(QUEUE_FLAG_CLUSTER, q);
 	else

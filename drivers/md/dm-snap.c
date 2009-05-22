@@ -544,7 +544,7 @@ static int set_chunk_size(struct dm_snapshot *s, const char *chunk_size_arg,
 	}
 
 	/* Validate the chunk size against the device block size */
-	if (chunk_size % (bdev_hardsect_size(s->cow->bdev) >> 9)) {
+	if (chunk_size % (bdev_logical_block_size(s->cow->bdev) >> 9)) {
 		*error = "Chunk size is not a multiple of device blocksize";
 		return -EINVAL;
 	}

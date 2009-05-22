@@ -1928,7 +1928,7 @@ static int udf_fill_super(struct super_block *sb, void *options, int silent)
 	sb->s_magic = UDF_SUPER_MAGIC;
 	sb->s_time_gran = 1000;
 
-	if (udf_load_sequence(sb, &fileset)) {
+if (udf_load_sequence(sb, &fileset)) {
 		printk(KERN_WARNING "UDF-fs: No partition found (1)\n");
 		goto error_out;
 	}
