@@ -414,9 +414,6 @@ static int resume_device(struct device *dev, pm_message_t state)
 		if (dev->type->pm) {
 			pm_dev_dbg(dev, state, "type ");
 			error = pm_op(dev, dev->type->pm, state);
-		} else if (dev->type->resume) {
-			pm_dev_dbg(dev, state, "legacy type ");
-			error = dev->type->resume(dev);
 		}
 		if (error)
 			goto End;
@@ -692,10 +689,6 @@ static int suspend_device(struct device *dev, pm_message_t state)
 		if (dev->type->pm) {
 			pm_dev_dbg(dev, state, "type ");
 			error = pm_op(dev, dev->type->pm, state);
-		} else if (dev->type->suspend) {
-			pm_dev_dbg(dev, state, "legacy type ");
-			error = dev->type->suspend(dev, state);
-			suspend_report_result(dev->type->suspend, error);
 		}
 		if (error)
 			goto End;

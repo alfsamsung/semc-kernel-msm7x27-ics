@@ -291,9 +291,6 @@ struct device_type {
 	char *(*nodename)(struct device *dev);
 	void (*release)(struct device *dev);
 
-	int (*suspend)(struct device *dev, pm_message_t state);
-	int (*resume)(struct device *dev);
-
 	const struct dev_pm_ops *pm;;
 };
 
