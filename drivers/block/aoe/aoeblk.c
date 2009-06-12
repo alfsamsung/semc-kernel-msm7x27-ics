@@ -265,6 +265,7 @@ aoeblk_gdalloc(void *vp)
 	}
 
 	blk_queue_make_request(&d->blkq, aoeblk_make_request);
+	d->blkq->backing_dev_info.name = "aoe";
 	if (bdi_init(&d->blkq.backing_dev_info))
 		goto err_mempool;
 	spin_lock_irqsave(&d->lock, flags);

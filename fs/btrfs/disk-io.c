@@ -1343,7 +1343,9 @@ static void btrfs_unplug_io_fn(struct backing_dev_info *bdi, struct page *page)
 static int setup_bdi(struct btrfs_fs_info *info, struct backing_dev_info *bdi)
 {
 	bdi_init(bdi);
-	bdi->ra_pages	= default_backing_dev_info.ra_pages;
+
+	bdi->name 		= "btrfs";
+	bdi->ra_pages		= default_backing_dev_info.ra_pages;
 	bdi->state		= 0;
 	bdi->capabilities	= default_backing_dev_info.capabilities;
 	bdi->unplug_io_fn	= btrfs_unplug_io_fn;
