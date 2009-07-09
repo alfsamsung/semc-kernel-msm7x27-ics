@@ -387,6 +387,8 @@ int blkdev_issue_discard(struct block_device *bdev,
 		return -EOPNOTSUPP;
 
 	while (nr_sects && !ret) {
+		unsigned int max_discard_sectors =
+                        min(q->limits.max_discard_sectors, UINT_MAX >> 9);
 		bio = bio_alloc(gfp_mask, 0);
 		if (!bio)
 			return -ENOMEM;
@@ -396,10 +398,10 @@ int blkdev_issue_discard(struct block_device *bdev,
 
 		bio->bi_sector = sector;
 
-		if (nr_sects > queue_max_hw_sectors(q)) {
-                        bio->bi_size = queue_max_hw_sectors(q) << 9;
-                        nr_sects -= queue_max_hw_sectors(q);
-                        sector += queue_max_hw_sectors(q);
+		if (nr_sects > max_discard_sectors) {
+                        bio->bi_size = max_discard_sectors << 9;
+                        nr_sects -= max_discard_sectors;
+                        sector += max_discard_sectors;
 		} else {
 			bio->bi_size = nr_sects << 9;
 			nr_sects = 0;

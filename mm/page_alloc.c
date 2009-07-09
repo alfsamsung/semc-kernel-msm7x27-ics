@@ -1479,6 +1479,7 @@ try_next_zone:
 struct page *
 __alloc_pages_internal(gfp_t gfp_mask, unsigned int order,
 			struct zonelist *zonelist, nodemask_t *nodemask)
+
 {
 	const gfp_t wait = gfp_mask & __GFP_WAIT;
 	enum zone_type high_zoneidx = gfp_zone(gfp_mask);
@@ -1571,7 +1572,7 @@ nofail_alloc:
 			if (page)
 				goto got_pg;
 			if (gfp_mask & __GFP_NOFAIL) {
-				congestion_wait(WRITE, HZ/50);
+				congestion_wait(BLK_RW_ASYNC, HZ/50);
 				goto nofail_alloc;
 			}
 		}
@@ -1668,7 +1669,7 @@ nofail_alloc:
 			do_retry = 1;
 	}
 	if (do_retry) {
-		congestion_wait(WRITE, HZ/50);
+		congestion_wait(BLK_RW_ASYNC, HZ/50);
 		goto rebalance;
 	}
 

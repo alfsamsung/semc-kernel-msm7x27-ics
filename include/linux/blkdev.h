@@ -38,6 +38,10 @@ struct request;
 typedef void (rq_end_io_fn)(struct request *, int);
 
 struct request_list {
+	/*
+        * count[], starved[], and wait[] are indexed by
+        * BLK_RW_SYNC/BLK_RW_ASYNC
+        */
 	int count[2];
 	int starved[2];
 	int elvpriv;
@@ -103,7 +107,7 @@ enum rq_flag_bits {
 	__REQ_QUIET,		/* don't worry about errors */
 	__REQ_PREEMPT,		/* set for "ide_preempt" requests */
 	__REQ_ORDERED_COLOR,	/* is before or after barrier */
-	__REQ_RW_SYNC,		/* request is sync (O_DIRECT) */
+	__REQ_RW_SYNC,		/* request is sync (sync write or read) */
 	__REQ_ALLOCED,		/* request came from our alloc pool */
 	__REQ_RW_META,		/* metadata io request */
 	__REQ_COPY_USER,	/* contains copies of user pages */
@@ -312,6 +316,7 @@ struct queue_limits {
 	unsigned int		alignment_offset;
 	unsigned int		io_min;
 	unsigned int		io_opt;
+	unsigned int            max_discard_sectors;
 
 	unsigned short		logical_block_size;
 	unsigned short		max_hw_segments;
@@ -452,8 +457,8 @@ struct request_queue
 #define QUEUE_FLAG_CLUSTER	0	/* cluster several segments into 1 */
 #define QUEUE_FLAG_QUEUED	1	/* uses generic tag queueing */
 #define QUEUE_FLAG_STOPPED	2	/* queue is stopped */
-#define	QUEUE_FLAG_READFULL	3	/* read queue has been filled */
-#define QUEUE_FLAG_WRITEFULL	4	/* write queue has been filled */
+#define QUEUE_FLAG_SYNCFULL     3       /* read queue has been filled */
+#define QUEUE_FLAG_ASYNCFULL    4       /* write queue has been filled */
 #define QUEUE_FLAG_DEAD		5	/* queue being torn down */
 #define QUEUE_FLAG_REENTER	6	/* Re-entrancy avoidance */
 #define QUEUE_FLAG_PLUGGED	7	/* queue is plugged */
@@ -626,32 +631,41 @@ enum {
 #define rq_data_dir(rq)		((rq)->cmd_flags & 1)
 
 /*
- * We regard a request as sync, if it's a READ or a SYNC write.
+ * We regard a request as sync, if it's a read or a sync write.
  */
-#define rq_is_sync(rq)		(rq_data_dir((rq)) == READ || (rq)->cmd_flags & REQ_RW_SYNC)
+static inline bool rw_is_sync(unsigned int rw_flags)
+{
+       return !(rw_flags & REQ_RW) || (rw_flags & REQ_RW_SYNC);
+}
+
+static inline bool rq_is_sync(struct request *rq)
+{
+       return rw_is_sync(rq->cmd_flags);
+}
+
 #define rq_is_meta(rq)		((rq)->cmd_flags & REQ_RW_META)
 
-static inline int blk_queue_full(struct request_queue *q, int rw)
+static inline int blk_queue_full(struct request_queue *q, int sync)
 {
-	if (rw == READ)
-		return test_bit(QUEUE_FLAG_READFULL, &q->queue_flags);
-	return test_bit(QUEUE_FLAG_WRITEFULL, &q->queue_flags);
+	if (sync)
+                return test_bit(QUEUE_FLAG_SYNCFULL, &q->queue_flags);
+        return test_bit(QUEUE_FLAG_ASYNCFULL, &q->queue_flags);
 }
 
-static inline void blk_set_queue_full(struct request_queue *q, int rw)
+static inline void blk_set_queue_full(struct request_queue *q, int sync)
 {
-	if (rw == READ)
-		queue_flag_set(QUEUE_FLAG_READFULL, q);
+	if (sync)
+                queue_flag_set(QUEUE_FLAG_SYNCFULL, q);
 	else
-		queue_flag_set(QUEUE_FLAG_WRITEFULL, q);
+		queue_flag_set(QUEUE_FLAG_ASYNCFULL, q);
 }
 
-static inline void blk_clear_queue_full(struct request_queue *q, int rw)
+static inline void blk_clear_queue_full(struct request_queue *q, int sync)
 {
-	if (rw == READ)
-		queue_flag_clear(QUEUE_FLAG_READFULL, q);
+	if (sync)
+                queue_flag_clear(QUEUE_FLAG_SYNCFULL, q);
 	else
-		queue_flag_clear(QUEUE_FLAG_WRITEFULL, q);
+		 queue_flag_clear(QUEUE_FLAG_ASYNCFULL, q);
 }
 
 
@@ -715,6 +729,7 @@ struct rq_map_data {
 	int nr_entries;
 	unsigned long offset;
 	int null_mapped;
+	int from_user;
 };
 
 struct req_iterator {
@@ -770,18 +785,18 @@ extern int blk_rq_append_bio(struct request_queue *q, struct request *rq,
  * congested queues, and wake up anyone who was waiting for requests to be
  * put back.
  */
-static inline void blk_clear_queue_congested(struct request_queue *q, int rw)
+static inline void blk_clear_queue_congested(struct request_queue *q, int sync)
 {
-	clear_bdi_congested(&q->backing_dev_info, rw);
+	clear_bdi_congested(&q->backing_dev_info, sync);
 }
 
 /*
  * A queue has just entered congestion.  Flag that in the queue's VM-visible
  * state flags and increment the global gounter of congested queues.
  */
-static inline void blk_set_queue_congested(struct request_queue *q, int rw)
+static inline void blk_set_queue_congested(struct request_queue *q, int sync)
 {
-	set_bdi_congested(&q->backing_dev_info, rw);
+	set_bdi_congested(&q->backing_dev_info, sync);
 }
 
 extern void blk_start_queue(struct request_queue *q);
@@ -873,10 +888,13 @@ extern void blk_queue_max_hw_sectors(struct request_queue *, unsigned int);
 extern void blk_queue_max_phys_segments(struct request_queue *, unsigned short);
 extern void blk_queue_max_hw_segments(struct request_queue *, unsigned short);
 extern void blk_queue_max_segment_size(struct request_queue *, unsigned int);
+extern void blk_queue_max_discard_sectors(struct request_queue *q,
+                unsigned int max_discard_sectors);
 extern void blk_queue_logical_block_size(struct request_queue *, unsigned short);
 extern void blk_queue_physical_block_size(struct request_queue *, unsigned short);
 extern void blk_queue_alignment_offset(struct request_queue *q,
 				       unsigned int alignment);
+extern void blk_limits_io_min(struct queue_limits *limits, unsigned int min);
 extern void blk_queue_io_min(struct request_queue *q, unsigned int min);
 extern void blk_queue_io_opt(struct request_queue *q, unsigned int opt);
 extern void blk_set_default_limits(struct queue_limits *lim);

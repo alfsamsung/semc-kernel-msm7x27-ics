@@ -111,6 +111,7 @@ void blk_set_default_limits(struct queue_limits *lim)
        lim->seg_boundary_mask = BLK_SEG_BOUNDARY_MASK;
        lim->max_segment_size = MAX_SEGMENT_SIZE;
        lim->max_sectors = lim->max_hw_sectors = SAFE_MAX_SECTORS;
+       lim->max_discard_sectors = SAFE_MAX_SECTORS;
        lim->logical_block_size = lim->physical_block_size = lim->io_min = 512;
        lim->bounce_pfn = BLK_BOUNCE_ANY;
        lim->alignment_offset = 0;
@@ -247,6 +248,18 @@ void blk_queue_max_hw_sectors(struct request_queue *q, unsigned int max_sectors)
 EXPORT_SYMBOL(blk_queue_max_hw_sectors);
 
 /**
+ * blk_queue_max_discard_sectors - set max sectors for a single discard
+ * @q:  the request queue for the device
+ * @max_discard: maximum number of sectors to discard
+ **/
+void blk_queue_max_discard_sectors(struct request_queue *q,
+               unsigned int max_discard_sectors)
+{
+       q->limits.max_discard_sectors = max_discard_sectors;
+}
+EXPORT_SYMBOL(blk_queue_max_discard_sectors);
+
+/**
  * blk_queue_max_phys_segments - set max phys segments for a request for this queue
  * @q:  the request queue for the device
  * @max_segments:  max number of segments
@@ -378,6 +391,29 @@ void blk_queue_alignment_offset(struct request_queue *q, unsigned int offset)
 EXPORT_SYMBOL(blk_queue_alignment_offset);
 
 /**
+ * blk_limits_io_min - set minimum request size for a device
+ * @limits: the queue limits
+ * @min:  smallest I/O size in bytes
+ *
+ * Description:
+ *   Some devices have an internal block size bigger than the reported
+ *   hardware sector size.  This function can be used to signal the
+ *   smallest I/O the device can perform without incurring a performance
+ *   penalty.
+ */
+void blk_limits_io_min(struct queue_limits *limits, unsigned int min)
+{
+       limits->io_min = min;
+
+       if (limits->io_min < limits->logical_block_size)
+               limits->io_min = limits->logical_block_size;
+
+       if (limits->io_min < limits->physical_block_size)
+               limits->io_min = limits->physical_block_size;
+}
+EXPORT_SYMBOL(blk_limits_io_min);
+
+/**
  * blk_queue_io_min - set minimum request size for the queue
  * @q:	the request queue for the device
  * @io_min:  smallest I/O size in bytes
@@ -390,13 +426,7 @@ EXPORT_SYMBOL(blk_queue_alignment_offset);
  */
 void blk_queue_io_min(struct request_queue *q, unsigned int min)
 {
-	q->limits.io_min = min;
-
-	if (q->limits.io_min < q->limits.logical_block_size)
-		q->limits.io_min = q->limits.logical_block_size;
-
-	if (q->limits.io_min < q->limits.physical_block_size)
-		q->limits.io_min = q->limits.physical_block_size;
+	blk_limits_io_min(&q->limits, min);
 }
 EXPORT_SYMBOL(blk_queue_io_min);
 
