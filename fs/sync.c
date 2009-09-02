@@ -33,21 +33,13 @@ MODULE_PARM_DESC(delay, "Change fsync() to work as a no-op: this is DANGEROUS");
  */
 static int __sync_filesystem(struct super_block *sb, int wait)
 {
-	/*
-	 * This should be safe, as we require bdi backing to actually
-	 * write out data in the first place
-	 */
-	if (!sb->s_bdi || sb->s_bdi == &noop_backing_dev_info)
-		return 0;
-
-	if (sb->s_qcop && sb->s_qcop->quota_sync)
-		sb->s_qcop->quota_sync(sb, -1);
-
-	if (wait)
-		sync_inodes_sb(sb, wait);
-	else {
+	/* Avoid doing twice syncing and cache pruning for quota sync */
+	if (!wait) {
+		writeout_quota_sb(sb, -1);
+		writeback_inodes_sb(sb);
+	} else {
 		sync_quota_sb(sb, -1);
-                sync_inodes_sb(sb, wait);
+		sync_inodes_sb(sb);
 	}
 	if (sb->s_op->sync_fs)
 		sb->s_op->sync_fs(sb, wait);
