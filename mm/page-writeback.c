@@ -36,15 +36,6 @@
 #include <linux/pagevec.h>
 
 /*
- * The maximum number of pages to writeout in a single bdflush/kupdate
- * operation.  We do this so we don't hold I_SYNC against an inode for
- * enormous amounts of time, which would block a userspace task which has
- * been forced to throttle against that inode.  Also, the code reevaluates
- * the dirty each time it has written this many pages.
- */
-#define MAX_WRITEBACK_PAGES	1024
-
-/*
  * After a CPU has dirtied this many pages, balance_dirty_pages_ratelimited
  * will look to see if it needs to force writeback or throttling.
  */
@@ -66,7 +57,7 @@ static inline long sync_writeback_pages(void)
 /*
  * Start background writeback (via pdflush) at this percentage
  */
-int dirty_background_ratio = 30;
+int dirty_background_ratio = 20;
 
 /*
  * dirty_background_bytes starts at 0 (disabled) so that it is a function of
@@ -83,7 +74,7 @@ int vm_highmem_is_dirtyable;
 /*
  * The generator of dirty data starts writeback at this percentage
  */
-int vm_dirty_ratio = 30;
+int vm_dirty_ratio = 40;
 
 /*
  * vm_dirty_bytes starts at 0 (disabled) so that it is a function of
@@ -92,14 +83,14 @@ int vm_dirty_ratio = 30;
 unsigned long vm_dirty_bytes;
 
 /*
- * The interval between `kupdate'-style writebacks, in jiffies
+ * The interval between `kupdate'-style writebacks
  */
-int dirty_writeback_interval = 15 * HZ;
+unsigned int dirty_writeback_interval = 15 * 100; /* centiseconds */	//org 5
 
 /*
- * The longest number of jiffies for which data is allowed to remain dirty
+ * The longest time for which data is allowed to remain dirty
  */
-int dirty_expire_interval = 40 * HZ;
+unsigned int dirty_expire_interval = 40 * 100; /* centiseconds */	//org 30
 
 /*
  * Flag that makes the machine dump writes/reads and block dirtyings.
@@ -116,8 +107,6 @@ EXPORT_SYMBOL(laptop_mode);
 
 /* End of sysctl-exported parameters */
 
-
-static void background_writeout(unsigned long _min_pages);
 
 /*
  * Scale the writeback cache size proportional to the relative writeout speeds.
@@ -265,18 +254,19 @@ static void bdi_writeout_fraction(struct backing_dev_info *bdi,
  * This avoids exceeding the total dirty_limit when the floating averages
  * fluctuate too quickly.
  */
-static void
-clip_bdi_dirty_limit(struct backing_dev_info *bdi, long dirty, long *pbdi_dirty)
+static void clip_bdi_dirty_limit(struct backing_dev_info *bdi,
+		unsigned long dirty, unsigned long *pbdi_dirty)
 {
-	long avail_dirty;
+	unsigned long avail_dirty;
 
-	avail_dirty = dirty -
-		(global_page_state(NR_FILE_DIRTY) +
-		 global_page_state(NR_WRITEBACK) +
-		 global_page_state(NR_UNSTABLE_NFS) +
-		 global_page_state(NR_WRITEBACK_TEMP));
+	avail_dirty = global_page_state(NR_FILE_DIRTY) +
+		global_page_state(NR_WRITEBACK) +
+		global_page_state(NR_UNSTABLE_NFS) +
+		global_page_state(NR_WRITEBACK_TEMP);
 
-	if (avail_dirty < 0)
+	if (avail_dirty < dirty)
+		avail_dirty = dirty - avail_dirty;
+	else
 		avail_dirty = 0;
 
 	avail_dirty += bdi_stat(bdi, BDI_RECLAIMABLE) +
@@ -299,10 +289,10 @@ static inline void task_dirties_fraction(struct task_struct *tsk,
  *
  *   dirty -= (dirty/8) * p_{t}
  */
-static void task_dirty_limit(struct task_struct *tsk, long *pdirty)
+static void task_dirty_limit(struct task_struct *tsk, unsigned long *pdirty)
 {
 	long numerator, denominator;
-	long dirty = *pdirty;
+	unsigned long dirty = *pdirty;
 	u64 inv = dirty >> 3;
 
 	task_dirties_fraction(tsk, &numerator, &denominator);
@@ -325,7 +315,7 @@ int bdi_set_min_ratio(struct backing_dev_info *bdi, unsigned int min_ratio)
 {
 	int ret = 0;
 
-	mutex_lock(&bdi_lock);
+	spin_lock(&bdi_lock);
 	if (min_ratio > bdi->max_ratio) {
 		ret = -EINVAL;
 	} else {
@@ -337,7 +327,7 @@ int bdi_set_min_ratio(struct backing_dev_info *bdi, unsigned int min_ratio)
 			ret = -EINVAL;
 		}
 	}
-	mutex_unlock(&bdi_lock);
+	spin_unlock(&bdi_lock);
 
 	return ret;
 }
@@ -349,14 +339,14 @@ int bdi_set_max_ratio(struct backing_dev_info *bdi, unsigned max_ratio)
 	if (max_ratio > 100)
 		return -EINVAL;
 
-	mutex_lock(&bdi_lock);
+	spin_lock(&bdi_lock);
 	if (bdi->min_ratio > max_ratio) {
 		ret = -EINVAL;
 	} else {
 		bdi->max_ratio = max_ratio;
 		bdi->max_prop_frac = (PROP_FRAC_BASE * max_ratio) / 100;
 	}
-	mutex_unlock(&bdi_lock);
+	spin_unlock(&bdi_lock);
 
 	return ret;
 }
@@ -537,9 +527,12 @@ static void balance_dirty_pages(struct address_space *mapping)
 		 * filesystems (i.e. NFS) in which data may have been
 		 * written to the server's write cache, but has not yet
 		 * been flushed to permanent storage.
+		 * Only move pages to writeback if this bdi is over its
+		 * threshold otherwise wait until the disk writes catch
+		 * up.
 		 */
-		if (bdi_nr_reclaimable) {
-			writeback_inodes(&wbc);
+		if (bdi_nr_reclaimable > bdi_thresh) {
+                        writeback_inodes_wbc(&wbc);
 			pages_written += write_chunk - wbc.nr_to_write;
 			get_dirty_limits(&background_thresh, &dirty_thresh,
 				       &bdi_thresh, bdi);
@@ -568,7 +561,7 @@ static void balance_dirty_pages(struct address_space *mapping)
 		if (pages_written >= write_chunk)
 			break;		/* We've done our duty */
 
-		congestion_wait(BLK_RW_ASYNC, HZ/10);
+		schedule_timeout(1);
 	}
 
 	if (bdi_nr_reclaimable + bdi_nr_writeback < bdi_thresh &&
@@ -587,10 +580,18 @@ static void balance_dirty_pages(struct address_space *mapping)
 	 * background_thresh, to keep the amount of dirty memory low.
 	 */
 	if ((laptop_mode && pages_written) ||
-			(!laptop_mode && (global_page_state(NR_FILE_DIRTY)
-					  + global_page_state(NR_UNSTABLE_NFS)
-					  > background_thresh)))
-		pdflush_operation(background_writeout, 0);
+	    (!laptop_mode && ((nr_writeback = global_page_state(NR_FILE_DIRTY)
+					  + global_page_state(NR_UNSTABLE_NFS))
+					  > background_thresh))) {
+		struct writeback_control wbc = {
+			.bdi		= bdi,
+			.sync_mode	= WB_SYNC_NONE,
+			.nr_to_write	= nr_writeback,
+		};
+
+
+		bdi_start_writeback(&wbc);
+	}
 }
 
 void set_page_dirty_balance(struct page *page, int page_mkwrite)
@@ -674,123 +675,9 @@ void throttle_vm_writeout(gfp_t gfp_mask)
         }
 }
 
-/*
- * writeback at least _min_pages, and keep writing until the amount of dirty
- * memory is less than the background threshold, or until we're all clean.
- */
-static void background_writeout(unsigned long _min_pages)
-{
-	long min_pages = _min_pages;
-	struct writeback_control wbc = {
-		.bdi		= NULL,
-		.sync_mode	= WB_SYNC_NONE,
-		.older_than_this = NULL,
-		.nr_to_write	= 0,
-		.nonblocking	= 1,
-		.range_cyclic	= 1,
-	};
-
-	for ( ; ; ) {
-		unsigned long background_thresh;
-		unsigned long dirty_thresh;
-
-		get_dirty_limits(&background_thresh, &dirty_thresh, NULL, NULL);
-		if (global_page_state(NR_FILE_DIRTY) +
-			global_page_state(NR_UNSTABLE_NFS) < background_thresh
-				&& min_pages <= 0)
-			break;
-		wbc.more_io = 0;
-		wbc.encountered_congestion = 0;
-		wbc.nr_to_write = MAX_WRITEBACK_PAGES;
-		wbc.pages_skipped = 0;
-		writeback_inodes(&wbc);
-		min_pages -= MAX_WRITEBACK_PAGES - wbc.nr_to_write;
-		if (wbc.nr_to_write > 0 || wbc.pages_skipped > 0) {
-			/* Wrote less than expected */
-			if (wbc.encountered_congestion || wbc.more_io)
-				congestion_wait(BLK_RW_ASYNC, HZ/10);
-			else
-				break;
-		}
-	}
-}
-
-/*
- * Start writeback of `nr_pages' pages.  If `nr_pages' is zero, write back
- * the whole world.  Returns 0 if a pdflush thread was dispatched.  Returns
- * -1 if all pdflush threads were busy.
- */
-int wakeup_pdflush(long nr_pages)
-{
-	if (nr_pages == 0)
-		nr_pages = global_page_state(NR_FILE_DIRTY) +
-				global_page_state(NR_UNSTABLE_NFS);
-	return pdflush_operation(background_writeout, nr_pages);
-}
-
-static void wb_timer_fn(unsigned long unused);
 static void laptop_timer_fn(unsigned long unused);
 
-static DEFINE_TIMER(wb_timer, wb_timer_fn, 0, 0);
 static DEFINE_TIMER(laptop_mode_wb_timer, laptop_timer_fn, 0, 0);
-
-/*
- * Periodic writeback of "old" data.
- *
- * Define "old": the first time one of an inode's pages is dirtied, we mark the
- * dirtying-time in the inode's address_space.  So this periodic writeback code
- * just walks the superblock inode list, writing back any inodes which are
- * older than a specific point in time.
- *
- * Try to run once per dirty_writeback_interval.  But if a writeback event
- * takes longer than a dirty_writeback_interval interval, then leave a
- * one-second gap.
- *
- * older_than_this takes precedence over nr_to_write.  So we'll only write back
- * all dirty pages if they are all attached to "old" mappings.
- */
-static void wb_kupdate(unsigned long arg)
-{
-	unsigned long oldest_jif;
-	unsigned long start_jif;
-	unsigned long next_jif;
-	long nr_to_write;
-	struct writeback_control wbc = {
-		.bdi		= NULL,
-		.sync_mode	= WB_SYNC_NONE,
-		.older_than_this = &oldest_jif,
-		.nr_to_write	= 0,
-		.nonblocking	= 1,
-		.for_kupdate	= 1,
-		.range_cyclic	= 1,
-	};
-
-	sync_supers();
-
-	oldest_jif = jiffies - dirty_expire_interval;
-	start_jif = jiffies;
-	next_jif = start_jif + dirty_writeback_interval;
-	nr_to_write = global_page_state(NR_FILE_DIRTY) +
-			global_page_state(NR_UNSTABLE_NFS) +
-			(inodes_stat.nr_inodes - inodes_stat.nr_unused);
-	while (nr_to_write > 0) {
-		wbc.more_io = 0;
-		wbc.encountered_congestion = 0;
-		wbc.nr_to_write = MAX_WRITEBACK_PAGES;
-		writeback_inodes(&wbc);
-		if (wbc.nr_to_write > 0) {
-			if (wbc.encountered_congestion || wbc.more_io)
-				congestion_wait(BLK_RW_ASYNC, HZ/10);
-			else
-				break;	/* All the old data is written */
-		}
-		nr_to_write -= MAX_WRITEBACK_PAGES - wbc.nr_to_write;
-	}
-	if (time_before(next_jif, jiffies + HZ))
-		next_jif = jiffies + HZ;
-	if (dirty_writeback_interval)
-		mod_timer(&wb_timer, next_jif);
-}
 
 /*
  * sysctl handler for /proc/sys/vm/dirty_writeback_centisecs
@@ -798,28 +685,25 @@ static void wb_kupdate(unsigned long arg)
 int dirty_writeback_centisecs_handler(ctl_table *table, int write,
 	struct file *file, void __user *buffer, size_t *length, loff_t *ppos)
 {
-	proc_dointvec_userhz_jiffies(table, write, file, buffer, length, ppos);
-	if (dirty_writeback_interval)
-		mod_timer(&wb_timer, jiffies + dirty_writeback_interval);
-	else
-		del_timer(&wb_timer);
+	proc_dointvec(table, write, file, buffer, length, ppos);
 	return 0;
 }
 
-static void wb_timer_fn(unsigned long unused)
+static void do_laptop_sync(struct work_struct *work)
 {
-	if (pdflush_operation(wb_kupdate, 0) < 0)
-		mod_timer(&wb_timer, jiffies + HZ); /* delay 1 second */
-}
-
-static void laptop_flush(unsigned long unused)
-{
-	sys_sync();
+	wakeup_flusher_threads(0);
+	kfree(work);
 }
 
 static void laptop_timer_fn(unsigned long unused)
 {
-	pdflush_operation(laptop_flush, 0);
+	struct work_struct *work;
+
+	work = kmalloc(sizeof(*work), GFP_ATOMIC);
+	if (work) {
+		INIT_WORK(work, do_laptop_sync);
+		schedule_work(work);
+	}
 }
 
 /*
@@ -901,8 +785,7 @@ static struct notifier_block __cpuinitdata ratelimit_nb = {
 void __init page_writeback_init(void)
 {
 	int shift;
-
-	mod_timer(&wb_timer, jiffies + dirty_writeback_interval);
+	
 	writeback_set_ratelimit();
 	register_cpu_notifier(&ratelimit_nb);
 
@@ -1193,6 +1076,20 @@ int __set_page_dirty_no_writeback(struct page *page)
 }
 
 /*
+ * Helper function for set_page_dirty family.
+ * NOTE: This relies on being atomic wrt interrupts.
+ */
+void account_page_dirtied(struct page *page, struct address_space *mapping)
+{
+	if (mapping_cap_account_dirty(mapping)) {
+		__inc_zone_page_state(page, NR_FILE_DIRTY);
+		__inc_bdi_stat(mapping->backing_dev_info, BDI_RECLAIMABLE);
+		task_dirty_inc(current);
+		task_io_account_write(PAGE_CACHE_SIZE);
+	}
+}
+
+/*
  * For address_spaces which do not use buffers.  Just tag the page as dirty in
  * its radix tree.
  *
@@ -1221,13 +1118,7 @@ int __set_page_dirty_nobuffers(struct page *page)
 		if (mapping2) { /* Race with truncate? */
 			BUG_ON(mapping2 != mapping);
 			WARN_ON_ONCE(!PagePrivate(page) && !PageUptodate(page));
-			if (mapping_cap_account_dirty(mapping)) {
-				__inc_zone_page_state(page, NR_FILE_DIRTY);
-				__inc_bdi_stat(mapping->backing_dev_info,
-						BDI_RECLAIMABLE);
-				task_dirty_inc(current);
-				task_io_account_write(PAGE_CACHE_SIZE);
-			}
+			account_page_dirtied(page, mapping);
 			radix_tree_tag_set(&mapping->page_tree,
 				page_index(page), PAGECACHE_TAG_DIRTY);
 		}

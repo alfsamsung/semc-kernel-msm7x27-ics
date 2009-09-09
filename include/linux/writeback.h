@@ -40,6 +40,8 @@ enum writeback_sync_modes {
 struct writeback_control {
 	struct backing_dev_info *bdi;	/* If !NULL, only write back this
 					   queue */
+	struct super_block *sb;		/* if !NULL, only write inodes from
+					   this super_block */
 	enum writeback_sync_modes sync_mode;
 	unsigned long *older_than_this;	/* If !NULL, only write back inodes
 					   older than this */
@@ -75,10 +77,13 @@ struct writeback_control {
 /*
  * fs/fs-writeback.c
  */	
-void writeback_inodes(struct writeback_control *wbc);
+struct bdi_writeback;
 int inode_wait(void *);
 long writeback_inodes_sb(struct super_block *);
 long sync_inodes_sb(struct super_block *);
+void writeback_inodes_wbc(struct writeback_control *wbc);
+long wb_do_writeback(struct bdi_writeback *wb, int force_wait);
+void wakeup_flusher_threads(long nr_pages);
 
 /* writeback.h requires fs.h; it, too, is not included from here. */
 static inline void wait_on_inode(struct inode *inode)
@@ -98,7 +103,6 @@ static inline void inode_sync_wait(struct inode *inode)
 /*
  * mm/page-writeback.c
  */
-int wakeup_pdflush(long nr_pages);
 void laptop_io_completion(void);
 void laptop_sync_completion(void);
 void throttle_vm_writeout(gfp_t gfp_mask);
@@ -108,8 +112,8 @@ extern int dirty_background_ratio;
 extern unsigned long dirty_background_bytes;
 extern int vm_dirty_ratio;
 extern unsigned long vm_dirty_bytes;
-extern int dirty_writeback_interval;
-extern int dirty_expire_interval;
+extern unsigned int dirty_writeback_interval;
+extern unsigned int dirty_expire_interval;
 extern int vm_highmem_is_dirtyable;
 extern int block_dump;
 extern int laptop_mode;
