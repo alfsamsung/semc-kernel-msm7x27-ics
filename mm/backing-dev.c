@@ -32,6 +32,12 @@ struct backing_dev_info noop_backing_dev_info = {
 EXPORT_SYMBOL_GPL(noop_backing_dev_info);
  
 static struct class *bdi_class;
+
+/*
+ * bdi_lock protects updates to bdi_list and bdi_pending_list, as well as
+ * reader side protection for bdi_pending_list. bdi_list has RCU reader side
+ * locking.
+ */
 DEFINE_SPINLOCK(bdi_lock);
 LIST_HEAD(bdi_list);
 LIST_HEAD(bdi_pending_list);
@@ -260,9 +266,9 @@ static int bdi_start_fn(void *ptr)
 	/*
 	 * Add us to the active bdi_list
 	 */
-	spin_lock(&bdi_lock);
-	list_add(&bdi->bdi_list, &bdi_list);
-	spin_unlock(&bdi_lock);
+	spin_lock_bh(&bdi_lock);
+	list_add_rcu(&bdi->bdi_list, &bdi_list);
+	spin_unlock_bh(&bdi_lock);
 
 	bdi_task_init(bdi, wb);
 
@@ -365,7 +371,7 @@ static int bdi_forker_task(void *ptr)
 		if (wb_has_dirty_io(me) || !list_empty(&me->bdi->work_list))
 			wb_do_writeback(me, 0);
 
-		spin_lock(&bdi_lock);
+		spin_lock_bh(&bdi_lock);
 
 		/*
 		 * Check if any existing bdi's have dirty data without
@@ -386,7 +392,7 @@ static int bdi_forker_task(void *ptr)
 		if (list_empty(&bdi_pending_list)) {
 			unsigned long wait;
 
-			spin_unlock(&bdi_lock);
+			spin_unlock_bh(&bdi_lock);
 			wait = msecs_to_jiffies(dirty_writeback_interval * 10);
 			schedule_timeout(wait);
 			try_to_freeze();
@@ -402,7 +408,7 @@ static int bdi_forker_task(void *ptr)
 		bdi = list_entry(bdi_pending_list.next, struct backing_dev_info,
 				 bdi_list);
 		list_del_init(&bdi->bdi_list);
-		spin_unlock(&bdi_lock);
+		spin_unlock_bh(&bdi_lock);
 
 		wb = &bdi->wb;
 		wb->task = kthread_run(bdi_start_fn, wb, "flush-%s",
@@ -421,15 +427,33 @@ static int bdi_forker_task(void *ptr)
 			 * a chance to flush other bdi's to free
 			 * memory.
 			 */
-			spin_lock(&bdi_lock);
+			spin_lock_bh(&bdi_lock);
 			list_add_tail(&bdi->bdi_list, &bdi_pending_list);
-			spin_unlock(&bdi_lock);
+			spin_unlock_bh(&bdi_lock);
 
 			bdi_flush_io(bdi);
 		}
 	}
 
 	return 0;
+}
+
+static void bdi_add_to_pending(struct rcu_head *head)
+{
+	struct backing_dev_info *bdi;
+
+	bdi = container_of(head, struct backing_dev_info, rcu_head);
+	INIT_LIST_HEAD(&bdi->bdi_list);
+
+	spin_lock(&bdi_lock);
+	list_add_tail(&bdi->bdi_list, &bdi_pending_list);
+	spin_unlock(&bdi_lock);
+
+	/*
+	 * We are now on the pending list, wake up bdi_forker_task()
+	 * to finish the job and add us back to the active bdi_list
+	 */
+	wake_up_process(default_backing_dev_info.wb.task);
 }
 
 /*
@@ -454,14 +478,27 @@ void static bdi_add_default_flusher_task(struct backing_dev_info *bdi)
 	 * waiting for previous additions to finish.
 	 */
 	if (!test_and_set_bit(BDI_pending, &bdi->state)) {
-		list_move_tail(&bdi->bdi_list, &bdi_pending_list);
+		list_del_rcu(&bdi->bdi_list);
 
 		/*
-		 * We are now on the pending list, wake up bdi_forker_task()
-		 * to finish the job and add us back to the active bdi_list
+		 * We must wait for the current RCU period to end before
+		 * moving to the pending list. So schedule that operation
+		 * from an RCU callback.
 		 */
-		wake_up_process(default_backing_dev_info.wb.task);
+		call_rcu(&bdi->rcu_head, bdi_add_to_pending);
 	}
+}
+
+/*
+ * Remove bdi from bdi_list, and ensure that it is no longer visible
+ */
+static void bdi_remove_from_list(struct backing_dev_info *bdi)
+{
+	spin_lock_bh(&bdi_lock);
+	list_del_rcu(&bdi->bdi_list);
+	spin_unlock_bh(&bdi_lock);
+
+	synchronize_rcu();
 }
 
 int bdi_register(struct backing_dev_info *bdi, struct device *parent,
@@ -482,9 +519,9 @@ int bdi_register(struct backing_dev_info *bdi, struct device *parent,
 		goto exit;
 	}
 
-	spin_lock(&bdi_lock);
-	list_add_tail(&bdi->bdi_list, &bdi_list);
-	spin_unlock(&bdi_lock);
+	spin_lock_bh(&bdi_lock);
+	list_add_tail_rcu(&bdi->bdi_list, &bdi_list);
+	spin_unlock_bh(&bdi_lock);
 
 	bdi->dev = dev;
 
@@ -502,9 +539,7 @@ int bdi_register(struct backing_dev_info *bdi, struct device *parent,
 			wb->task = NULL;
 			ret = -ENOMEM;
 
-			spin_lock(&bdi_lock);
-			list_del(&bdi->bdi_list);
-			spin_unlock(&bdi_lock);
+			bdi_remove_from_list(bdi);
 			goto exit;
 		}
 	}
@@ -541,9 +576,7 @@ static void bdi_wb_shutdown(struct backing_dev_info *bdi)
 	/*
 	 * Make sure nobody finds us on the bdi_list anymore
 	 */
-	spin_lock(&bdi_lock);
-	list_del(&bdi->bdi_list);
-	spin_unlock(&bdi_lock);
+	bdi_remove_from_list(bdi);
 
 	/*
 	 * Finally, kill the kernel threads. We don't need to be RCU
@@ -575,6 +608,7 @@ int bdi_init(struct backing_dev_info *bdi)
 	bdi->max_ratio = 100;
 	bdi->max_prop_frac = PROP_FRAC_BASE;
 	spin_lock_init(&bdi->wb_lock);
+	INIT_RCU_HEAD(&bdi->rcu_head);
 	INIT_LIST_HEAD(&bdi->bdi_list);
 	INIT_LIST_HEAD(&bdi->wb_list);
 	INIT_LIST_HEAD(&bdi->work_list);
