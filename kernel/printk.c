@@ -32,6 +32,8 @@
 #include <linux/security.h>
 #include <linux/bootmem.h>
 #include <linux/syscalls.h>
+#include <linux/kexec.h>
+#include <linux/ratelimit.h>
 
 #include <asm/uaccess.h>
 
