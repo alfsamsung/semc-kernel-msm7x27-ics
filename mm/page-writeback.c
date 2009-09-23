@@ -55,7 +55,7 @@ static inline long sync_writeback_pages(void)
 /* The following parameters are exported via /proc/sys/vm */
 
 /*
- * Start background writeback (via pdflush) at this percentage
+ * Start background writeback (via writeback threads) at this percentage
  */
 int dirty_background_ratio = 20;
 
@@ -473,8 +473,8 @@ get_dirty_limits(unsigned long *pbackground, unsigned long *pdirty,
  * balance_dirty_pages() must be called by processes which are generating dirty
  * data.  It looks at the number of dirty pages in the machine and will force
  * the caller to perform writeback if the system is over `vm_dirty_ratio'.
- * If we're over `background_thresh' then pdflush is woken to perform some
- * writeout.
+ * If we're over `background_thresh' then the writeback threads are woken to
+ * perform some writeout.
  */
 static void balance_dirty_pages(struct address_space *mapping)
 {
@@ -569,7 +569,7 @@ static void balance_dirty_pages(struct address_space *mapping)
 		bdi->dirty_exceeded = 0;
 
 	if (writeback_in_progress(bdi))
-		return;		/* pdflush is already working this queue */
+		return;
 
 	/*
 	 * In laptop mode, we wait until hitting the higher threshold before
