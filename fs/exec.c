@@ -1381,18 +1381,16 @@ out_ret:
 	return retval;
 }
 
-int set_binfmt(struct linux_binfmt *new)
+void set_binfmt(struct linux_binfmt *new)
 {
-	struct linux_binfmt *old = current->binfmt;
+	struct mm_struct *mm = current->mm;
 
-	if (new) {
-		if (!try_module_get(new->module))
-			return -1;
-	}
-	current->binfmt = new;
-	if (old)
-		module_put(old->module);
-	return 0;
+	if (mm->binfmt)
+		module_put(mm->binfmt->module);
+
+	mm->binfmt = new;
+	if (new)
+		__module_get(new->module);
 }
 
 EXPORT_SYMBOL(set_binfmt);
@@ -1736,7 +1734,7 @@ void do_coredump(long signr, int exit_code, struct pt_regs *regs)
 
 	audit_core_dumps(signr);
 
-	binfmt = current->binfmt;
+	binfmt = mm->binfmt;
 	if (!binfmt || !binfmt->core_dump)
 		goto fail;
 

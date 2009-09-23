@@ -245,6 +245,8 @@ struct mm_struct {
         */
         struct mm_rss_stat rss_stat;
 
+	struct linux_binfmt *binfmt;
+
 	cpumask_t cpu_vm_mask;
 
 	/* Architecture-specific MM context */

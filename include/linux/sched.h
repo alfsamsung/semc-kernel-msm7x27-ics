@@ -1176,7 +1176,6 @@ struct task_struct {
        struct task_rss_stat    rss_stat;
 #endif
 /* task state */
-	struct linux_binfmt *binfmt;
 	int exit_state;
 	int exit_code, exit_signal;
 	int pdeath_signal;  /*  The signal sent when the parent dies  */
