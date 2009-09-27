@@ -1545,7 +1545,7 @@ static int kvm_vcpu_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 	return 0;
 }
 
-static struct vm_operations_struct kvm_vcpu_vm_ops = {
+static const struct vm_operations_struct kvm_vcpu_vm_ops = {
 	.fault = kvm_vcpu_fault,
 };
 
@@ -1960,7 +1960,7 @@ static int kvm_vm_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 	return 0;
 }
 
-static struct vm_operations_struct kvm_vm_vm_ops = {
+static const struct vm_operations_struct kvm_vm_vm_ops = {
 	.fault = kvm_vm_fault,
 };
 

@@ -309,7 +309,7 @@ static int spufs_mem_mmap_access(struct vm_area_struct *vma,
 	return len;
 }
 
-static struct vm_operations_struct spufs_mem_mmap_vmops = {
+static const struct vm_operations_struct spufs_mem_mmap_vmops = {
 	.fault = spufs_mem_mmap_fault,
 	.access = spufs_mem_mmap_access,
 };
@@ -436,7 +436,7 @@ static int spufs_cntl_mmap_fault(struct vm_area_struct *vma,
 	return spufs_ps_fault(vma, vmf, 0x4000, SPUFS_CNTL_MAP_SIZE);
 }
 
-static struct vm_operations_struct spufs_cntl_mmap_vmops = {
+static const struct vm_operations_struct spufs_cntl_mmap_vmops = {
 	.fault = spufs_cntl_mmap_fault,
 };
 
@@ -1141,7 +1141,7 @@ spufs_signal1_mmap_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 #endif
 }
 
-static struct vm_operations_struct spufs_signal1_mmap_vmops = {
+static const struct vm_operations_struct spufs_signal1_mmap_vmops = {
 	.fault = spufs_signal1_mmap_fault,
 };
 
@@ -1277,7 +1277,7 @@ spufs_signal2_mmap_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 #endif
 }
 
-static struct vm_operations_struct spufs_signal2_mmap_vmops = {
+static const struct vm_operations_struct spufs_signal2_mmap_vmops = {
 	.fault = spufs_signal2_mmap_fault,
 };
 
@@ -1395,7 +1395,7 @@ spufs_mss_mmap_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 	return spufs_ps_fault(vma, vmf, 0x0000, SPUFS_MSS_MAP_SIZE);
 }
 
-static struct vm_operations_struct spufs_mss_mmap_vmops = {
+static const struct vm_operations_struct spufs_mss_mmap_vmops = {
 	.fault = spufs_mss_mmap_fault,
 };
 
@@ -1456,7 +1456,7 @@ spufs_psmap_mmap_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 	return spufs_ps_fault(vma, vmf, 0x0000, SPUFS_PS_MAP_SIZE);
 }
 
-static struct vm_operations_struct spufs_psmap_mmap_vmops = {
+static const struct vm_operations_struct spufs_psmap_mmap_vmops = {
 	.fault = spufs_psmap_mmap_fault,
 };
 
@@ -1515,7 +1515,7 @@ spufs_mfc_mmap_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 	return spufs_ps_fault(vma, vmf, 0x3000, SPUFS_MFC_MAP_SIZE);
 }
 
-static struct vm_operations_struct spufs_mfc_mmap_vmops = {
+static const struct vm_operations_struct spufs_mfc_mmap_vmops = {
 	.fault = spufs_mfc_mmap_fault,
 };
 
