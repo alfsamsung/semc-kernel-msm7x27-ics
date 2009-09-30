@@ -1122,7 +1122,7 @@ void init_request_from_bio(struct request *req, struct bio *bio)
 		req->cmd_flags |= REQ_DISCARD;
 		if (bio_barrier(bio))
 			req->cmd_flags |= REQ_SOFTBARRIER;
-		req->q->prepare_discard_fn(req->q, req);
+		
 	} else if (unlikely(bio_barrier(bio)))
 		req->cmd_flags |= (REQ_HARDBARRIER | REQ_NOMERGE);
 
@@ -1451,7 +1451,7 @@ static inline void __generic_make_request(struct bio *bio)
 		if (bio_check_eod(bio, nr_sectors))
 			goto end_io;
 
-		if (bio_discard(bio) && !q->prepare_discard_fn) {
+		if (bio_discard(bio) && !blk_queue_discard(q)) {
 			err = -EOPNOTSUPP;
 			goto end_io;
 		}
