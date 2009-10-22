@@ -17,7 +17,6 @@
 #include <linux/hash.h>
 #include <linux/swap.h>
 #include <linux/security.h>
-#include <linux/ima.h>
 #include <linux/pagemap.h>
 #include <linux/cdev.h>
 #include <linux/bootmem.h>
@@ -153,10 +152,6 @@ struct inode *inode_init_always(struct super_block *sb, struct inode *inode)
 	if (security_inode_alloc(inode))
 		goto out_free_inode;
 
-	/* allocate and initialize an i_integrity */
-	if (ima_inode_alloc(inode))
-		goto out_free_security;
-
 	spin_lock_init(&inode->i_lock);
 	lockdep_set_class(&inode->i_lock, &sb->s_type->i_lock_key);
 
@@ -192,8 +187,6 @@ struct inode *inode_init_always(struct super_block *sb, struct inode *inode)
 
 	return inode;
 
-out_free_security:
-	security_inode_free(inode);
 out_free_inode:
 	if (inode->i_sb->s_op->destroy_inode)
 		inode->i_sb->s_op->destroy_inode(inode);
