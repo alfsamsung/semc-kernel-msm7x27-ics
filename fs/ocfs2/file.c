@@ -1868,7 +1868,7 @@ out_dio:
 	/* buffered aio wouldn't have proper lock coverage today */
 	BUG_ON(ret == -EIOCBQUEUED && !(file->f_flags & O_DIRECT));
 
-	if ((file->f_flags & O_SYNC && !direct_io) || IS_SYNC(inode)) {
+	if ((file->f_flags & O_DSYNC && !direct_io) || IS_SYNC(inode)) {
 		/*
 		 * The generic write paths have handled getting data
 		 * to disk, but since we don't make use of the dirty

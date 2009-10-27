@@ -796,7 +796,7 @@ start:
 	XFS_STATS_ADD(xs_write_bytes, ret);
 
 	/* Handle various SYNC-type writes */
-	if ((file->f_flags & O_SYNC) || IS_SYNC(inode)) {
+	if ((file->f_flags & O_DSYNC) || IS_SYNC(inode)) {
 		int error2;
 
 		xfs_iunlock(xip, iolock);
