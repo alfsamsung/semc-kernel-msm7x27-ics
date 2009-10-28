@@ -1856,6 +1856,33 @@ static void *module_alloc_update_bounds(unsigned long size)
 	return ret;
 }
 
+#ifdef CONFIG_DEBUG_KMEMLEAK
+static void kmemleak_load_module(struct module *mod, Elf_Ehdr *hdr,
+				 Elf_Shdr *sechdrs, char *secstrings)
+{
+	unsigned int i;
+
+	/* only scan the sections containing data */
+	kmemleak_scan_area(mod, sizeof(struct module), GFP_KERNEL);
+
+	for (i = 1; i < hdr->e_shnum; i++) {
+		if (!(sechdrs[i].sh_flags & SHF_ALLOC))
+			continue;
+		if (strncmp(secstrings + sechdrs[i].sh_name, ".data", 5) != 0
+		    && strncmp(secstrings + sechdrs[i].sh_name, ".bss", 4) != 0)
+			continue;
+
+		kmemleak_scan_area((void *)sechdrs[i].sh_addr,
+				   sechdrs[i].sh_size, GFP_KERNEL);
+	}
+}
+#else
+static inline void kmemleak_load_module(struct module *mod, Elf_Ehdr *hdr,
+					Elf_Shdr *sechdrs, char *secstrings)
+{
+}
+#endif
+
 /* Allocate and load the module: note that size of section 0 is always
    zero, and we rely on this for optional sections. */
 static noinline struct module *load_module(void __user *umod,

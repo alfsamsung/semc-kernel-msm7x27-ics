@@ -2612,6 +2612,15 @@ static struct slab *alloc_slabmgmt(struct kmem_cache *cachep, void *objp,
 		/* Slab management obj is off-slab. */
 		slabp = kmem_cache_alloc_node(cachep->slabp_cache,
 					      local_flags, nodeid);
+
+		/*
+		 * If the first object in the slab is leaked (it's allocated
+		 * but no one has a reference to it), we want to make sure
+		 * kmemleak does not treat the ->s_mem pointer as a reference
+		 * to the object. Otherwise we will not report the leak.
+		 */
+		kmemleak_scan_area(&slabp->list, sizeof(struct list_head),
+				   local_flags);
 		if (!slabp)
 			return NULL;
 	} else {
