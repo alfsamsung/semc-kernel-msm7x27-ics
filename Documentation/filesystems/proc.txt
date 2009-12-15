@@ -46,6 +46,15 @@ Table of Contents
   2.16	/proc/<pid>/mountinfo - Information about mounts
   2.17	/proc/sys/fs/epoll - Configuration options for the epoll interface
 
+  3	Per-Process Parameters
+  3.1	/proc/<pid>/oom_adj - Adjust the oom-killer score
+  3.2	/proc/<pid>/oom_score - Display current oom-killer score
+  3.3	/proc/<pid>/io - Display the IO accounting fields
+  3.4	/proc/<pid>/coredump_filter - Core dump filtering settings
+  3.5	/proc/<pid>/mountinfo - Information about mounts
+  3.6	/proc/<pid>/comm  & /proc/<pid>/task/<tid>/comm
+
+
 ------------------------------------------------------------------------------
 Preface
 ------------------------------------------------------------------------------
@@ -2288,5 +2297,10 @@ The current default value for  max_user_watches  is the 1/32 of the available
 low memory, divided for the "watch" cost in bytes.
 
 
-------------------------------------------------------------------------------
-
+3.6	/proc/<pid>/comm  & /proc/<pid>/task/<tid>/comm
+--------------------------------------------------------
+These files provide a method to access a tasks comm value. It also allows for
+a task to set its own or one of its thread siblings comm value. The comm value
+is limited in size compared to the cmdline value, so writing anything longer
+then the kernel's TASK_COMM_LEN (currently 16 chars) will result in a truncated
+comm value.
