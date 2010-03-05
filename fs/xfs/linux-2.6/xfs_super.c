@@ -994,12 +994,9 @@ xfs_fs_write_inode(
 	int			flags = 0;
 
 	xfs_itrace_entry(ip);
-	if (sync) {
-		error = xfs_wait_on_pages(ip, 0, -1);
-		if (error)
-			goto out_error;
+	if (sync)
 		flags |= FLUSH_SYNC;
-	}
+
 	error = xfs_inode_flush(ip, flags);
 
 out_error:
