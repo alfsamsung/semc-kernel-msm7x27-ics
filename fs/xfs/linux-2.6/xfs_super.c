@@ -987,14 +987,14 @@ xfs_fs_inode_init_once(
 STATIC int
 xfs_fs_write_inode(
 	struct inode		*inode,
-	int			sync)
+	struct writeback_control *wbc)
 {
 	struct xfs_inode	*ip = XFS_I(inode);
 	int			error = 0;
 	int			flags = 0;
 
 	xfs_itrace_entry(ip);
-	if (sync)
+	if (wbc->sync_mode == WB_SYNC_ALL) {
 		flags |= FLUSH_SYNC;
 
 	error = xfs_inode_flush(ip, flags);

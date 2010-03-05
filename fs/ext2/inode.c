@@ -41,6 +41,8 @@ MODULE_AUTHOR("Remy Card and others");
 MODULE_DESCRIPTION("Second Extended Filesystem");
 MODULE_LICENSE("GPL");
 
+static int __ext2_write_inode(struct inode *inode, int do_sync);
+
 /*
  * Test whether an inode is a fast symlink.
  */
@@ -73,7 +75,7 @@ void ext2_evict_inode(struct inode * inode)
 		/* set dtime */
 		EXT2_I(inode)->i_dtime  = get_seconds();
 		mark_inode_dirty(inode);
-		ext2_write_inode(inode, inode_needs_sync(inode));
+		__ext2_write_inode(inode, inode_needs_sync(inode));
 		/* truncate to 0 */
 		inode->i_size = 0;
 		if (inode->i_blocks)
@@ -1350,7 +1352,7 @@ bad_inode:
 	return ERR_PTR(ret);
 }
 
-int ext2_write_inode(struct inode *inode, int do_sync)
+static int __ext2_write_inode(struct inode *inode, int do_sync)
 {
 	struct ext2_inode_info *ei = EXT2_I(inode);
 	struct super_block *sb = inode->i_sb;
@@ -1453,6 +1455,11 @@ int ext2_write_inode(struct inode *inode, int do_sync)
 	ei->i_state &= ~EXT2_STATE_NEW;
 	brelse (bh);
 	return err;
+}
+
+int ext2_write_inode(struct inode *inode, struct writeback_control *wbc)
+{
+	return __ext2_write_inode(inode, wbc->sync_mode == WB_SYNC_ALL);
 }
 
 int ext2_sync_inode(struct inode *inode)

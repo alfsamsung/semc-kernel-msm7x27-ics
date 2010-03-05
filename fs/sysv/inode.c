@@ -27,6 +27,7 @@
 #include <linux/init.h>
 #include <linux/buffer_head.h>
 #include <linux/vfs.h>
+#include <linux/writeback.h>
 #include <linux/namei.h>
 #include <asm/byteorder.h>
 #include "sysv.h"
@@ -280,7 +281,7 @@ static struct buffer_head * sysv_update_inode(struct inode * inode)
 	return bh;
 }
 
-int sysv_write_inode(struct inode * inode, int wait)
+static int __sysv_write_inode(struct inode *inode, int wait)
 {
 	struct buffer_head *bh;
 	lock_kernel();
@@ -308,6 +309,10 @@ int sysv_sync_inode(struct inode * inode)
                 err = -1;
         brelse (bh);
         return err;
+
+int sysv_write_inode(struct inode *inode, struct writeback_control *wbc)
+{
+	return __sysv_write_inode(inode, wbc->sync_mode == WB_SYNC_ALL);
 }
 
 static void sysv_delete_inode(struct inode *inode)

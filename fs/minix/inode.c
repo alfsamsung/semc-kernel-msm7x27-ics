@@ -17,8 +17,10 @@
 #include <linux/init.h>
 #include <linux/highuid.h>
 #include <linux/vfs.h>
+#include <linux/writeback.h>
 
-static int minix_write_inode(struct inode * inode, int wait);
+static int minix_write_inode(struct inode *inode,
+		struct writeback_control *wbc);
 static int minix_statfs(struct dentry *dentry, struct kstatfs *buf);
 static int minix_remount (struct super_block * sb, int * flags, char * data);
 
@@ -559,7 +561,7 @@ static struct buffer_head *minix_update_inode(struct inode *inode)
 		return V2_minix_update_inode(inode);
 }
 
-static int minix_write_inode(struct inode * inode, int wait)
+static int minix_write_inode(struct inode *inode, struct writeback_control *wbc)
 {
 	brelse(minix_update_inode(inode));
 	return 0;
