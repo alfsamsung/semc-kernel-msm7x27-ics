@@ -121,15 +121,14 @@ void __remove_from_page_cache(struct page *page)
         if (PageUptodate(page))
 		cleancache_put_page(page);
 	else
-		cleancache_flush_page(mapping, page);
+		cleancache_invalidate_page(mapping, page);
 
 	radix_tree_delete(&mapping->page_tree, page->index);
 	page->mapping = NULL;
 	mapping->nrpages--;
 	__dec_zone_page_state(page, NR_FILE_PAGES);
 	BUG_ON(page_mapped(page));
-	mem_cgroup_uncharge_cache_page(page);
-
+	
 	/*
 	 * Some filesystems seem to re-dirty the page even after
 	 * the VM has canceled the dirty bit (eg ext3 journaling).
@@ -152,6 +151,7 @@ void remove_from_page_cache(struct page *page)
 	spin_lock_irq(&mapping->tree_lock);
 	__remove_from_page_cache(page);
 	spin_unlock_irq(&mapping->tree_lock);
+	mem_cgroup_uncharge_cache_page(page);
 }
 
 static int sync_page(void *word)
@@ -480,13 +480,14 @@ int add_to_page_cache_locked(struct page *page, struct address_space *mapping,
 		if (likely(!error)) {
 			mapping->nrpages++;
 			__inc_zone_page_state(page, NR_FILE_PAGES);
+			spin_unlock_irq(&mapping->tree_lock);
 		} else {
 			page->mapping = NULL;
+			spin_unlock_irq(&mapping->tree_lock);
 			mem_cgroup_uncharge_cache_page(page);
 			page_cache_release(page);
 		}
 
-		spin_unlock_irq(&mapping->tree_lock);
 		radix_tree_preload_end();
 	} else
 		mem_cgroup_uncharge_cache_page(page);
@@ -514,7 +515,7 @@ int add_to_page_cache_lru(struct page *page, struct address_space *mapping,
 		if (page_is_file_cache(page))
 			lru_cache_add_file(page);
 		else
-			lru_cache_add_active_anon(page);
+			lru_cache_add_anon(page);
 	}
 	return ret;
 }

@@ -265,7 +265,6 @@
 
 #include <linux/module.h>
 #include <linux/fs.h>
-#include <linux/buffer_head.h>
 #include <linux/major.h>
 #include <linux/types.h>
 #include <linux/errno.h>

@@ -22,7 +22,7 @@
 #include <linux/writeback.h>
 #include <linux/blkdev.h>
 #include <linux/backing-dev.h>
-#include <linux/buffer_head.h>
+#include <linux/buffer_head.h> /* sync_mapping_buffers */
 #include "internal.h"
 
 

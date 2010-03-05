@@ -32,6 +32,7 @@
 #include <linux/swap.h>
 #include <linux/writeback.h>
 #include <linux/statfs.h>
+#include <linux/slab.h>
 #include <linux/cleancache.h>
 #include <linux/compat.h>
 #include <linux/parser.h>
@@ -354,7 +355,7 @@ static int btrfs_fill_super(struct super_block *sb,
 	sb->s_root = root_dentry;
 
 	save_mount_options(sb, data);
-	cleancache_init_fs(sb);
+	sb->cleancache_poolid = cleancache_init_fs(PAGE_SIZE);
 	return 0;
 
 fail_close:

@@ -90,8 +90,6 @@ static unsigned int dbs_enable;	/* number of CPUs using this policy */
  */
 static DEFINE_MUTEX(dbs_mutex);
 
-static struct workqueue_struct	*kondemand_wq;
-
 static struct dbs_tuners {
 	unsigned int sampling_rate;
 	unsigned int up_threshold;
@@ -240,7 +238,6 @@ static ssize_t store_sampling_rate(struct cpufreq_policy *unused,
 	int ret;
 	ret = sscanf(buf, "%u", &input);
 
-	mutex_lock(&dbs_mutex);
 	if (ret != 1 || input > MAX_SAMPLING_RATE
 		     || input < MIN_SAMPLING_RATE) {
 		mutex_unlock(&dbs_mutex);
@@ -248,8 +245,7 @@ static ssize_t store_sampling_rate(struct cpufreq_policy *unused,
 	}
 
 	dbs_tuners_ins.sampling_rate = input;
-	mutex_unlock(&dbs_mutex);
-
+	
 	return count;
 }
 
@@ -260,7 +256,6 @@ static ssize_t store_up_threshold(struct cpufreq_policy *unused,
 	int ret;
 	ret = sscanf(buf, "%u", &input);
 
-	mutex_lock(&dbs_mutex);
 	if (ret != 1 || input > MAX_FREQUENCY_UP_THRESHOLD ||
 			input < MIN_FREQUENCY_UP_THRESHOLD) {
 		mutex_unlock(&dbs_mutex);
@@ -268,8 +263,7 @@ static ssize_t store_up_threshold(struct cpufreq_policy *unused,
 	}
 
 	dbs_tuners_ins.up_threshold = input;
-	mutex_unlock(&dbs_mutex);
-
+	
 	return count;
 }
 
@@ -280,7 +274,6 @@ static ssize_t store_down_differential(struct cpufreq_policy *unused,
 	int ret;
 	ret = sscanf(buf, "%u", &input);
 
-	mutex_lock(&dbs_mutex);
 	if (ret != 1 || input >= dbs_tuners_ins.up_threshold ||
 			input < MIN_FREQUENCY_DOWN_DIFFERENTIAL) {
 		mutex_unlock(&dbs_mutex);
@@ -288,8 +281,7 @@ static ssize_t store_down_differential(struct cpufreq_policy *unused,
 	}
 
 	dbs_tuners_ins.down_differential = input;
-	mutex_unlock(&dbs_mutex);
-
+	
 	return count;
 }
 
@@ -308,7 +300,6 @@ static ssize_t store_ignore_nice_load(struct cpufreq_policy *policy,
 	if ( input > 1 )
 		input = 1;
 
-	mutex_lock(&dbs_mutex);
 	if ( input == dbs_tuners_ins.ignore_nice ) { /* nothing to do */
 		mutex_unlock(&dbs_mutex);
 		return count;
@@ -325,8 +316,7 @@ static ssize_t store_ignore_nice_load(struct cpufreq_policy *policy,
 			dbs_info->prev_cpu_nice = kstat_cpu(j).cpustat.nice;
 
 	}
-	mutex_unlock(&dbs_mutex);
-
+	
 	return count;
 }
 
@@ -343,11 +333,9 @@ static ssize_t store_powersave_bias(struct cpufreq_policy *unused,
 	if (input > 1000)
 		input = 1000;
 
-	mutex_lock(&dbs_mutex);
 	dbs_tuners_ins.powersave_bias = input;
 	ondemand_powersave_bias_init();
-	mutex_unlock(&dbs_mutex);
-
+	
 	return count;
 }
 
@@ -511,11 +499,8 @@ static void do_dbs_timer(struct work_struct *work)
 		container_of(work, struct cpu_dbs_info_s, work.work);
 	unsigned int cpu = dbs_info->cpu;
 	int sample_type = dbs_info->sample_type;
-
-	/* We want all CPUs to do sampling nearly on same jiffy */
-	int delay = usecs_to_jiffies(dbs_tuners_ins.sampling_rate);
-
-	delay -= jiffies % delay;
+	
+	int delay;
 
 	if (lock_policy_rwsem_write(cpu) < 0)
 		return;
@@ -534,13 +519,18 @@ static void do_dbs_timer(struct work_struct *work)
 			/* Setup timer for SUB_SAMPLE */
 			dbs_info->sample_type = DBS_SUB_SAMPLE;
 			delay = dbs_info->freq_hi_jiffies;
+		} else {
+			/* We want all CPUs to do sampling nearly on same jiffy */
+			delay = usecs_to_jiffies(dbs_tuners_ins.sampling_rate);
+			delay -= jiffies % delay;
 		}
 	} else {
 		__cpufreq_driver_target(dbs_info->cur_policy,
 	                        	dbs_info->freq_lo,
 	                        	CPUFREQ_RELATION_H);
+		delay = dbs_info->freq_lo_jiffies;
 	}
-	queue_delayed_work_on(cpu, kondemand_wq, &dbs_info->work, delay);
+	schedule_delayed_work_on(cpu, &dbs_info->work, delay);
 	unlock_policy_rwsem_write(cpu);
 }
 
@@ -554,8 +544,7 @@ static inline void dbs_timer_init(struct cpu_dbs_info_s *dbs_info)
 	ondemand_powersave_bias_init();
 	dbs_info->sample_type = DBS_NORMAL_SAMPLE;
 	INIT_DELAYED_WORK_DEFERRABLE(&dbs_info->work, do_dbs_timer);
-	queue_delayed_work_on(dbs_info->cpu, kondemand_wq, &dbs_info->work,
-	                      delay);
+	schedule_delayed_work_on(dbs_info->cpu, &dbs_info->work, delay);
 }
 
 static inline void dbs_timer_exit(struct cpu_dbs_info_s *dbs_info)
@@ -747,7 +736,6 @@ struct cpufreq_governor cpufreq_gov_ondemand = {
 
 static int __init cpufreq_gov_dbs_init(void)
 {
-	int err;
 	cputime64_t wall;
 	u64 idle_time;
 	int cpu = get_cpu();
@@ -761,22 +749,12 @@ static int __init cpufreq_gov_dbs_init(void)
 					MICRO_FREQUENCY_DOWN_DIFFERENTIAL;
 	}
 
-	kondemand_wq = create_workqueue("kondemand");
-	if (!kondemand_wq) {
-		printk(KERN_ERR "Creation of kondemand failed\n");
-		return -EFAULT;
-	}
-	err = cpufreq_register_governor(&cpufreq_gov_ondemand);
-	if (err)
-		destroy_workqueue(kondemand_wq);
-
-	return err;
+	return cpufreq_register_governor(&cpufreq_gov_ondemand);
 }
 
 static void __exit cpufreq_gov_dbs_exit(void)
 {
 	cpufreq_unregister_governor(&cpufreq_gov_ondemand);
-	destroy_workqueue(kondemand_wq);
 }
 
 

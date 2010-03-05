@@ -69,7 +69,6 @@
 #include <linux/suspend.h>
 #include <linux/freezer.h>
 #include <linux/writeback.h>
-#include <linux/buffer_head.h>		/* for invalidate_bdev() */
 #include <linux/completion.h>
 #include <linux/highmem.h>
 #include <linux/gfp.h>

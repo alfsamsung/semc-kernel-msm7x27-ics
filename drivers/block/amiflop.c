@@ -61,7 +61,7 @@
 #include <linux/init.h>
 #include <linux/amifdreg.h>
 #include <linux/amifd.h>
-#include <linux/buffer_head.h>
+#include <linux/fs.h>
 #include <linux/blkdev.h>
 #include <linux/elevator.h>
 #include <linux/interrupt.h>

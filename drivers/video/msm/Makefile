@@ -34,7 +34,7 @@ endif
 
 obj-y += mdp_dma.o
 obj-y += mdp_dma_s.o
-obj-y += mdp_vsync.o
+obj-$(CONFIG_MSM7X27_VSYNC_ENABLE) += mdp_vsync.o
 obj-y += mdp_cursor.o
 obj-y += mdp_dma_tv.o
 

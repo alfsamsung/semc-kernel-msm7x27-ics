@@ -277,7 +277,7 @@ out:
 #ifdef CONFIG_MMU
 static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 {
-	struct vm_area_struct *mpnt, *tmp, **pprev;
+	struct vm_area_struct *mpnt, *tmp, *prev, **pprev;
 	struct rb_node **rb_link, *rb_parent;
 	int retval;
 	unsigned long charge;
@@ -304,7 +304,8 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 	retval = ksm_fork(mm, oldmm);
         if (retval)
                 goto out;
-
+	
+	prev = NULL;
 	for (mpnt = oldmm->mmap; mpnt; mpnt = mpnt->vm_next) {
 		struct file *file;
 
@@ -333,7 +334,7 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 		vma_set_policy(tmp, pol);
 		tmp->vm_flags &= ~VM_LOCKED;
 		tmp->vm_mm = mm;
-		tmp->vm_next = NULL;
+		tmp->vm_next = tmp->vm_prev = NULL;
 		anon_vma_link(tmp);
 		file = tmp->vm_file;
 		if (file) {
@@ -367,6 +368,8 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 		 */
 		*pprev = tmp;
 		pprev = &tmp->vm_next;
+		tmp->vm_prev = prev;
+                prev = tmp;
 
 		__vma_link_rb(mm, tmp, rb_link, rb_parent);
 		rb_link = &tmp->vm_rb.rb_right;
@@ -444,8 +447,7 @@ static struct mm_struct * mm_init(struct mm_struct * mm, struct task_struct *p)
                 (current->mm->flags & MMF_INIT_MASK) : default_dump_filter;
 	mm->core_state = NULL;
 	mm->nr_ptes = 0;
-	set_mm_counter(mm, file_rss, 0);
-	set_mm_counter(mm, anon_rss, 0);
+	memset(&mm->rss_stat, 0, sizeof(mm->rss_stat));
 	spin_lock_init(&mm->page_table_lock);
 	spin_lock_init(&mm->ioctx_lock);
 	INIT_HLIST_HEAD(&mm->ioctx_list);

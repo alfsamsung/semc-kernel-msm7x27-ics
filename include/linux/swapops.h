@@ -131,3 +131,15 @@ static inline int is_write_migration_entry(swp_entry_t entry)
 
 #endif
 
+#if defined(CONFIG_MEMORY_FAILURE) || defined(CONFIG_MIGRATION)
+static inline int non_swap_entry(swp_entry_t entry)
+{
+        return swp_type(entry) >= MAX_SWAPFILES;
+}
+#else
+static inline int non_swap_entry(swp_entry_t entry)
+{
+        return 0;
+}
+#endif
+

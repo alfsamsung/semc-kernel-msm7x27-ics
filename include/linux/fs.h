@@ -1199,7 +1199,10 @@ struct super_block {
 	 */
 	char *s_options;
 	
-	int cleancache_poolid;	
+	/*
+	 * Saved pool identifier for cleancache (-1 means none)
+	 */
+	int cleancache_poolid;
 
 	/*
 	 * storage for asynchronous operations
@@ -1734,6 +1737,7 @@ extern void bdput(struct block_device *);
 extern struct block_device *open_by_devnum(dev_t, fmode_t);
 extern void invalidate_bdev(struct block_device *);
 extern int sync_blockdev(struct block_device *bdev);
+extern void kill_bdev(struct block_device *);
 extern struct super_block *freeze_bdev(struct block_device *);
 extern int thaw_bdev(struct block_device *bdev, struct super_block *sb);
 extern int fsync_bdev(struct block_device *);
@@ -1741,6 +1745,8 @@ extern int fsync_super(struct super_block *);
 extern int fsync_no_super(struct block_device *);
 #else
 static inline void bd_forget(struct inode *inode) {}
+static inline void kill_bdev(struct block_device *bdev) {}
+static inline void invalidate_bdev(struct block_device *bdev) {}
 #endif
 extern const struct file_operations def_blk_fops;
 extern const struct file_operations def_chr_fops;
@@ -1980,6 +1986,7 @@ extern ssize_t do_sync_read(struct file *filp, char __user *buf, size_t len, lof
 extern ssize_t do_sync_write(struct file *filp, const char __user *buf, size_t len, loff_t *ppos);
 extern int generic_segment_checks(const struct iovec *iov,
 		unsigned long *nr_segs, size_t *count, int access_flags);
+extern void block_sync_page(struct page *page);
 
 /* fs/splice.c */
 extern ssize_t generic_file_splice_read(struct file *, loff_t *,

@@ -12,7 +12,6 @@
 #include <linux/linkage.h>
 #include <linux/pagemap.h>
 #include <linux/quotaops.h>
-#include <linux/buffer_head.h>
 #include "internal.h"
 
 #define VALID_FLAGS (SYNC_FILE_RANGE_WAIT_BEFORE|SYNC_FILE_RANGE_WRITE| \

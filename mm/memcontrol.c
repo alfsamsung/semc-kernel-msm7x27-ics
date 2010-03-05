@@ -1365,24 +1365,31 @@ void mem_cgroup_uncharge_cache_page(struct page *page)
 	__mem_cgroup_uncharge_common(page, MEM_CGROUP_CHARGE_TYPE_CACHE);
 }
 
+#ifdef CONFIG_SWAP
 /*
- * called from __delete_from_swap_cache() and drop "page" account.
+ * called after __delete_from_swap_cache() and drop "page" account.
  * memcg information is recorded to swap_cgroup of "ent"
  */
-void mem_cgroup_uncharge_swapcache(struct page *page, swp_entry_t ent)
+void
+mem_cgroup_uncharge_swapcache(struct page *page, swp_entry_t ent, bool swapout)
 {
-	struct mem_cgroup *memcg;
+        struct mem_cgroup *memcg;
+        int ctype = MEM_CGROUP_CHARGE_TYPE_SWAPOUT;
+ 
+        if (!swapout) /* this was a swap cache but the swap is unused ! */
+                 ctype = MEM_CGROUP_CHARGE_TYPE_DROP;
 
-	memcg = __mem_cgroup_uncharge_common(page,
-					MEM_CGROUP_CHARGE_TYPE_SWAPOUT);
-	/* record memcg information */
-	if (do_swap_account && memcg) {
-		swap_cgroup_record(ent, memcg);
-		mem_cgroup_get(memcg);
-	}
-	if (memcg)
-		css_put(&memcg->css);
+        memcg = __mem_cgroup_uncharge_common(page, ctype);
+
+        /* record memcg information */
+        if (do_swap_account && swapout && memcg) {
+                swap_cgroup_record(ent, css_id(&memcg->css));
+                mem_cgroup_get(memcg);
+        }
+        if (swapout && memcg)
+                css_put(&memcg->css);
 }
+#endif
 
 #ifdef CONFIG_CGROUP_MEM_RES_CTLR_SWAP
 /*

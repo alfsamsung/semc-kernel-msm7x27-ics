@@ -36,7 +36,7 @@
 #include <linux/raid/md.h>
 #include <linux/raid/bitmap.h>
 #include <linux/sysctl.h>
-#include <linux/buffer_head.h> /* for invalidate_bdev */
+#include <linux/fs.h>
 #include <linux/poll.h>
 #include <linux/ctype.h>
 #include <linux/hdreg.h>

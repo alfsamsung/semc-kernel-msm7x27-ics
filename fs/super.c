@@ -197,16 +197,13 @@ void deactivate_super(struct super_block *s)
 {
 	struct file_system_type *fs = s->s_type;
 	if (atomic_dec_and_lock(&s->s_active, &sb_lock)) {
+		cleancache_invalidate_fs(s);
 		s->s_count -= S_BIAS-1;
 		spin_unlock(&sb_lock);
 		DQUOT_OFF(s, 0);
 		down_write(&s->s_umount);
 		fs->kill_sb(s);
-        if (s->cleancache_poolid >= 0) {
-//            int cleancache_poolid = s->cleancache_poolid;
-            s->cleancache_poolid = -1; /* avoid races */
-            cleancache_flush_fs(s);
-        }
+        
 		put_filesystem(fs);
 		put_super(s);
 	}

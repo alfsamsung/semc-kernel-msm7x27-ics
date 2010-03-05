@@ -19,7 +19,7 @@
 
 /*
  * This global enablement flag may be read thousands of times per second
- * by cleancache_get/put/flush even on systems where cleancache_ops
+ * by cleancache_get/put/invalidate even on systems where cleancache_ops
  * is not claimed (e.g. cleancache is config'ed on but remains
  * disabled), so is preferred to the slower alternative: a function
  * call that checks a non-global.
@@ -76,17 +76,18 @@ static int cleancache_get_key(struct inode *inode,
 			      struct cleancache_filekey *key)
 {
 	int (*fhfn)(struct dentry *, __u32 *fh, int *, int);
-	int maxlen = CLEANCACHE_KEY_MAX;
+	int len = 0, maxlen = CLEANCACHE_KEY_MAX;
 	struct super_block *sb = inode->i_sb;
-	struct dentry *d;
 
 	key->u.ino = inode->i_ino;
 	if (sb->s_export_op != NULL) {
 		fhfn = sb->s_export_op->encode_fh;
 		if  (fhfn) {
-			d = list_first_entry(&inode->i_dentry,
-						struct dentry, d_alias);
-			(void)(*fhfn)(d, &key->u.fh[0], &maxlen, 0);
+			struct dentry d;
+			d.d_inode = inode;
+			len = (*fhfn)(&d, &key->u.fh[0], &maxlen, 0);
+			if (len <= 0 || len == 255)
+				return -1;
 			if (maxlen > CLEANCACHE_KEY_MAX)
 				return -1;
 		}
@@ -147,10 +148,11 @@ void __cleancache_put_page(struct page *page)
 EXPORT_SYMBOL(__cleancache_put_page);
 
 /*
- * Flush any data from cleancache associated with the poolid and the
+ * Invalidate any data from cleancache associated with the poolid and the
  * page's inode and page index so that a subsequent "get" will fail.
  */
-void __cleancache_flush_page(struct address_space *mapping, struct page *page)
+void __cleancache_invalidate_page(struct address_space *mapping,
+                                        struct page *page)
 {
 	/* careful... page->mapping is NULL sometimes when this is called */
 	int pool_id = mapping->host->i_sb->cleancache_poolid;
@@ -159,77 +161,63 @@ void __cleancache_flush_page(struct address_space *mapping, struct page *page)
 	if (pool_id >= 0) {
 		VM_BUG_ON(!PageLocked(page));
 		if (cleancache_get_key(mapping->host, &key) >= 0) {
-			(*cleancache_ops.flush_page)(pool_id, key, page->index);
+			(*cleancache_ops.invalidate_page)(pool_id,
+                                                          key, page->index);
 			cleancache_flushes++;
 		}
 	}
 }
-EXPORT_SYMBOL(__cleancache_flush_page);
+EXPORT_SYMBOL(__cleancache_invalidate_page);
 
 /*
- * Flush all data from cleancache associated with the poolid and the
+ * Invalidate all data from cleancache associated with the poolid and the
  * mappings's inode so that all subsequent gets to this poolid/inode
  * will fail.
  */
-void __cleancache_flush_inode(struct address_space *mapping)
+void __cleancache_invalidate_inode(struct address_space *mapping)
 {
 	int pool_id = mapping->host->i_sb->cleancache_poolid;
 	struct cleancache_filekey key = { .u.key = { 0 } };
 
 	if (pool_id >= 0 && cleancache_get_key(mapping->host, &key) >= 0)
-		(*cleancache_ops.flush_inode)(pool_id, key);
+		(*cleancache_ops.invalidate_inode)(pool_id, key);
 }
-EXPORT_SYMBOL(__cleancache_flush_inode);
+EXPORT_SYMBOL(__cleancache_invalidate_inode);
 
 /*
  * Called by any cleancache-enabled filesystem at time of unmount;
  * note that pool_id is surrendered and may be reutrned by a subsequent
  * cleancache_init_fs or cleancache_init_shared_fs
  */
-void __cleancache_flush_fs(struct super_block *sb)
+void __cleancache_invalidate_fs(struct super_block *sb)
 {
 	if (sb->cleancache_poolid >= 0) {
 		int old_poolid = sb->cleancache_poolid;
 		sb->cleancache_poolid = -1;
-		(*cleancache_ops.flush_fs)(old_poolid);
+		(*cleancache_ops.invalidate_fs)(old_poolid);
 	}
 }
-EXPORT_SYMBOL(__cleancache_flush_fs);
+EXPORT_SYMBOL(__cleancache_invalidate_fs);
 
 #ifdef CONFIG_SYSFS
 
 /* see Documentation/ABI/xxx/sysfs-kernel-mm-cleancache */
 
-#define CLEANCACHE_ATTR_RO(_name) \
-	static struct kobj_attribute _name##_attr = __ATTR_RO(_name)
+#define CLEANCACHE_SYSFS_RO(_name) \
+	static ssize_t cleancache_##_name##_show(struct kobject *kobj, \
+				struct kobj_attribute *attr, char *buf) \
+	{ \
+		return sprintf(buf, "%lu\n", cleancache_##_name); \
+	} \
+	static struct kobj_attribute cleancache_##_name##_attr = { \
+		.attr = { .name = __stringify(_name), .mode = 0444 }, \
+		.show = cleancache_##_name##_show, \
+	}
 
-static ssize_t cleancache_succ_gets_show(struct kobject *kobj,
-			       struct kobj_attribute *attr, char *buf)
-{
-	return sprintf(buf, "%lu\n", cleancache_succ_gets);
-}
-CLEANCACHE_ATTR_RO(cleancache_succ_gets);
-
-static ssize_t cleancache_failed_gets_show(struct kobject *kobj,
-			       struct kobj_attribute *attr, char *buf)
-{
-	return sprintf(buf, "%lu\n", cleancache_failed_gets);
-}
-CLEANCACHE_ATTR_RO(cleancache_failed_gets);
-
-static ssize_t cleancache_puts_show(struct kobject *kobj,
-			       struct kobj_attribute *attr, char *buf)
-{
-	return sprintf(buf, "%lu\n", cleancache_puts);
-}
-CLEANCACHE_ATTR_RO(cleancache_puts);
-
-static ssize_t cleancache_flushes_show(struct kobject *kobj,
-			       struct kobj_attribute *attr, char *buf)
-{
-	return sprintf(buf, "%lu\n", cleancache_flushes);
-}
-CLEANCACHE_ATTR_RO(cleancache_flushes);
+CLEANCACHE_SYSFS_RO(succ_gets);
+CLEANCACHE_SYSFS_RO(failed_gets);
+CLEANCACHE_SYSFS_RO(puts);
+CLEANCACHE_SYSFS_RO(flushes);
 
 static struct attribute *cleancache_attrs[] = {
 	&cleancache_succ_gets_attr.attr,

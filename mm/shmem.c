@@ -1082,7 +1082,11 @@ static int shmem_writepage(struct page *page, struct writeback_control *wbc)
 	shmem_swp_unmap(entry);
 unlock:
 	spin_unlock(&info->lock);
-	swap_free(swap);
+	/*
+         * add_to_swap_cache() doesn't return -EEXIST, so we can safely
+         * clear SWAP_HAS_CACHE flag.
+         */
+	swapcache_free(swap, NULL);
 redirty:
 	set_page_dirty(page);
 	if (wbc->for_reclaim)

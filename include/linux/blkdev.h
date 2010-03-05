@@ -961,6 +961,12 @@ static inline struct request *blk_map_queue_find_tag(struct blk_queue_tag *bqt,
 		return NULL;
 	return bqt->tag_index[tag];
 }
+enum{
+        BLKDEV_WAIT,    /* wait for completion */
+        BLKDEV_BARRIER, /*issue request with barrier */
+};
+#define BLKDEV_IFL_WAIT         (1 << BLKDEV_WAIT)
+#define BLKDEV_IFL_BARRIER      (1 << BLKDEV_BARRIER)
 
 extern int blkdev_issue_flush(struct block_device *, sector_t *);
 #define DISCARD_FL_WAIT		0x01	/* wait for completion */
