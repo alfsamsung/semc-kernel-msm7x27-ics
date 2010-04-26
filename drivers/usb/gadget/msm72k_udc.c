@@ -74,8 +74,6 @@ static const char *const ep_name[] = {
 	"ep12in", "ep13in", "ep14in", "ep15in"
 };
 
-/* current state of VBUS */
-static int vbus;
 /*To release the wakelock from debugfs*/
 static int release_wlocks;
 
@@ -106,6 +104,7 @@ struct msm_request {
 #define to_msm_endpoint(r) container_of(r, struct msm_endpoint, ep)
 #define to_msm_otg(xceiv)  container_of(xceiv, struct msm_otg, otg)
 #define is_b_sess_vld()	((OTGSC_BSV & readl(USB_OTGSC)) ? 1 : 0)
+#define is_usb_online(ui) (ui->usb_state != USB_STATE_NOTATTACHED)
 
 struct msm_endpoint {
 	struct usb_ep ep;
@@ -1449,7 +1448,10 @@ static void msm72k_pm_qos_update(int vote)
 {
 	struct msm_hsusb_gadget_platform_data *pdata =
 				the_usb_info->pdev->dev.platform_data;
-	u32 swfi_latency = pdata->swfi_latency + 1;
+	u32 swfi_latency = 0;
+
+        if (pdata)
+                swfi_latency = pdata->swfi_latency + 1;
 
 	if (vote) {
 		pm_qos_update_requirement(PM_QOS_CPU_DMA_LATENCY,
@@ -1471,7 +1473,7 @@ static void usb_do_work_check_vbus(struct usb_info *ui)
 	unsigned long iflags;
 
 	spin_lock_irqsave(&ui->lock, iflags);
-	if (vbus)
+	 if (is_usb_online(ui))
 		ui->flags |= USB_FLAG_VBUS_ONLINE;
 	else
 		ui->flags |= USB_FLAG_VBUS_OFFLINE;
@@ -1488,7 +1490,7 @@ static void usb_do_work(struct work_struct *w)
 		spin_lock_irqsave(&ui->lock, iflags);
 		flags = ui->flags;
 		ui->flags = 0;
-		_vbus = vbus;
+		_vbus = is_usb_online(ui);
 		spin_unlock_irqrestore(&ui->lock, iflags);
 
 		/* give up if we have nothing to do */
@@ -1711,22 +1713,26 @@ void msm_hsusb_set_vbus_state(int online)
 	unsigned long flags;
 	struct usb_info *ui = the_usb_info;
 
-	if (ui) {
-		spin_lock_irqsave(&ui->lock, flags);
-		if (vbus != online) {
-			vbus = online;
-			if (online)
-				ui->flags |= USB_FLAG_VBUS_ONLINE;
-			else
-				ui->flags |= USB_FLAG_VBUS_OFFLINE;
-			schedule_work(&ui->work);
-		}
-		spin_unlock_irqrestore(&ui->lock, flags);
-	} else {
+	 if (!ui) {
 		dev_err(&ui->pdev->dev, "msm_hsusb_set_vbus_state called"
 			" before driver initialized\n");
-		vbus = online;
+		return;
 	}
+	spin_lock_irqsave(&ui->lock, flags);
+
+       if (is_usb_online(ui) ==  online)
+               goto out;
+
+       if (online) {
+               ui->usb_state = USB_STATE_POWERED;
+               ui->flags |= USB_FLAG_VBUS_ONLINE;
+       } else {
+               ui->usb_state = USB_STATE_NOTATTACHED;
+               ui->flags |= USB_FLAG_VBUS_OFFLINE;
+       }
+       schedule_work(&ui->work);
+out:
+       spin_unlock_irqrestore(&ui->lock, flags);
 }
 
 #ifdef CONFIG_USB_POWER_REENUMERATION
@@ -2185,8 +2191,9 @@ static int msm72k_get_frame(struct usb_gadget *_gadget)
 static int msm72k_udc_vbus_session(struct usb_gadget *_gadget, int is_active)
 {
 	struct usb_info *ui = container_of(_gadget, struct usb_info, gadget);
+	unsigned long flags;
 
-	ui->usb_state = is_active ? USB_STATE_POWERED : USB_STATE_NOTATTACHED;
+	spin_lock_irqsave(&ui->lock, flags);
 
 	if (is_active || ui->chg_type == USB_CHG_TYPE__WALLCHARGER
 #ifdef CONFIG_SUPPORT_ALIEN_USB_CHARGER
@@ -2194,7 +2201,8 @@ static int msm72k_udc_vbus_session(struct usb_gadget *_gadget, int is_active)
 #endif
 	)
 		wake_lock(&ui->wlock);
-
+	spin_unlock_irqrestore(&ui->lock, flags);
+	
 	msm_hsusb_set_vbus_state(is_active);
 
 #ifdef CONFIG_USB_POWER_REENUMERATION
@@ -2222,10 +2230,13 @@ SW workaround	- Making opmode non-driving and SuspendM set in function
 static int msm72k_pullup(struct usb_gadget *_gadget, int is_active)
 {
 	struct usb_info *ui = container_of(_gadget, struct usb_info, gadget);
+	unsigned long flags;
 
 	if (is_active) {
-		if (vbus && ui->driver)
+		spin_lock_irqsave(&ui->lock, flags);
+                if (is_usb_online(ui) && ui->driver)
 			writel(readl(USB_USBCMD) | USBCMD_RS, USB_USBCMD);
+		spin_unlock_irqrestore(&ui->lock, flags);
 	} else {
 		writel(readl(USB_USBCMD) & ~USBCMD_RS, USB_USBCMD);
 		/* S/W workaround, Issue#1 */
