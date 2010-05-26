@@ -176,6 +176,7 @@ EXPORT_SYMBOL(task_free_unregister);
 static inline void free_signal_struct(struct signal_struct *sig)
 {
 	thread_group_cputime_free(sig);
+	taskstats_tgid_free(sig);
 	kmem_cache_free(signal_cachep, sig);
 }
 
