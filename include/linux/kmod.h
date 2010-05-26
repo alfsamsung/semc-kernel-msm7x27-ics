@@ -55,7 +55,6 @@ enum umh_wait {
 struct subprocess_info {
 	struct work_struct work;
 	struct completion *complete;
-	struct cred *cred;
 	char *path;
 	char **argv;
 	char **envp;

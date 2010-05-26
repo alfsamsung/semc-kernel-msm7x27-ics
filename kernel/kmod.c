@@ -130,18 +130,12 @@ static int ____call_usermodehelper(void *data)
 	struct subprocess_info *sub_info = data;
 	int retval;
 
-	BUG_ON(atomic_read(&sub_info->cred->usage) != 1);
-
 	/* Unblock all signals */
 	spin_lock_irq(&current->sighand->siglock);
 	flush_signal_handlers(current, 1);
 	sigemptyset(&current->blocked);
 	recalc_sigpending();
 	spin_unlock_irq(&current->sighand->siglock);
-
-	/* Install the credentials */
-	commit_creds(sub_info->cred);
-	sub_info->cred = NULL;
 
 	/* Install input pipe when needed */
 	if (sub_info->stdin) {
@@ -187,8 +181,6 @@ void call_usermodehelper_freeinfo(struct subprocess_info *info)
 {
 	if (info->cleanup)
 		(*info->cleanup)(info);
-	if (info->cred)
-		put_cred(info->cred);
 	kfree(info);
 }
 EXPORT_SYMBOL(call_usermodehelper_freeinfo);
@@ -243,8 +235,6 @@ static void __call_usermodehelper(struct work_struct *work)
 		container_of(work, struct subprocess_info, work);
 	pid_t pid;
 	enum umh_wait wait = sub_info->wait;
-
-	BUG_ON(atomic_read(&sub_info->cred->usage) != 1);
 
 	/* CLONE_VFORK: wait until the usermode helper has execve'd
 	 * successfully We need the data structures to stay around
@@ -368,12 +358,6 @@ struct subprocess_info *call_usermodehelper_setup(char *path, char **argv,
 	sub_info->path = path;
 	sub_info->argv = argv;
 	sub_info->envp = envp;
-	sub_info->cred = prepare_usermodehelper_creds();
-	if (!sub_info->cred) {
-		kfree(sub_info);
-		return NULL;
-	}
-
   out:
 	return sub_info;
 }
@@ -452,8 +436,6 @@ int call_usermodehelper_exec(struct subprocess_info *sub_info,
 {
 	DECLARE_COMPLETION_ONSTACK(done);
 	int retval = 0;
-
-	BUG_ON(atomic_read(&sub_info->cred->usage) != 1);
 
 	helper_lock();
 	if (sub_info->path[0] == '\0')
