@@ -160,7 +160,7 @@ void free_task(struct task_struct *tsk)
 	free_task_struct(tsk);
 }
 EXPORT_SYMBOL(free_task);
-/*
+
 int task_free_register(struct notifier_block *n)
 {
 	return atomic_notifier_chain_register(&task_free_notifier, n);
@@ -172,7 +172,7 @@ int task_free_unregister(struct notifier_block *n)
 	return atomic_notifier_chain_unregister(&task_free_notifier, n);
 }
 EXPORT_SYMBOL(task_free_unregister);
-*/
+
 static inline void free_signal_struct(struct signal_struct *sig)
 {
 	thread_group_cputime_free(sig);

@@ -1440,7 +1440,6 @@ extern void cpu_scaling(int cpu);
 extern void cpu_nonscaling(int cpu);
 #define tsk_seruntime(t)		((t)->sched_time)
 #define tsk_rttimeout(t)		((t)->rt_timeout)
-#define task_rq_unlock_wait(tsk)	grq_unlock_wait()
 
 static inline void set_oom_timeslice(struct task_struct *p)
 {
@@ -1465,7 +1464,6 @@ static inline int iso_task(struct task_struct *p)
 extern void remove_cpu(unsigned long cpu);
 #else /* CFS */
 extern int runqueue_is_locked(int cpu);
-extern void task_rq_unlock_wait(struct task_struct *p);
 static inline void cpu_scaling(int cpu)
 {
 }
