@@ -1404,8 +1404,7 @@ static int wait_task_stopped(int ptrace, struct task_struct *p,
 	if (!unlikely(options & WNOWAIT))
 		p->exit_code = 0;
 
-	/* don't need the RCU readlock here as we're holding a spinlock */
-	uid = __task_cred(p)->uid;
+	uid = task_uid(p);
 unlock_sig:
 	spin_unlock_irq(&p->sighand->siglock);
 	if (!exit_code)
@@ -1479,7 +1478,7 @@ static int wait_task_continued(struct task_struct *p, int options,
 	}
 	if (!unlikely(options & WNOWAIT))
 		p->signal->flags &= ~SIGNAL_STOP_CONTINUED;
-	uid = __task_cred(p)->uid;
+	uid = task_uid(p);
 	spin_unlock_irq(&p->sighand->siglock);
 
 	pid = task_pid_vnr(p);
