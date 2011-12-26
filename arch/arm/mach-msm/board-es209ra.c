@@ -335,11 +335,6 @@ static struct usb_mass_storage_platform_data mass_storage_pdata = {
         .vendor = "SEMC",
         .product = "Mass Storage",
         .release = 0x0100,
-
-        .cdrom_nluns = 1,
-        .cdrom_vendor = "SEMC",
-        .cdrom_product = "CD-ROM",
-        .cdrom_release = 0x0100,
 };
 
 static struct platform_device usb_mass_storage_device = {
