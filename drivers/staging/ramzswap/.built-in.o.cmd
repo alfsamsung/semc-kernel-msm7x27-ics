@@ -1,1 +1,0 @@
-cmd_drivers/staging/ramzswap/built-in.o :=  /home/birbilakos/android-src/cyanogen/gingerbread/prebuilt/linux-x86/toolchain/arm-eabi-4.3.1/bin/arm-eabi-ld -EL    -r -o drivers/staging/ramzswap/built-in.o drivers/staging/ramzswap/ramzswap.o 
