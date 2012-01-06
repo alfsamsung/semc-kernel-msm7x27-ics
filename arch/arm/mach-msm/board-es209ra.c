@@ -1386,7 +1386,7 @@ static struct kgsl_platform_data kgsl_pdata = {
 };
 
 static struct platform_device msm_device_kgsl = {
-       .name = "kgsl",
+       .name = "kgsl-3d0",
        .id = -1,
        .num_resources = ARRAY_SIZE(kgsl_resources),
        .resource = kgsl_resources,
