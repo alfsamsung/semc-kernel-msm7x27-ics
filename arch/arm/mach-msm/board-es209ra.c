@@ -169,15 +169,6 @@
 #define MSM_RAM_CONSOLE_SIZE    128 * SZ_1K
 #endif
 
-#ifdef CONFIG_CAPTURE_KERNEL
-#define AMSSCORE_RAM_START 0x00000000
-#define AMSSCORE_RAM_END   0x03FFFFFF
-#define SMEMCORE_RAM_START 0x00100000
-#define SMEMCORE_RAM_END   0x001FFFFF
-#define ADSPCORE_RAM_START 0x2E000000
-#define ADSPCORE_RAM_END   0x2FFFFFFF
-#endif
-
 #ifdef CONFIG_SEMC_MSM_PMIC_VIBRATOR
 static int msm7227_platform_set_vib_voltage(u16 volt_mv)
 {
@@ -606,36 +597,6 @@ static struct android_pmem_platform_data android_pmem_kernel_smi_pdata = {
 	.cached = 0,
 };
 
-#endif
-
-#ifdef CONFIG_CAPTURE_KERNEL
-static struct resource kdump_amsscoredump_resources[] = {
-	{
-		.name   = "amsscore0",
-		.start  = AMSSCORE_RAM_START,
-		.end    = AMSSCORE_RAM_END,
-		.flags  = IORESOURCE_MEM,
-	},
-	{
-		.name   = "smemcore0",
-		.start  = SMEMCORE_RAM_START,
-		.end    = SMEMCORE_RAM_END,
-		.flags  = IORESOURCE_MEM,
-	},
-	{
-		.name   = "adspcore0",
-		.start  = ADSPCORE_RAM_START,
-		.end    = ADSPCORE_RAM_END,
-		.flags  = IORESOURCE_MEM,
-	},
-};
-
-static struct platform_device kdump_amsscoredump_device = {
-	.name           = "amsscoredump",
-	.id             = -1,
-	.num_resources  = ARRAY_SIZE(kdump_amsscoredump_resources),
-	.resource       = kdump_amsscoredump_resources,
-};
 #endif
 
 static struct android_pmem_platform_data android_pmem_pdata = {
@@ -1770,9 +1731,6 @@ static struct platform_device *devices[] __initdata = {
 #ifdef CONFIG_SEMC_LOW_BATT_SHUTDOWN
 	&lbs_device,
 #endif /* CONFIG_SEMC_LOW_BATT_SHUTDOWN */
-#ifdef CONFIG_CAPTURE_KERNEL
-	&kdump_amsscoredump_device,
-#endif
 #ifdef CONFIG_PMIC_TIME
 	&pmic_time_device,
 #endif
@@ -2154,11 +2112,7 @@ int get_predecode_repair_cache(void);
 int set_predecode_repair_cache(void);
 static void __init es209ra_init(void)
 {
-#ifdef CONFIG_CAPTURE_KERNEL
-	smsm_wait_for_modem_reset();
-#else
 	smsm_wait_for_modem();
-#endif
 	if (socinfo_init() < 0)
 		printk(KERN_ERR "%s: socinfo_init() failed!\n", __func__);
 	printk(KERN_INFO "%s: startup_reason: 0x%08x\n",
@@ -2203,7 +2157,6 @@ static void __init es209ra_init(void)
 	msm_mddi_tmd_fwvga_display_device_init();
 }
 
-#ifndef CONFIG_CAPTURE_KERNEL
 static void __init es209ra_allocate_memory_regions(void)
 {
 	void *addr;
@@ -2274,15 +2227,12 @@ static void __init es209ra_fixup(struct machine_desc *desc, struct tag *tags,
 	mi->bank[1].size = (127*1024*1024);
 	mi->bank[1].node = PHYS_TO_NID(mi->bank[1].start);
 }
-#endif
 
 static void __init es209ra_map_io(void)
 {
 	msm_shared_ram_phys = MSM_SHARED_RAM_PHYS;
 	msm_map_qsd8x50_io();
-#ifndef CONFIG_CAPTURE_KERNEL
 	es209ra_allocate_memory_regions();
-#endif
 	msm_clock_init(msm_clocks_8x50, msm_num_clocks_8x50);
 }
 
@@ -2308,12 +2258,8 @@ MACHINE_START(ES209RA, "ES209RA")
 	.phys_io  = MSM_DEBUG_UART_PHYS,
 	.io_pg_offst = ((MSM_DEBUG_UART_BASE) >> 18) & 0xfffc,
 #endif
-#ifdef CONFIG_CAPTURE_KERNEL
-	.boot_params    = PHYS_OFFSET + 0x1000,
-#else
 	.boot_params	= PHYS_OFFSET + 0x100,
 	.fixup          = es209ra_fixup,
-#endif
 	.map_io		= es209ra_map_io,
 	.init_irq	= es209ra_init_irq,
 	.init_machine	= es209ra_init,
