@@ -1,25 +1,3 @@
-/* SEMC:modified */
-/* 
-   ES209RA Board specific file.
-   Copyright (C) 2009 Sony Ericsson Mobile Communications Japan, Inc.
-
-   This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License, version 2, as
-   published by the Free Software Foundation.
-
-   This program is distributed in the hope that it will be useful,
-   but WITHOUT ANY WARRANTY; without even the implied warranty of
-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-   GNU General Public License for more details.
-
-   You should have received a copy of the GNU General Public License
-   along with this program; if not, write to the Free Software
-   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
-   
-   This file is derived from
-      board-qsd8x50.c
-      QUALCOMM USA, INC.
-*/
 /* Copyright (c) 2008-2009, Code Aurora Forum. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -160,7 +138,7 @@
 
 #define MSM_PMEM_ADSP_SIZE	0x2196000
 #define MSM_FB_SIZE		0x500000
-#define MSM_AUDIO_SIZE		0x80000
+
 #define MSM_GPU_PHYS_SIZE 	SZ_2M
 
 #ifdef CONFIG_MSM_SOC_REV_A
@@ -2333,14 +2311,6 @@ static void __init pmem_adsp_size_setup(char **p)
 }
 __early_param("pmem_adsp_size=", pmem_adsp_size_setup);
 
-static unsigned audio_size = MSM_AUDIO_SIZE;
-static void __init audio_size_setup(char **p)
-{
-	audio_size = memparse(*p, p);
-}
-__early_param("audio_size=", audio_size_setup);
-
-
 /* SEMC:SYS: Get startup reason - start */
 unsigned int es209ra_startup_reason = 0;
 
@@ -2471,14 +2441,6 @@ static void __init es209ra_allocate_memory_regions(void)
 	msm_fb_resources[0].end = msm_fb_resources[0].start + size - 1;
 	pr_info("using %lu bytes of SMI at %lx physical for fb\n",
 	       size, (unsigned long)addr);
-
-	size = audio_size ? : MSM_AUDIO_SIZE;
-	addr = alloc_bootmem(size);
-	msm_audio_resources[0].start = __pa(addr);
-	msm_audio_resources[0].end = msm_audio_resources[0].start + size - 1;
-	pr_info("allocating %lu bytes at %p (%lx physical) for audio\n",
-		size, addr, __pa(addr));
-}
 
 static void __init es209ra_fixup(struct machine_desc *desc, struct tag *tags,
                                char **cmdline, struct meminfo *mi)
