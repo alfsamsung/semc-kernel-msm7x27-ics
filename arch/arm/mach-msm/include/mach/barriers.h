@@ -1,4 +1,4 @@
-/* Copyright (c) 2002,2007-2010, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2010, Code Aurora Forum. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -26,27 +26,12 @@
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  */
-#ifndef _GSL_CMDSTREAM_H
-#define _GSL_CMDSTREAM_H
 
-#include <linux/types.h>
-#include <linux/msm_kgsl.h>
-#include "kgsl_device.h"
-#include <linux/mutex.h>
-#include <linux/msm_kgsl.h>
-#include "kgsl_sharedmem.h"
-
-struct kgsl_device;
-
-int kgsl_g12_cmdstream_check_timestamp(struct kgsl_device *device,
-					unsigned int timestamp);
-int kgsl_g12_cmdstream_issueibcmds(struct kgsl_device *device,
-			struct kgsl_pagetable *pagetable,
-			int drawctxt_index,
-			uint32_t ibaddr,
-			int sizedwords,
-			int *timestamp,
-			unsigned int ctrl);
-int kgsl_g12_cmdstream_addtimestamp(struct kgsl_device *device,
-			  int *timestamp);
-#endif  /* _GSL_CMDSTREAM_H */
+#define mb() do \
+	{ \
+		dsb();\
+		outer_sync(); \
+		write_to_strongly_ordered_memory(); \
+	} while (0)
+#define rmb()	do { dmb(); write_to_strongly_ordered_memory(); } while (0)
+#define wmb()	mb()

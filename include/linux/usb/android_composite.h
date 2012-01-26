@@ -80,14 +80,6 @@ struct usb_mass_storage_platform_data {
 
 	/* number of LUNS */
 	int nluns;
-
-	/* Information for CD-ROM */
-	char *cdrom_vendor;
-	char *cdrom_product;
-	int cdrom_release;
-
-	/* number of CD-ROM LUNS */
-	int cdrom_nluns;
 };
 
 /* Platform data for USB ethernet driver. */

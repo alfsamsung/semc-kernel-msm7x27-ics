@@ -3096,17 +3096,6 @@ fsg_function_bind(struct usb_configuration *c, struct usb_function *f)
 					fsg->product : pdata->product;
 				curlun->release = (!pdata->release) ?
 					fsg->release : pdata->release;
-			} else {
-				/* CD-ROM LUN */
-				curlun->is_cdrom = true;
-				curlun->shift_size = 11;
-				curlun->can_stall = false;
-				curlun->vendor = (!pdata->cdrom_vendor) ?
-					fsg->vendor : pdata->cdrom_vendor;
-				curlun->product = pdata->cdrom_product;
-				curlun->release = (!pdata->cdrom_release) ?
-					fsg->release : pdata->cdrom_release;
-				curlun->ro = 1;
 			}
 		} else {
 			/* Mass storage LUN */
@@ -3330,8 +3319,6 @@ static int __init fsg_probe(struct platform_device *pdev)
 			fsg->release = pdata->release;
 
 		fsg->msc_nluns = pdata->nluns;
-		fsg->cdrom_nluns = pdata->cdrom_nluns;
-		fsg->nluns = fsg->msc_nluns + fsg->cdrom_nluns;
 	}
 
 	return 0;

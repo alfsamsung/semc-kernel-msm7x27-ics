@@ -1,35 +1,35 @@
 /* Copyright (c) 2002,2007-2010, Code Aurora Forum. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
+ * modification, are permitted provided that the following conditions are
+ * met:
  *     * Redistributions of source code must retain the above copyright
  *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in the
- *       documentation and/or other materials provided with the distribution.
- *     * Neither the name of Code Aurora nor
- *       the names of its contributors may be used to endorse or promote
- *       products derived from this software without specific prior written
- *       permission.
+ *     * Redistributions in binary form must reproduce the above
+ *       copyright notice, this list of conditions and the following
+ *       disclaimer in the documentation and/or other materials provided
+ *       with the distribution.
+ *     * Neither the name of Code Aurora Forum, Inc. nor the names of its
+ *       contributors may be used to endorse or promote products derived
+ *       from this software without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NON-INFRINGEMENT ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
- * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
- * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
- * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
+ * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+ * BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
+ * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
+ * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  */
 #ifndef __GSL_MMU_H
 #define __GSL_MMU_H
 #include <linux/types.h>
 #include <linux/msm_kgsl.h>
-#include "kgsl_log.h"
 #include "kgsl_sharedmem.h"
 
 /* Identifier for the global page table */
@@ -68,19 +68,6 @@ extern unsigned int kgsl_cache_enable;
 
 struct kgsl_device;
 
-struct kgsl_mmu_debug {
-	unsigned int  config;
-	unsigned int  mpu_base;
-	unsigned int  mpu_end;
-	unsigned int  va_range;
-	unsigned int  pt_base;
-	unsigned int  page_fault;
-	unsigned int  trans_error;
-	unsigned int  axi_error;
-	unsigned int  interrupt_mask;
-	unsigned int  interrupt_status;
-};
-
 struct kgsl_ptstats {
 	int64_t  maps;
 	int64_t  unmaps;
@@ -96,6 +83,7 @@ struct kgsl_tlbflushfilter {
 };
 
 struct kgsl_pagetable {
+	spinlock_t lock;
 	unsigned int   refcnt;
 	struct kgsl_memdesc  base;
 	uint32_t      va_base;
@@ -107,6 +95,15 @@ struct kgsl_pagetable {
 	unsigned int name;
 	/* Maintain filter to manage tlb flushing */
 	struct kgsl_tlbflushfilter tlbflushfilter;
+	unsigned int tlb_flags;
+	struct kobject *kobj;
+
+	struct {
+		unsigned int entries;
+		unsigned int mapped;
+		unsigned int max_mapped;
+		unsigned int max_entries;
+	} stats;
 };
 
 struct kgsl_mmu_reg {
@@ -122,6 +119,7 @@ struct kgsl_mmu_reg {
 	uint32_t interrupt_mask;
 	uint32_t interrupt_status;
 	uint32_t interrupt_clear;
+	uint32_t axi_error;
 };
 
 struct kgsl_mmu {
@@ -131,34 +129,61 @@ struct kgsl_mmu {
 	unsigned int     config;
 	uint32_t        mpu_base;
 	int              mpu_range;
-	uint32_t        va_base;
-	unsigned int     va_range;
 	struct kgsl_memdesc    dummyspace;
+	struct kgsl_mmu_reg    reg;
 	/* current page table object being used by device mmu */
 	struct kgsl_pagetable  *defaultpagetable;
 	struct kgsl_pagetable  *hwpagetable;
-	unsigned int tlb_flags;
 };
 
+struct kgsl_ptpool_chunk {
+	size_t size;
+	unsigned int count;
+	int dynamic;
 
-static inline int
-kgsl_mmu_isenabled(struct kgsl_mmu *mmu)
-{
-	return ((mmu)->flags & KGSL_FLAGS_STARTED) ? 1 : 0;
-}
+	void *data;
+	unsigned int phys;
 
+	unsigned long *bitmap;
+	struct list_head list;
+};
+
+struct kgsl_ptpool {
+	size_t ptsize;
+	struct mutex lock;
+	struct list_head list;
+	int entries;
+	int static_entries;
+	int chunks;
+};
 
 int kgsl_mmu_init(struct kgsl_device *device);
 
+int kgsl_mmu_start(struct kgsl_device *device);
+
+int kgsl_mmu_stop(struct kgsl_device *device);
+
 int kgsl_mmu_close(struct kgsl_device *device);
 
-struct kgsl_pagetable *kgsl_mmu_getpagetable(struct kgsl_mmu *mmu,
-					     unsigned long name);
+struct kgsl_pagetable *kgsl_mmu_getpagetable(unsigned long name);
 
 void kgsl_mmu_putpagetable(struct kgsl_pagetable *pagetable);
 
 int kgsl_mmu_setstate(struct kgsl_device *device,
 			struct kgsl_pagetable *pagetable);
+
+static inline unsigned int kgsl_pt_get_flags(struct kgsl_pagetable *pt,
+					     enum kgsl_deviceid id)
+{
+	unsigned int result = 0;
+	spin_lock(&pt->lock);
+	if (pt->tlb_flags && (1<<id)) {
+		result = KGSL_MMUFLAGS_TLBFLUSH;
+		pt->tlb_flags &= ~(1<<id);
+	}
+	spin_unlock(&pt->lock);
+	return result;
+}
 
 #ifdef CONFIG_MSM_KGSL_MMU
 int kgsl_mmu_map(struct kgsl_pagetable *pagetable,
@@ -171,7 +196,18 @@ int kgsl_mmu_map(struct kgsl_pagetable *pagetable,
 int kgsl_mmu_unmap(struct kgsl_pagetable *pagetable,
 					unsigned int gpuaddr, int range);
 
-pte_t *kgsl_get_pte_from_vaddr(unsigned int virtaddr);
+unsigned int kgsl_virtaddr_to_physaddr(unsigned int virtaddr);
+
+void kgsl_ptpool_destroy(struct kgsl_ptpool *pool);
+
+int kgsl_ptpool_init(struct kgsl_ptpool *pool, int ptsize, int entries);
+
+static inline int
+kgsl_mmu_isenabled(struct kgsl_mmu *mmu)
+{
+	return ((mmu)->flags & KGSL_FLAGS_STARTED) ? 1 : 0;
+}
+
 #else
 static inline int kgsl_mmu_map(struct kgsl_pagetable *pagetable,
 		 unsigned int address,
@@ -188,21 +224,25 @@ static inline int kgsl_mmu_unmap(struct kgsl_pagetable *pagetable,
 					unsigned int gpuaddr, int range)
 { return 0; }
 
+static inline int kgsl_mmu_isenabled(struct kgsl_mmu *mmu) { return 0; }
+
+static inline int kgsl_ptpool_init(struct kgsl_ptpool *pool, int ptsize,
+				    int entries)
+{
+	return 0;
+}
+
+static inline void kgsl_ptpool_free(struct kgsl_ptpool *pool) { }
+
 #endif
+
+int kgsl_mmu_map_global(struct kgsl_pagetable *pagetable,
+			struct kgsl_memdesc *memdesc, unsigned int protflags,
+			unsigned int flags);
 
 int kgsl_mmu_querystats(struct kgsl_pagetable *pagetable,
 			struct kgsl_ptstats *stats);
 
 void kgsl_mh_intrcallback(struct kgsl_device *device);
-
-#ifdef DEBUG
-void kgsl_mmu_debug(struct kgsl_mmu *, struct kgsl_mmu_debug*);
-#else
-static inline void kgsl_mmu_debug(struct kgsl_mmu *mmu,
-				struct kgsl_mmu_debug *mmu_debug)
-{
-
-}
-#endif /* DEBUG */
 
 #endif /* __GSL_MMU_H */
