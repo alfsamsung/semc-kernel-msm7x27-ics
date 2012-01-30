@@ -739,7 +739,7 @@ static int __init mddi_nt35580_lcd_lcd_probe(struct platform_device *pdev)
 //	nv_vsync &= (0xffff);
 //	if ((MIN_NV > nv_vsync) || (nv_vsync > MAX_NV))
 //		nv_vsync = DEF_NV ;
-	panel_data->panel_info.lcd.refx100 = 5500; //7468;
+	panel_data->panel_info.lcd.refx100 = 7468;
 	//100000000 / nv_vsync;
 
 	msm_fb_add_device(pdev);

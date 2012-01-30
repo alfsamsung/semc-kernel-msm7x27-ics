@@ -135,7 +135,7 @@
 
 #define SMEM_SPINLOCK_I2C	"S:6"
 
-#define MSM_PMEM_ADSP_SIZE	0x03000000 //0x02196000
+#define MSM_PMEM_ADSP_SIZE	0x02196000
 #define MSM_PMEM_MDP_SIZE	0x01C91000
 #define PMEM_KERNEL_EBI1_SIZE	0x00028000
 
@@ -145,7 +145,10 @@
 #define MSM_PMEM_SMI_SIZE	0x01500000
 
 #define MSM_FB_BASE		0x02B00000
-#define MSM_FB_SIZE		0x00500000
+#define MSM_FB_SIZE		0x00300000 // 0x00500000
+
+#define MSM_GPU_PHYS_BASE 	0x03000000
+#define MSM_GPU_PHYS_SIZE 	0x00200000
 
 #define MSM_RAM_CONSOLE_START   0x38000000 - MSM_RAM_CONSOLE_SIZE
 #define MSM_RAM_CONSOLE_SIZE    128 * SZ_1K
@@ -275,6 +278,11 @@ static struct usb_mass_storage_platform_data mass_storage_pdata = {
         .vendor = "SEMC",
         .product = "Mass Storage",
         .release = 0x0100,
+
+//        .cdrom_nluns = 1,
+//        .cdrom_vendor = "SEMC",
+//        .cdrom_product = "CD-ROM",
+//        .cdrom_release = 0x0100,
 };
 
 static struct platform_device usb_mass_storage_device = {
@@ -1643,6 +1651,14 @@ static void __init es209ra_init_irq(void)
 	msm_init_sirc();
 }
 
+/*
+static void kgsl_phys_memory_init(void)
+{
+	request_mem_region(kgsl_resources[1].start,
+		resource_size(&kgsl_resources[1]), "kgsl");
+}
+*/
+
 static void __init es209ra_init_usb(void)
 {
 	hs_clk = clk_get(NULL, "usb_hs_clk");
@@ -2017,6 +2033,7 @@ static void __init es209ra_init(void)
 	spi_register_board_info(msm_spi_board_info,
 				ARRAY_SIZE(msm_spi_board_info));
 	msm_pm_set_platform_data(msm_pm_data);
+//	kgsl_phys_memory_init();
 	platform_device_register(&es209ra_keypad_device);
 	msm_mddi_tmd_fwvga_display_device_init();
 }
