@@ -15,6 +15,8 @@
 #ifndef __LINUX_USB_GADGET_H
 #define __LINUX_USB_GADGET_H
 
+#include <linux/slab.h>
+
 struct usb_ep;
 
 /**
@@ -70,7 +72,7 @@ struct usb_ep;
  * Bulk endpoints can use any size buffers, and can also be used for interrupt
  * transfers. interrupt-only endpoints can be much less functional.
  *
- * NOTE:  this is analagous to 'struct urb' on the host side, except that
+ * NOTE:  this is analogous to 'struct urb' on the host side, except that
  * it's thinner and promotes more pre-allocation.
  */
 
@@ -267,7 +269,7 @@ static inline void usb_ep_free_request(struct usb_ep *ep,
  *
  * Control endpoints ... after getting a setup() callback, the driver queues
  * one response (even if it would be zero length).  That enables the
- * status ack, after transfering data as specified in the response.  Setup
+ * status ack, after transferring data as specified in the response.  Setup
  * functions may return negative error codes to generate protocol stalls.
  * (Note that some USB device controllers disallow protocol stall responses
  * in some cases.)  When control responses are deferred (the response is
@@ -484,6 +486,7 @@ struct usb_gadget {
 	unsigned			b_hnp_enable:1;
 	unsigned			a_hnp_support:1;
 	unsigned			a_alt_hnp_support:1;
+	unsigned			host_request:1;
 	const char			*name;
 	struct device			dev;
 };
@@ -492,9 +495,13 @@ static inline void set_gadget_data(struct usb_gadget *gadget, void *data)
 	{ dev_set_drvdata(&gadget->dev, data); }
 static inline void *get_gadget_data(struct usb_gadget *gadget)
 	{ return dev_get_drvdata(&gadget->dev); }
+static inline struct usb_gadget *dev_to_usb_gadget(struct device *dev)
+{
+	return container_of(dev, struct usb_gadget, dev);
+}
 
 /* iterates the non-control endpoints; 'tmp' is a struct usb_ep pointer */
-#define gadget_for_each_ep(tmp,gadget) \
+#define gadget_for_each_ep(tmp, gadget) \
 	list_for_each_entry(tmp, &(gadget)->ep_list, ep_list)
 
 
@@ -598,6 +605,7 @@ static inline int usb_gadget_clear_selfpowered(struct usb_gadget *gadget)
 /**
  * usb_gadget_vbus_connect - Notify controller that VBUS is powered
  * @gadget:The device which now has VBUS power.
+ * Context: can sleep
  *
  * This call is used by a driver for an external transceiver (or GPIO)
  * that detects a VBUS power session starting.  Common responses include
@@ -636,6 +644,7 @@ static inline int usb_gadget_vbus_draw(struct usb_gadget *gadget, unsigned mA)
 /**
  * usb_gadget_vbus_disconnect - notify controller about VBUS session end
  * @gadget:the device whose VBUS supply is being described
+ * Context: can sleep
  *
  * This call is used by a driver for an external transceiver (or GPIO)
  * that detects a VBUS power session ending.  Common responses include
@@ -771,7 +780,6 @@ struct usb_gadget_driver {
 	int			(*setup)(struct usb_gadget *,
 					const struct usb_ctrlrequest *);
 	void			(*disconnect)(struct usb_gadget *);
-	void			(*offline)(struct usb_gadget *);
 	void			(*suspend)(struct usb_gadget *);
 	void			(*resume)(struct usb_gadget *);
 
@@ -793,19 +801,20 @@ struct usb_gadget_driver {
 /**
  * usb_gadget_register_driver - register a gadget driver
  * @driver:the driver being registered
+ * Context: can sleep
  *
  * Call this in your gadget driver's module initialization function,
  * to tell the underlying usb controller driver about your driver.
  * The driver's bind() function will be called to bind it to a
  * gadget before this registration call returns.  It's expected that
  * the bind() functions will be in init sections.
- * This function must be called in a context that can sleep.
  */
 int usb_gadget_register_driver(struct usb_gadget_driver *driver);
 
 /**
  * usb_gadget_unregister_driver - unregister a gadget driver
  * @driver:the driver being unregistered
+ * Context: can sleep
  *
  * Call this in your gadget driver's module cleanup function,
  * to tell the underlying usb controller that your driver is
@@ -814,7 +823,6 @@ int usb_gadget_register_driver(struct usb_gadget_driver *driver);
  * to unbind() and clean up any device state, before this procedure
  * finally returns.  It's expected that the unbind() functions
  * will in in exit sections, so may not be linked in some kernels.
- * This function must be called in a context that can sleep.
  */
 int usb_gadget_unregister_driver(struct usb_gadget_driver *driver);
 
@@ -887,8 +895,8 @@ static inline void usb_free_descriptors(struct usb_descriptor_header **v)
 /* utility wrapping a simple endpoint selection policy */
 
 extern struct usb_ep *usb_ep_autoconfig(struct usb_gadget *,
-			struct usb_endpoint_descriptor *) __devinit;
+			struct usb_endpoint_descriptor *);
 
-extern void usb_ep_autoconfig_reset(struct usb_gadget *) __devinit;
+extern void usb_ep_autoconfig_reset(struct usb_gadget *);
 
 #endif /* __LINUX_USB_GADGET_H */

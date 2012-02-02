@@ -128,6 +128,7 @@ config SYS_HYPERVISOR
 
 config GENLOCK
 	bool "Enable a generic cross-process locking mechanism"
+	default y
 	depends on ANON_INODES
 	help
 	Enable a generic cross-process locking API to provide protection
@@ -135,6 +136,7 @@ config GENLOCK
 
 config GENLOCK_MISCDEVICE
 	bool "Enable a misc-device for userspace to access the genlock engine"
+	default y
 	depends on GENLOCK
 	help
 	Create a miscdevice for the purposes of allowing userspace to create

@@ -81,6 +81,15 @@ struct wireless_dev;
 #define net_xmit_eval(e)	((e) == NET_XMIT_CN? 0 : (e))
 #define net_xmit_errno(e)	((e) != NET_XMIT_CN ? -ENOBUFS : 0)
 
+/* Driver transmit return codes */
+enum netdev_tx {
+	NETDEV_TX_OK = 0,	/* driver took care of packet */
+	NETDEV_TX_BUSY,		/* driver tx path was busy*/
+	NETDEV_TX_LOCKED = -1,	/* driver tx lock was already taken */
+};
+typedef enum netdev_tx netdev_tx_t;
+
+
 #endif
 
 #define MAX_ADDR_LEN	32		/* Largest hardware address length */
@@ -961,6 +970,12 @@ static inline void *netdev_priv(const struct net_device *dev)
  * if set prior to registration will cause a symlink during initialization.
  */
 #define SET_NETDEV_DEV(net, pdev)	((net)->dev.parent = (pdev))
+
+/* Set the sysfs device type for the network logical device to allow
+ * fin grained indentification of different network device types. For
+ * example Ethernet, Wirelss LAN, Bluetooth, WiMAX etc.
+ */
+#define SET_NETDEV_DEVTYPE(net, devtype)	((net)->dev.type = (devtype))
 
 /**
  *	netif_napi_add - initialize a napi context
