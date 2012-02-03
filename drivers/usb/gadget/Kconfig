@@ -551,7 +551,7 @@ config USB_GADGET_DUALSPEED
 choice
 	tristate "USB Gadget Drivers"
 	depends on USB_GADGET && USB_GADGET_SELECTED
-	default USB_ETH
+	default USB_G_ANDROID
 	help
 	  A Linux "Gadget Driver" talks to the USB Peripheral Controller
 	  driver through the abstract "gadget" API.  Some other operating
@@ -697,7 +697,6 @@ config USB_G_SERIAL
 	  This driver supports a CDC-ACM module option, which can be used
 	  to interoperate with MS-Windows hosts or with the Linux-USB
 	  "cdc-acm" driver.
-
 	  This driver also supports a CDC-OBEX option.  You will need a
 	  user space OBEX server talking to /dev/ttyGS*, since the kernel
 	  itself doesn't implement the OBEX protocol.
@@ -740,6 +739,7 @@ config USB_G_PRINTER
 
 config USB_G_ANDROID
 	tristate "Android Gadget"
+	default y
 	help
 	  The Android gadget provides mass storage and adb transport.
 
@@ -762,25 +762,6 @@ config USB_ANDROID_CDC_ECM
 	  enabling this option adds CDC-ECM support to the
 	  android gadget.
 	  Say "y" to link the CDC-ECM as a part of android gadget
-
-config USB_ANDROID_RNDIS
-	bool "RNDIS function driver"
-	depends on USB_ANDROID
-	default n
-	help
-	  enabling this option adds RNDIS support to the
-	  android gadget.
-
-config USB_ANDROID_RNDIS_WCEIS
-	boolean "Use Windows Internet Sharing Class/SubClass/Protocol"
-	depends on USB_ANDROID_RNDIS
-	default n
-	help
-	 Causes the driver to look like a Windows-compatible Internet
-	 Sharing device, so Windows auto-detects it
-
-	 If you enable this option, the device is no longer CDC ethernet
-	 compatible.
 
 config USB_ANDROID_RMNET
 	bool "RmNet function driver"
@@ -806,44 +787,6 @@ config RMNET_SMD_DATA_CHANNEL
 	default ""
 	help
 	  Data SMD channel for transferring network data
-
-config USB_F_SERIAL
-	tristate "generic serial function driver"
-	depends on USB_ANDROID
-	default n
-	help
-	  Say "y" to link the driver statically, or "m" to build
-	  as a part of "g_android"
-
-config MODEM_SUPPORT
-	tristate "modem support in generic serial function driver"
-	depends on USB_F_SERIAL
-	default n
-	help
-          This feature enables the modem functionality in the
-	  generic serial.
-	  adds interrupt endpoint support to send modem notifications
-	  to host.
-	  adds CDC descriptors to enumerate the generic serial as MODEM.
-	  adds CDC class requests to configure MODEM line settings.
-	  Say "y" to enable MODEM support in the generic serial driver.
-
-config USB_CSW_HACK
-	boolean "USB Mass storage csw hack Feature"
-	depends on USB_ANDROID
-	help
-	 This csw hack feature is for increasing the performance of the mass
-	 storage
-
-	default y
-
-config USB_POWER_REENUMERATION
-	tristate "Power reenumeration support"
-	depends on USB_ANDROID
-	help
-	  Enabling this option adds the power reenumeration support.
-
-	default n
 
 config USB_GADGET_REMOTE_WAKEUP
 	tristate "Remote wakeup support"
