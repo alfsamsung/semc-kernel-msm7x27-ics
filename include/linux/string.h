@@ -61,9 +61,6 @@ extern char * strnchr(const char *, size_t, int);
 extern char * strrchr(const char *,int);
 #endif
 extern char * strstrip(char *);
-
-extern char *strim(char *);
-
 #ifndef __HAVE_ARCH_STRSTR
 extern char * strstr(const char *,const char *);
 #endif

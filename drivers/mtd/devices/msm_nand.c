@@ -399,6 +399,7 @@ static struct flash_identification supported_flash[] =
 	{0x5510baad, 0xFFFFFFFF,  (256<<20), 1, 2048, (2048<<6),  64, 5, 0},
 	/* Numonyx */
 	{0x5510bc20, 0xFFFFFFFF,  (512<<20), 1, 2048, (2048<<6),  64, 5, 0},
+	{0x5590bc2c, 0xFFFFFFFF,  (512<<20), 1, 2048, (2048<<6),  64, 5, 0},
 	{0x5551b320, 0xFFFFFFFF, (1024<<20), 1, 2048, (2048<<6),  64, 3, 0},
 	/* Note: Width flag is 0 for 8 bit Flash and 1 for 16 bit flash      */
 };

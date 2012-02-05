@@ -52,7 +52,7 @@ static unsigned int awake_ideal_freq;
  * that practically when sleep_ideal_freq==0 the awake_ideal_freq is used
  * also when suspended).
  */
-#define DEFAULT_SLEEP_IDEAL_FREQ 352000
+#define DEFAULT_SLEEP_IDEAL_FREQ 128000
 static unsigned int sleep_ideal_freq;
 
 /*
@@ -74,13 +74,13 @@ static unsigned int ramp_down_step;
 /*
  * CPU freq will be increased if measured load > max_cpu_load;
  */
-#define DEFAULT_MAX_CPU_LOAD 50
+#define DEFAULT_MAX_CPU_LOAD 65
 static unsigned long max_cpu_load;
 
 /*
  * CPU freq will be decreased if measured load < min_cpu_load;
  */
-#define DEFAULT_MIN_CPU_LOAD 25
+#define DEFAULT_MIN_CPU_LOAD 30
 static unsigned long min_cpu_load;
 
 /*

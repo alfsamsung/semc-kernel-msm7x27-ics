@@ -73,6 +73,7 @@
 #include <linux/ctype.h>
 #include <linux/ftrace.h>
 #include <trace/sched.h>
+#include <linux/earlysuspend.h>
 
 #include <asm/tlb.h>
 #include <asm/irq_regs.h>
@@ -231,13 +232,20 @@ static void start_rt_bandwidth(struct rt_bandwidth *rt_b)
 
 	spin_lock(&rt_b->rt_runtime_lock);
 	for (;;) {
+		unsigned long delta;
+		ktime_t soft, hard;
+
 		if (hrtimer_active(&rt_b->rt_period_timer))
 			break;
 
 		now = hrtimer_cb_get_time(&rt_b->rt_period_timer);
 		hrtimer_forward(&rt_b->rt_period_timer, now, rt_b->rt_period);
-		hrtimer_start_expires(&rt_b->rt_period_timer,
-				HRTIMER_MODE_ABS);
+
+		soft = hrtimer_get_softexpires(&rt_b->rt_period_timer);
+		hard = hrtimer_get_expires(&rt_b->rt_period_timer);
+		delta = ktime_to_ns(ktime_sub(hard, soft));
+		__hrtimer_start_range_ns(&rt_b->rt_period_timer, soft, delta,
+				HRTIMER_MODE_ABS, 0);
 	}
 	spin_unlock(&rt_b->rt_runtime_lock);
 }
@@ -1129,7 +1137,8 @@ static __init void init_hrtick(void)
  */
 static void hrtick_start(struct rq *rq, u64 delay)
 {
-	hrtimer_start(&rq->hrtick_timer, ns_to_ktime(delay), HRTIMER_MODE_REL);
+	__hrtimer_start_range_ns(&rq->hrtick_timer, ns_to_ktime(delay), 0,
+			HRTIMER_MODE_REL, 0);
 }
 
 static inline void init_hrtick(void)
@@ -4341,7 +4350,7 @@ void account_process_tick(struct task_struct *p, int user_tick)
 
 	if (user_tick)
 		account_user_time(p, one_jiffy, one_jiffy_scaled);
-	else if (p != rq->idle)
+	else if ((p != rq->idle) || (irq_count() != HARDIRQ_OFFSET))
 		account_system_time(p, HARDIRQ_OFFSET, one_jiffy,
 				    one_jiffy_scaled);
 	else
@@ -9705,3 +9714,73 @@ struct cgroup_subsys cpuacct_subsys = {
 	.subsys_id = cpuacct_subsys_id,
 };
 #endif	/* CONFIG_CGROUP_CPUACCT */
+
+#ifdef CONFIG_SCHED_HRTICK
+
+
+// Fix for wakeup issues when suspended with HRTICK on:
+
+
+
+static int sched_suspend_hrtick_restore=0;
+
+
+
+static void sched_early_suspend(struct early_suspend *handler) {
+
+        if (sched_feat(HRTICK)) {
+
+                sched_suspend_hrtick_restore = 1;
+
+                sysctl_sched_features &= ~(1UL << __SCHED_FEAT_HRTICK);
+
+        }
+
+        else sched_suspend_hrtick_restore = 0;
+
+}
+
+
+
+static void sched_late_resume(struct early_suspend *handler) {
+
+        if (sched_suspend_hrtick_restore && !sched_feat(HRTICK)) {
+
+                sched_suspend_hrtick_restore = 0;
+
+                sysctl_sched_features |= 1UL << __SCHED_FEAT_HRTICK;
+
+        }
+
+}
+
+
+
+static struct early_suspend sched_power_suspend = {
+
+        .suspend = sched_early_suspend,
+
+        .resume = sched_late_resume,
+
+        .level = EARLY_SUSPEND_LEVEL_DISABLE_FB + 1,
+
+};
+
+
+
+static __init int sched_init_register_suspend(void)
+
+{
+
+        register_early_suspend(&sched_power_suspend);
+
+ return 0;
+
+}
+
+late_initcall(sched_init_register_suspend);
+
+
+
+#endif // CONFIG_SCHED_HRTICK
+

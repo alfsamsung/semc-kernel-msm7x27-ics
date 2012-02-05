@@ -1,1 +1,1 @@
-#define UTS_RELEASE "2.6.29-FXP_"
+#define UTS_RELEASE "2.6.29.6-Alfs"

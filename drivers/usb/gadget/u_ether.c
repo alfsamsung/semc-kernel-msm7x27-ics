@@ -23,7 +23,7 @@
 /* #define VERBOSE_DEBUG */
 
 #include <linux/kernel.h>
-#include <linux/gfp.h>
+#include <linux/utsname.h>
 #include <linux/device.h>
 #include <linux/ctype.h>
 #include <linux/etherdevice.h>
@@ -37,9 +37,8 @@
  * one (!) network link through the USB gadget stack, normally "usb0".
  *
  * The control and data models are handled by the function driver which
- * connects to this code; such as CDC Ethernet (ECM or EEM),
- * "CDC Subset", or RNDIS.  That includes all descriptor and endpoint
- * management.
+ * connects to this code; such as CDC Ethernet, "CDC Subset", or RNDIS.
+ * That includes all descriptor and endpoint management.
  *
  * Link level addressing is handled by this component using module
  * parameters; if no such parameters are provided, random link level
@@ -69,13 +68,9 @@ struct eth_dev {
 	struct list_head	tx_reqs, rx_reqs;
 	atomic_t		tx_qlen;
 
-	struct sk_buff_head	rx_frames;
-
 	unsigned		header_len;
-	struct sk_buff		*(*wrap)(struct gether *, struct sk_buff *skb);
-	int			(*unwrap)(struct gether *,
-						struct sk_buff *skb,
-						struct sk_buff_head *list);
+	struct sk_buff		*(*wrap)(struct sk_buff *skb);
+	int			(*unwrap)(struct sk_buff *skb);
 
 	struct work_struct	work;
 
@@ -186,7 +181,7 @@ static void eth_get_drvinfo(struct net_device *net, struct ethtool_drvinfo *p)
  *   - ... probably more ethtool ops
  */
 
-static const struct ethtool_ops ops = {
+static struct ethtool_ops ops = {
 	.get_drvinfo = eth_get_drvinfo,
 	.get_link = ethtool_op_get_link,
 };
@@ -240,9 +235,6 @@ rx_submit(struct eth_dev *dev, struct usb_request *req, gfp_t gfp_flags)
 	size += out->maxpacket - 1;
 	size -= size % out->maxpacket;
 
-	if (dev->port_usb->is_fixed)
-		size = max_t(size_t, size, dev->port_usb->fixed_out_len);
-
 	skb = alloc_skb(size + NET_IP_ALIGN, gfp_flags);
 	if (skb == NULL) {
 		DBG(dev, "no rx skb\n");
@@ -277,7 +269,7 @@ enomem:
 
 static void rx_complete(struct usb_ep *ep, struct usb_request *req)
 {
-	struct sk_buff	*skb = req->context, *skb2;
+	struct sk_buff	*skb = req->context;
 	struct eth_dev	*dev = ep->driver_data;
 	int		status = req->status;
 
@@ -286,47 +278,26 @@ static void rx_complete(struct usb_ep *ep, struct usb_request *req)
 	/* normal completion */
 	case 0:
 		skb_put(skb, req->actual);
-
-		if (dev->unwrap) {
-			unsigned long	flags;
-
-			spin_lock_irqsave(&dev->lock, flags);
-			if (dev->port_usb) {
-				status = dev->unwrap(dev->port_usb,
-							skb,
-							&dev->rx_frames);
-			} else {
-				dev_kfree_skb_any(skb);
-				status = -ENOTCONN;
-			}
-			spin_unlock_irqrestore(&dev->lock, flags);
-		} else {
-			skb_queue_tail(&dev->rx_frames, skb);
+		if (dev->unwrap)
+			status = dev->unwrap(skb);
+		if (status < 0
+				|| ETH_HLEN > skb->len
+				|| skb->len > ETH_FRAME_LEN) {
+			dev->net->stats.rx_errors++;
+			dev->net->stats.rx_length_errors++;
+			DBG(dev, "rx length %d\n", skb->len);
+			break;
 		}
+
+		skb->protocol = eth_type_trans(skb, dev->net);
+		dev->net->stats.rx_packets++;
+		dev->net->stats.rx_bytes += skb->len;
+
+		/* no buffer copies needed, unless hardware can't
+		 * use skb buffers.
+		 */
+		status = netif_rx(skb);
 		skb = NULL;
-
-		skb2 = skb_dequeue(&dev->rx_frames);
-		while (skb2) {
-			if (status < 0
-					|| ETH_HLEN > skb2->len
-					|| skb2->len > ETH_FRAME_LEN) {
-				dev->net->stats.rx_errors++;
-				dev->net->stats.rx_length_errors++;
-				DBG(dev, "rx length %d\n", skb2->len);
-				dev_kfree_skb_any(skb2);
-				goto next_frame;
-			}
-			skb2->protocol = eth_type_trans(skb2, dev->net);
-			dev->net->stats.rx_packets++;
-			dev->net->stats.rx_bytes += skb2->len;
-
-			/* no buffer copies needed, unless hardware can't
-			 * use skb buffers.
-			 */
-			status = netif_rx(skb2);
-next_frame:
-			skb2 = skb_dequeue(&dev->rx_frames);
-		}
 		break;
 
 	/* software-driven interface shutdown */
@@ -494,8 +465,7 @@ static inline int is_promisc(u16 cdc_filter)
 	return cdc_filter & USB_CDC_PACKET_TYPE_PROMISCUOUS;
 }
 
-static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
-					struct net_device *net)
+static int eth_start_xmit(struct sk_buff *skb, struct net_device *net)
 {
 	struct eth_dev		*dev = netdev_priv(net);
 	int			length = skb->len;
@@ -517,7 +487,7 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 
 	if (!in) {
 		dev_kfree_skb_any(skb);
-		return NETDEV_TX_OK;
+		return 0;
 	}
 
 	/* apply outgoing CDC or RNDIS filters */
@@ -536,7 +506,7 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 				type = USB_CDC_PACKET_TYPE_ALL_MULTICAST;
 			if (!(cdc_filter & type)) {
 				dev_kfree_skb_any(skb);
-				return NETDEV_TX_OK;
+				return 0;
 			}
 		}
 		/* ignores USB_CDC_PACKET_TYPE_DIRECTED */
@@ -550,7 +520,7 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 	 */
 	if (list_empty(&dev->tx_reqs)) {
 		spin_unlock_irqrestore(&dev->req_lock, flags);
-		return NETDEV_TX_BUSY;
+		return 1;
 	}
 
 	req = container_of(dev->tx_reqs.next, struct usb_request, list);
@@ -566,34 +536,26 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 	 * or there's not enough space for extra headers we need
 	 */
 	if (dev->wrap) {
-		unsigned long	flags;
+		struct sk_buff	*skb_new;
 
-		spin_lock_irqsave(&dev->lock, flags);
-		if (dev->port_usb)
-			skb = dev->wrap(dev->port_usb, skb);
-		spin_unlock_irqrestore(&dev->lock, flags);
-		if (!skb)
+		skb_new = dev->wrap(skb);
+		if (!skb_new)
 			goto drop;
 
+		dev_kfree_skb_any(skb);
+		skb = skb_new;
 		length = skb->len;
 	}
 	req->buf = skb->data;
 	req->context = skb;
 	req->complete = tx_complete;
 
-	/* NCM requires no zlp if transfer is dwNtbInMaxSize */
-	if (dev->port_usb->is_fixed &&
-	    length == dev->port_usb->fixed_in_len &&
-	    (length % in->maxpacket) == 0)
-		req->zero = 0;
-	else
-		req->zero = 1;
-
 	/* use zlp framing on tx for strict CDC-Ether conformance,
 	 * though any robust network rx path ignores extra padding.
 	 * and some hardware doesn't like to write zlps.
 	 */
-	if (req->zero && !dev->zlp && (length % in->maxpacket) == 0)
+	req->zero = 1;
+	if (!dev->zlp && (length % in->maxpacket) == 0)
 		length++;
 
 	req->length = length;
@@ -615,16 +577,16 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 	}
 
 	if (retval) {
-		dev_kfree_skb_any(skb);
 drop:
 		dev->net->stats.tx_dropped++;
+		dev_kfree_skb_any(skb);
 		spin_lock_irqsave(&dev->req_lock, flags);
 		if (list_empty(&dev->tx_reqs))
 			netif_start_queue(net);
 		list_add(&req->list, &dev->tx_reqs);
 		spin_unlock_irqrestore(&dev->req_lock, flags);
 	}
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 /*-------------------------------------------------------------------------*/
@@ -714,6 +676,17 @@ static char *host_addr;
 module_param(host_addr, charp, S_IRUGO);
 MODULE_PARM_DESC(host_addr, "Host Ethernet Address");
 
+
+static u8 nibble(unsigned char c)
+{
+	if (isdigit(c))
+		return c - '0';
+	c = toupper(c);
+	if (isxdigit(c))
+		return 10 + c - 'A';
+	return 0;
+}
+
 static int get_ether_addr(const char *str, u8 *dev_addr)
 {
 	if (str) {
@@ -724,8 +697,8 @@ static int get_ether_addr(const char *str, u8 *dev_addr)
 
 			if ((*str == '.') || (*str == ':'))
 				str++;
-			num = hex_to_bin(*str++) << 4;
-			num |= hex_to_bin(*str++);
+			num = nibble(*str++) << 4;
+			num |= (nibble(*str++));
 			dev_addr [i] = num;
 		}
 		if (is_valid_ether_addr(dev_addr))
@@ -746,10 +719,6 @@ static const struct net_device_ops eth_netdev_ops = {
 	.ndo_validate_addr	= eth_validate_addr,
 };
 
-static struct device_type gadget_type = {
-	.name	= "gadget",
-};
-
 /**
  * gether_setup - initialize one ethernet-over-usb link
  * @g: gadget to associated with these links
@@ -764,26 +733,6 @@ static struct device_type gadget_type = {
  * Returns negative errno, or zero on success
  */
 int gether_setup(struct usb_gadget *g, u8 ethaddr[ETH_ALEN])
-{
-	return gether_setup_name(g, ethaddr, "usb");
-}
-
-/**
- * gether_setup_name - initialize one ethernet-over-usb link
- * @g: gadget to associated with these links
- * @ethaddr: NULL, or a buffer in which the ethernet address of the
- *	host side of the link is recorded
- * @netname: name for network device (for example, "usb")
- * Context: may sleep
- *
- * This sets up the single network link that may be exported by a
- * gadget driver using this framework.  The link layer addresses are
- * set up using module parameters.
- *
- * Returns negative errno, or zero on success
- */
-int gether_setup_name(struct usb_gadget *g, u8 ethaddr[ETH_ALEN],
-		const char *netname)
 {
 	struct eth_dev		*dev;
 	struct net_device	*net;
@@ -803,11 +752,9 @@ int gether_setup_name(struct usb_gadget *g, u8 ethaddr[ETH_ALEN],
 	INIT_LIST_HEAD(&dev->tx_reqs);
 	INIT_LIST_HEAD(&dev->rx_reqs);
 
-	skb_queue_head_init(&dev->rx_frames);
-
 	/* network device setup */
 	dev->net = net;
-	snprintf(net->name, sizeof(net->name), "%s%%d", netname);
+	strcpy(net->name, "usb%d");
 
 	if (get_ether_addr(dev_addr, net->dev_addr))
 		dev_warn(&g->dev,
@@ -827,11 +774,11 @@ int gether_setup_name(struct usb_gadget *g, u8 ethaddr[ETH_ALEN],
 	 *  - iff DATA transfer is active, carrier is "on"
 	 *  - tx queueing enabled if open *and* carrier is "on"
 	 */
+	netif_stop_queue(net);
 	netif_carrier_off(net);
 
 	dev->gadget = g;
 	SET_NETDEV_DEV(net, &g->dev);
-	SET_NETDEV_DEVTYPE(net, &gadget_type);
 
 	status = register_netdev(net);
 	if (status < 0) {
@@ -965,6 +912,7 @@ void gether_disconnect(struct gether *link)
 	struct eth_dev		*dev = link->ioport;
 	struct usb_request	*req;
 
+	WARN_ON(!dev);
 	if (!dev)
 		return;
 
@@ -993,6 +941,8 @@ void gether_disconnect(struct gether *link)
 	link->in = NULL;
 
 	usb_ep_disable(link->out_ep);
+	usb_ep_fifo_flush(link->in_ep);
+	usb_ep_fifo_flush(link->out_ep);
 	spin_lock(&dev->req_lock);
 	while (!list_empty(&dev->rx_reqs)) {
 		req = container_of(dev->rx_reqs.next,

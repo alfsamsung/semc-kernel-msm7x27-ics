@@ -105,7 +105,9 @@
 #include "smd_private.h"
 #include "proc_comm.h"
 #include <linux/msm_kgsl.h>
-#include <linux/usb/android.h>
+#ifdef CONFIG_USB_ANDROID
+#include <linux/usb/android_composite.h>
+#endif /* CONFIG_USB_ANDROID */
 #include "board-es209ra.h"
 #include "board-es209ra-keypad.h"
 #ifdef CONFIG_ES209RA_HEADSET
@@ -142,11 +144,11 @@
 #define MSM_PMEM_SMI_BASE	0x02B00000
 #define MSM_PMEM_SMI_SIZE	0x01500000
 
-#define MSM_FB_BASE		0x02B00000
+#define MSM_FB_BASE		0x03400000 // 0x02B00000
 #define MSM_FB_SIZE		0x00300000 // 0x00500000
 
-#define MSM_GPU_PHYS_BASE 	0x03000000
-#define MSM_GPU_PHYS_SIZE 	0x00200000
+#define MSM_GPU_PHYS_BASE 	0x03200000 //0x03000000
+#define MSM_GPU_PHYS_SIZE 	0x00200000 //0x00200000
 
 #define MSM_RAM_CONSOLE_START   0x38000000 - MSM_RAM_CONSOLE_SIZE
 #define MSM_RAM_CONSOLE_SIZE    128 * SZ_1K
@@ -210,12 +212,77 @@ static struct platform_device ram_console_device = {
         .resource       = ram_console_resources,
 };
 
+#ifdef CONFIG_USB_ANDROID
+/* dynamic composition */
+static char *usb_func_msc[] = {
+	"usb_mass_storage",
+};
+static char *usb_func_msc_adb[] = {
+	"usb_mass_storage",
+	"adb",
+};
+static char *usb_func_rndis[] = {
+	"rndis",
+};
+static char *usb_func_adb_rndis[] = {
+	"rndis",
+	"adb",
+};
+
+static char *usb_func_msc_adb_eng[] = {
+	"usb_mass_storage",
+	"adb",
+	"modem",
+	"nmea",
+	"diag",
+};
+
+static char *usb_functions_all[] = {
+	"rndis",
+	"usb_mass_storage",
+	"adb",
+	"modem",
+	"nmea",
+	"diag",
+};
+static struct android_usb_product android_usb_products[] = {
+	{
+		.product_id = 0xE12E,
+		.functions = usb_func_msc,
+		.num_functions = ARRAY_SIZE(usb_func_msc),
+	},
+	{
+		.product_id = 0x612E,
+		.functions = usb_func_msc_adb,
+		.num_functions = ARRAY_SIZE(usb_func_msc_adb),
+	},
+	{
+		.product_id = 0x712E,
+		.functions = usb_func_rndis,
+		.num_functions = ARRAY_SIZE(usb_func_rndis),
+	},
+	{
+		.product_id = 0x812E,
+		.functions = usb_func_adb_rndis,
+		.num_functions = ARRAY_SIZE(usb_func_adb_rndis),
+	},
+	{
+		.product_id = 0x6146,
+		.functions = usb_func_msc_adb_eng,
+		.num_functions = ARRAY_SIZE(usb_func_msc_adb_eng),
+	}
+};
+
 static struct usb_mass_storage_platform_data mass_storage_pdata = {
         .nluns = 1,
         .vendor = "SEMC",
         .product = "Mass Storage",
         .release = 0x0100,
 
+//        .cdrom_nluns = 1,
+//        .cdrom_vendor = "SEMC",
+//        .cdrom_product = "CD-ROM",
+//        .cdrom_release = 0x0100,
 };
 
 static struct platform_device usb_mass_storage_device = {
@@ -226,6 +293,40 @@ static struct platform_device usb_mass_storage_device = {
                 },
 };
 
+static struct usb_ether_platform_data rndis_pdata = {
+	/* ethaddr is filled by board_serialno_setup */
+	.vendorID	= 0x0FCE,
+	.vendorDescr	= "SEMC",
+};
+
+static struct platform_device rndis_device = {
+	.name	= "rndis",
+	.id	= -1,
+	.dev	= {
+		.platform_data = &rndis_pdata,
+	},
+};
+
+static struct android_usb_platform_data android_usb_pdata = {
+	.vendor_id		= 0x0FCE,
+	.product_id		= 0xE12E,
+	.version		= 0x0100,
+	.product_name		= "SEMC HSUSB Device",
+	.manufacturer_name	= "SEMC",
+	.serial_number		= "1234567890ABCDEF",
+	.num_products		= ARRAY_SIZE(android_usb_products),
+	.products		= android_usb_products,
+	.num_functions		= ARRAY_SIZE(usb_functions_all),
+	.functions		= usb_functions_all,
+};
+static struct platform_device android_usb_device = {
+	.name	= "android_usb",
+	.id		= -1,
+	.dev		= {
+		.platform_data = &android_usb_pdata,
+	},
+};
+#endif
 
 static struct platform_device hs_device = {
 	.name   = "msm-handset",
@@ -1082,56 +1183,46 @@ static void __init bt_power_init(void)
 #define bt_power_init(x) do {} while (0)
 #endif
 
-static struct resource kgsl_3d0_resources[] = {
+static struct resource kgsl_resources[] = {
        {
-		.name  = KGSL_3D0_REG_MEMORY,
+		.name  = "kgsl_reg_memory",
 		.start = 0xA0000000,
 		.end = 0xA001ffff,
 		.flags = IORESOURCE_MEM,
        },
        {
-		.name = KGSL_3D0_IRQ,
+		.name   = "kgsl_phys_memory",
+		.start = MSM_GPU_PHYS_BASE,
+		.end = MSM_GPU_PHYS_BASE + MSM_GPU_PHYS_SIZE - 1,
+		.flags = IORESOURCE_MEM,
+       },
+       {
+		.name = "kgsl_yamato_irq",
 		.start = INT_GRAPHICS,
 		.end = INT_GRAPHICS,
 		.flags = IORESOURCE_IRQ,
        },
 };
-
-static struct kgsl_device_platform_data kgsl_3d0_pdata = {
-	.pwr_data = {
-		.pwrlevel = {
-			{
-				.gpu_freq = 128000000,
-				.bus_freq = 128000000,
-			},
-			{
-				.gpu_freq = 128000000,
-				.bus_freq = 0,
-			},
-		},
-		.init_level = 0,
-		.num_levels = 2,
-		.set_grp_async = NULL,
-		.idle_timeout = HZ/20,
-		.nap_allowed = true,
-	},
-	.clk = {
-		.name = {
-			.clk = "grp_clk",
-		},
-	},
-	.imem_clk_name = {
-		.clk = "imem_clk",
-	},
+static struct kgsl_platform_data kgsl_pdata = {
+	.high_axi_3d = 128000, /* Max for 8K */
+	.max_grp2d_freq = 0,
+	.min_grp2d_freq = 0,
+	.set_grp2d_async = NULL,
+	.max_grp3d_freq = 0,
+	.min_grp3d_freq = 0,
+	.set_grp3d_async = NULL,
+	.imem_clk_name = "imem_clk",
+	.grp3d_clk_name = "grp_clk",
+	.grp2d0_clk_name = NULL,
 };
 
-static struct platform_device msm_kgsl_3d0 = {
-       .name = "kgsl-3d0",
-       .id = 0,
-       .num_resources = ARRAY_SIZE(kgsl_3d0_resources),
-       .resource = kgsl_3d0_resources,
+static struct platform_device msm_device_kgsl = {
+       .name = "kgsl",
+       .id = -1,
+       .num_resources = ARRAY_SIZE(kgsl_resources),
+       .resource = kgsl_resources,
 	.dev = {
-		.platform_data = &kgsl_3d0_pdata,
+		.platform_data = &kgsl_pdata,
 	},
 };
 
@@ -1508,7 +1599,11 @@ static struct platform_device *devices[] __initdata = {
 	&msm_device_nand,
 	&msm_device_i2c,
 	&qsd_device_spi,
+	&rndis_device,
 	&usb_mass_storage_device,
+#ifdef CONFIG_USB_ANDROID
+	&android_usb_device,
+#endif
 	&msm_device_tssc,
 	&msm_audio_device,
 	&msm_device_uart1,
@@ -1517,7 +1612,7 @@ static struct platform_device *devices[] __initdata = {
 	&msm_bt_power_device,
 	&msm_device_uart_dm2,
 #endif
-	&msm_kgsl_3d0,
+	&msm_device_kgsl,
 	&hs_device,
 #if defined(CONFIG_TSIF) || defined(CONFIG_TSIF_MODULE)
 	&msm_device_tsif,
@@ -1546,13 +1641,11 @@ static void __init es209ra_init_irq(void)
 	msm_init_sirc();
 }
 
-/*
 static void kgsl_phys_memory_init(void)
 {
 	request_mem_region(kgsl_resources[1].start,
 		resource_size(&kgsl_resources[1]), "kgsl");
 }
-*/
 
 static void __init es209ra_init_usb(void)
 {
@@ -1928,7 +2021,7 @@ static void __init es209ra_init(void)
 	spi_register_board_info(msm_spi_board_info,
 				ARRAY_SIZE(msm_spi_board_info));
 	msm_pm_set_platform_data(msm_pm_data);
-//	kgsl_phys_memory_init();
+	kgsl_phys_memory_init();
 	platform_device_register(&es209ra_keypad_device);
 	msm_mddi_tmd_fwvga_display_device_init();
 }
@@ -1994,6 +2087,16 @@ static void __init es209ra_map_io(void)
 
 static int __init board_serialno_setup(char *serialno)
 {
+#ifdef CONFIG_USB_ANDROID
+	int i;
+	char *src = serialno;
+	android_usb_pdata.serial_number = serialno;
+	printk(KERN_INFO "USB serial number: %s\n", android_usb_pdata.serial_number);
+
+	rndis_pdata.ethaddr[0] = 0x02;
+	for (i = 0; *src; i++)
+		rndis_pdata.ethaddr[i % (ETH_ALEN -1)+1] ^= *src++;
+#endif
 	return 1;
 }
 __setup_param("serialno=", board_serialno_setup_1, board_serialno_setup, 0);
