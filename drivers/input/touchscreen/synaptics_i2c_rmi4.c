@@ -306,7 +306,7 @@ static int synaptics_init_panel(struct synaptics_ts_data *ts)
 			__FUNCTION__);
 		return ret;
 	}
-	msleep(100);
+	usleep_range(100000, 150000);
 
 	ret = i2c_smbus_write_byte_data(ts->client,
 		F01_RMI_CTRL00_DEVICE_CONTROL(ts->rmi4_func), 0x80);
@@ -747,7 +747,8 @@ static int synaptics_ts_check_state
 		if (ts->state >= exp_state) {
 			return 0;
 		} else {
-			msleep(20);
+			usleep_range(20000, 25000);
+;
 		}
 	}
 
@@ -790,7 +791,7 @@ static int synaptics_ts_do_bist
 		F08_BIST_CMD00_BIST_COMMAND(ts->rmi4_func));
 		if ((ret >= 0) && ((ret & 0x1) == 0))
 			break;
-		msleep(100);
+		usleep_range(100000 ,150000);
 	}
 
 	if (ret < 0) {
