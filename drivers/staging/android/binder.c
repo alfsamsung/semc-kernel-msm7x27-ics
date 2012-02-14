@@ -30,7 +30,6 @@
 #include <linux/rbtree.h>
 #include <linux/sched.h>
 #include <linux/seq_file.h>
-#include <linux/slab.h>
 #include <linux/uaccess.h>
 #include <linux/vmalloc.h>
 
@@ -837,8 +836,7 @@ static void binder_delete_free_buffer(struct binder_proc *proc,
 			free_page_end = 0;
 		binder_debug(BINDER_DEBUG_BUFFER_ALLOC,
 			     "binder: %d: merge free, buffer %p "
-			     "share page with prev %p\n", proc->pid,
-			     buffer, prev);
+			     "share page with %p\n", proc->pid, buffer, prev);
 	}
 
 	if (!list_is_last(&buffer->entry, &proc->buffers)) {
@@ -851,8 +849,8 @@ static void binder_delete_free_buffer(struct binder_proc *proc,
 				free_page_start = 0;
 			binder_debug(BINDER_DEBUG_BUFFER_ALLOC,
 				     "binder: %d: merge free, buffer"
-				     " %p share page with next %p\n", proc->pid,
-				     buffer, next);
+				     " %p share page with %p\n", proc->pid,
+				     buffer, prev);
 		}
 	}
 	list_del(&buffer->entry);
