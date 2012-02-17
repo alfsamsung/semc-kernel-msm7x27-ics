@@ -781,7 +781,6 @@ static int pmem_free_system(int id, int index)
 	return 0;
 }
 
-
 static int pmem_free_space_bitmap(int id, struct pmem_freespace *fs)
 {
 	int i, j;
@@ -810,7 +809,6 @@ static int pmem_free_space_bitmap(int id, struct pmem_freespace *fs)
 					continue;
 				if (curr_alloc < next_alloc)
 					next_alloc = curr_alloc;
-				}
 			}
 		}
 		alloc_quanta = pmem[id].allocator.bitmap.
@@ -923,10 +921,6 @@ static int pmem_open(struct inode *inode, struct file *file)
 	DLOG("pid %u(%s) file %p(%ld) dev %s(id: %d)\n",
 		current->pid, get_task_comm(currtask_name, current),
 		file, file_count(file), get_name(file), id);
-	/* setup file->private_data to indicate its unmapped */
-	/*  you can only open a pmem device one time */
-	if (file->private_data != NULL)
-		return -EINVAL;
 	data = kmalloc(sizeof(struct pmem_data), GFP_KERNEL);
 	if (!data) {
 		printk(KERN_ALERT "pmem: %s: unable to allocate memory for "
@@ -1080,17 +1074,17 @@ static void bitmap_bits_set_all(uint32_t *bitp, int bit_start, int bit_end)
 
 static int
 bitmap_allocate_contiguous(uint32_t *bitp, int num_bits_to_alloc,
-		int total_bits, int spacing, int start_bit)
+		int total_bits, int spacing)
 {
 	int bit_start, last_bit, word_index;
 
 	if (num_bits_to_alloc <= 0)
 		return -1;
 
-	for (bit_start = start_bit; ;
-		bit_start = ((last_bit +
+	for (bit_start = 0; ;
+		bit_start = (last_bit +
 			(word_index << PMEM_32BIT_WORD_ORDER) + spacing - 1)
-			& ~(spacing - 1)) + start_bit) {
+			& ~(spacing - 1)) {
 		int bit_end = bit_start + num_bits_to_alloc, total_words;
 
 		if (bit_end > total_bits)
@@ -1168,8 +1162,7 @@ static int reserve_quanta(const unsigned int quanta_needed,
 	ret = bitmap_allocate_contiguous(pmem[id].allocator.bitmap.bitmap,
 		quanta_needed,
 		(pmem[id].size + pmem[id].quantum - 1) / pmem[id].quantum,
-		spacing,
-		start_bit);
+		spacing);
 
 #if PMEM_DEBUG
 	if (ret < 0)
@@ -1607,8 +1600,6 @@ static int pmem_mmap(struct file *file, struct vm_area_struct *vma)
 		mutex_unlock(&pmem[id].arena_mutex);
 		/* either no space was available or an error occured */
 		if (index == -1) {
-		data->index = index;
-		if (data->index < 0) {
 			pr_err("pmem: mmap unable to allocate memory"
 				"on %s\n", get_name(file));
 			ret = -ENOMEM;
@@ -1616,13 +1607,6 @@ static int pmem_mmap(struct file *file, struct vm_area_struct *vma)
 		}
 		/* store the index of a successful allocation */
 		data->index = index;
-	}
-
-	/* either no space was available or an error occured */
-	if (!has_allocation(file)) {
-		ret = -ENOMEM;
-		pr_err("pmem: could not find allocation for map.\n");
-		goto error;
 	}
 
 	if (pmem[id].len(id, data) < vma_size) {
@@ -2561,31 +2545,6 @@ static long pmem_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		{
 			struct pmem_allocation alloc;
 			int ret = 0;
-
-			if (copy_from_user(&alloc, (void __user *)arg,
-						sizeof(struct pmem_allocation)))
-				return -EFAULT;
-			DLOG("allocate id align %d %u\n", id, alloc.align);
-			down_write(&data->sem);
-			if (has_allocation(file)) {
-				pr_err("pmem: Existing allocation found on "
-					"this file descrpitor\n");
-				up_write(&data->sem);
-				return -EINVAL;
-			}
-
-			if (alloc.align & (alloc.align - 1)) {
-				pr_err("pmem: Alignment is not a power of 2\n");
-				return -EINVAL;
-			}
-
-			if (alloc.align != SZ_4K &&
-					(pmem[id].allocator_type !=
-						PMEM_ALLOCATORTYPE_BITMAP)) {
-				pr_err("pmem: Non 4k alignment requires bitmap"
-					" allocator on %s\n", pmem[id].name);
-				return -EINVAL;
-			}
 
 			if (copy_from_user(&alloc, (void __user *)arg,
 						sizeof(struct pmem_allocation)))
