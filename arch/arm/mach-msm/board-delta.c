@@ -142,7 +142,11 @@
 #define MSM_FB_SIZE		0xB6000
 #endif
 
-#define MSM_GPU_PHYS_SIZE	SZ_2M
+#define MSM_GPU_PHYS_BASE   (MSM_FB_BASE + MSM_FB_SIZE) //SZ_2M
+
+#define MSM_PMEM_VENC_BASE   (MSM_GPU_PHYS_BASE + MSM_GPU_PHYS_SIZE) 
+#define MSM_PMEM_VENC_SIZE   (MSM_PMEM_SMI_SIZE - MSM_FB_SIZE - MSM_GPU_PHYS_SIZE) 
+
 #define PMEM_KERNEL_EBI1_SIZE	0x1C000
 
 /** Initial configuration for all used SEport GPIOS. Only set them here! */
@@ -860,6 +864,14 @@ static struct android_pmem_platform_data android_pmem_adsp_pdata = {
 	.cached = 0,
 };
 
+static struct android_pmem_platform_data android_pmem_venc_pdata = { 
+  .name = "pmem_venc", 
+  .start = MSM_PMEM_VENC_BASE, 
+  .size = MSM_PMEM_VENC_SIZE, 
+  .allocator_type = PMEM_ALLOCATORTYPE_BITMAP, 
+  .cached = 0, 
+}; 
+
 static struct platform_device android_pmem_device = {
 	.name = "android_pmem",
 	.id = 0,
@@ -871,6 +883,12 @@ static struct platform_device android_pmem_adsp_device = {
 	.id = 1,
 	.dev = { .platform_data = &android_pmem_adsp_pdata },
 };
+
+static struct platform_device android_pmem_venc_device = { 
+  .name = "android_pmem", 
+  .id = 2, 
+  .dev = { .platform_data = &android_pmem_venc_pdata }, 
+}; 
 
 static struct platform_device android_pmem_kernel_ebi1_device = {
 	.name = "android_pmem",
@@ -2001,6 +2019,7 @@ static struct platform_device *devices[] __initdata = {
 	&android_pmem_kernel_ebi1_device,
 	&android_pmem_device,
 	&android_pmem_adsp_device,
+	&android_pmem_venc_device,
 	&msm_fb_device,
 	&msm_device_uart_dm1,
 #ifdef CONFIG_TOUCHSCREEN_CY8CTMA300_SER
