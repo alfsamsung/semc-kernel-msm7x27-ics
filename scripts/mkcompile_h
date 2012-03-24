@@ -38,15 +38,15 @@ fi
 SEMC_BUILD_TIMESTAMP=`cd $srctree && scripts/timestamp_gen.sh`
 
 if [ -z "$SEMC_BUILD_TIMESTAMP" ]; then
-	TIMESTAMP=`date`
+	TIMESTAMP=`date +"%d/%m/%Y"`
 else
-	TIMESTAMP=$SEMC_BUILD_TIMESTAMP
+	TIMESTAMP=`date +"%d/%m/%Y"`
 fi
 
 CONFIG_FLAGS=""
 if [ -n "$SMP" ] ; then CONFIG_FLAGS="SMP"; fi
 if [ -n "$PREEMPT" ] ; then CONFIG_FLAGS="$CONFIG_FLAGS PREEMPT"; fi
-UTS_VERSION="#1 $CONFIG_FLAGS $TIMESTAMP"
+UTS_VERSION="$TIMESTAMP $CONFIG_FLAGS"
 
 # Truncate to maximum length
 
@@ -64,7 +64,7 @@ UTS_TRUNCATE="sed -e s/\(.\{1,$UTS_LEN\}\).*/\1/"
 
   echo \#define LINUX_COMPILE_TIME \"`date --date="$TIMESTAMP" +%R:%S`\"
   echo \#define LINUX_COMPILE_BY \"alf\"
-  echo \#define LINUX_COMPILE_HOST \"v08\"
+  echo \#define LINUX_COMPILE_HOST \"v08a\"
 
   if [ -x /bin/dnsdomainname ]; then
     echo \#define LINUX_COMPILE_DOMAIN \"`dnsdomainname | $UTS_TRUNCATE`\"

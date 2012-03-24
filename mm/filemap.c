@@ -336,7 +336,7 @@ int sync_page_range(struct inode *inode, struct address_space *mapping,
 		mutex_unlock(&inode->i_mutex);
 	}
 	if (ret == 0)
-		ret = wait_on_page_writeback_range(mapping, start, end);
+		ret = filemap_fdatawait_range(mapping, start, end);
 	return ret;
 }
 EXPORT_SYMBOL(sync_page_range);
@@ -365,7 +365,7 @@ int sync_page_range_nolock(struct inode *inode, struct address_space *mapping,
 	if (ret == 0)
 		ret = generic_osync_inode(inode, mapping, OSYNC_METADATA);
 	if (ret == 0)
-		ret = wait_on_page_writeback_range(mapping, start, end);
+		ret = filemap_fdatawait_range(mapping, start, end);
 	return ret;
 }
 EXPORT_SYMBOL(sync_page_range_nolock);

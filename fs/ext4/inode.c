@@ -2482,14 +2482,12 @@ static int ext4_da_writepages(struct address_space *mapping,
 		   "dev %s ino %lu nr_t_write %ld "
 		   "pages_skipped %ld range_start %llu "
 		   "range_end %llu nonblocking %d "
-		   "for_kupdate %d for_reclaim %d "
-		   "for_writepages %d range_cyclic %d",
+		   "for_kupdate %d for_reclaim %d ",
 		   inode->i_sb->s_id, inode->i_ino,
 		   wbc->nr_to_write, wbc->pages_skipped,
 		   (unsigned long long) wbc->range_start,
 		   (unsigned long long) wbc->range_end,
 		   wbc->nonblocking, wbc->for_kupdate,
-		   wbc->for_reclaim, wbc->for_writepages,
 		   wbc->range_cyclic);
 
 	/*
