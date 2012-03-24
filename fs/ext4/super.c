@@ -1568,13 +1568,6 @@ static int ext4_setup_super(struct super_block *sb, struct ext4_super_block *es,
 			EXT4_INODES_PER_GROUP(sb),
 			sbi->s_mount_opt);
 
-	if (EXT4_SB(sb)->s_journal) {
-		printk(KERN_INFO "EXT4 FS on %s, %s journal on %s\n",
-		       sb->s_id, EXT4_SB(sb)->s_journal->j_inode ? "internal" :
-		       "external", EXT4_SB(sb)->s_journal->j_devname);
-	} else {
-		printk(KERN_INFO "EXT4 FS on %s, no journal\n", sb->s_id);
-	}
 	return res;
 }
 
@@ -2548,12 +2541,12 @@ no_journal:
 			"available.\n");
 	}
 
-	if (test_opt(sb, DATA_FLAGS) == EXT4_MOUNT_JOURNAL_DATA) {
+	if (test_opt(sb, DELALLOC) &&
+	    (test_opt(sb, DATA_FLAGS) == EXT4_MOUNT_JOURNAL_DATA)) {
 		printk(KERN_WARNING "EXT4-fs: Ignoring delalloc option - "
 				"requested data journaling mode\n");
 		clear_opt(sbi->s_mount_opt, DELALLOC);
-	} else if (test_opt(sb, DELALLOC))
-		printk(KERN_INFO "EXT4-fs: delayed allocation enabled\n");
+	} 
 
 	ext4_ext_init(sb);
 	err = ext4_mb_init(sb, needs_recovery);
@@ -2849,9 +2842,7 @@ static int ext4_load_journal(struct super_block *sb,
 			return -EINVAL;
 	}
 
-	if (journal->j_flags & JBD2_BARRIER)
-		printk(KERN_INFO "EXT4-fs: barriers enabled\n");
-	else
+	if (!(journal->j_flags & JBD2_BARRIER))
 		printk(KERN_INFO "EXT4-fs: barriers disabled\n");
 
 	if (!really_read_only && test_opt(sb, UPDATE_JOURNAL)) {
