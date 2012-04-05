@@ -1026,7 +1026,7 @@ int i915_master_create(struct drm_device *dev, struct drm_master *master)
 {
 	struct drm_i915_master_private *master_priv;
 
-	master_priv = drm_calloc(1, sizeof(*master_priv), DRM_MEM_DRIVER);
+	master_priv = kzalloc(sizeof(*master_priv), GFP_KERNEL);
 	if (!master_priv)
 		return -ENOMEM;
 
@@ -1041,7 +1041,7 @@ void i915_master_destroy(struct drm_device *dev, struct drm_master *master)
 	if (!master_priv)
 		return;
 
-	drm_free(master_priv, sizeof(*master_priv), DRM_MEM_DRIVER);
+	kfree(master_priv);
 
 	master->driver_priv = NULL;
 }
@@ -1070,11 +1070,9 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 	dev->types[8] = _DRM_STAT_SECONDARY;
 	dev->types[9] = _DRM_STAT_DMA;
 
-	dev_priv = drm_alloc(sizeof(drm_i915_private_t), DRM_MEM_DRIVER);
+	dev_priv = kzalloc(sizeof(drm_i915_private_t), GFP_KERNEL);
 	if (dev_priv == NULL)
 		return -ENOMEM;
-
-	memset(dev_priv, 0, sizeof(drm_i915_private_t));
 
 	dev->dev_private = (void *)dev_priv;
 	dev_priv->dev = dev;
@@ -1174,7 +1172,7 @@ out_iomapfree:
 out_rmmap:
 	iounmap(dev_priv->regs);
 free_priv:
-	drm_free(dev_priv, sizeof(struct drm_i915_private), DRM_MEM_DRIVER);
+	kfree(dev_priv);
 	return ret;
 }
 
@@ -1213,8 +1211,7 @@ int i915_driver_unload(struct drm_device *dev)
 		i915_gem_lastclose(dev);
 	}
 
-	drm_free(dev->dev_private, sizeof(drm_i915_private_t),
-		 DRM_MEM_DRIVER);
+	kfree(dev->dev_private);
 
 	return 0;
 }
@@ -1225,7 +1222,7 @@ int i915_driver_open(struct drm_device *dev, struct drm_file *file_priv)
 
 	DRM_DEBUG("\n");
 	i915_file_priv = (struct drm_i915_file_private *)
-	    drm_alloc(sizeof(*i915_file_priv), DRM_MEM_FILES);
+	    kmalloc(sizeof(*i915_file_priv), GFP_KERNEL);
 
 	if (!i915_file_priv)
 		return -ENOMEM;
@@ -1278,7 +1275,7 @@ void i915_driver_postclose(struct drm_device *dev, struct drm_file *file_priv)
 {
 	struct drm_i915_file_private *i915_file_priv = file_priv->driver_priv;
 
-	drm_free(i915_file_priv, sizeof(*i915_file_priv), DRM_MEM_FILES);
+	kfree(i915_file_priv);
 }
 
 struct drm_ioctl_desc i915_ioctls[] = {

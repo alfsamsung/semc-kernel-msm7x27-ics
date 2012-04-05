@@ -1190,7 +1190,7 @@ int msm_drm_gem_mmap(struct file *filp, struct vm_area_struct *vma)
 	struct drm_file *priv = filp->private_data;
 	struct drm_device *dev = priv->minor->dev;
 	struct drm_gem_mm *mm = dev->mm_private;
-	struct drm_local_map *map = NULL;
+	struct drm_map *map = NULL;
 	struct drm_gem_object *obj;
 	struct drm_hash_item *hash;
 	struct drm_kgsl_gem_object *gpriv;
@@ -1720,7 +1720,7 @@ static struct drm_driver driver = {
 int kgsl_drm_init(struct platform_device *dev)
 {
 	int i;
-
+	
 	driver.num_ioctls = DRM_ARRAY_SIZE(kgsl_drm_ioctls);
 	driver.platform_device = dev;
 

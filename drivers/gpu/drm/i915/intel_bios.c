@@ -88,8 +88,7 @@ parse_panel_data(struct drm_i915_private *dev_priv, struct bdb_header *bdb)
 	entry = &lvds_lfp_data->data[lvds_options->panel_type];
 	dvo_timing = &entry->dvo_timing;
 
-	panel_fixed_mode = drm_calloc(1, sizeof(*panel_fixed_mode),
-				      DRM_MEM_DRIVER);
+	panel_fixed_mode = kzalloc(sizeof(*panel_fixed_mode), GFP_KERNEL);
 
 	panel_fixed_mode->hdisplay = (dvo_timing->hactive_hi << 8) |
 		dvo_timing->hactive_lo;

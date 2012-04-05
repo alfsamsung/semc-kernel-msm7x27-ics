@@ -110,7 +110,7 @@ int drm_get_pci_dev(struct pci_dev *pdev, const struct pci_device_id *ent,
 err_g2:
 	pci_disable_device(pdev);
 err_g1:
-	drm_free(dev, sizeof(*dev), DRM_MEM_STUB);
+	kfree(dev);
 	return ret;
 }
 

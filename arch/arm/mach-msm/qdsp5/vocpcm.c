@@ -28,6 +28,9 @@
 #include <linux/dma-mapping.h>
 #include <linux/delay.h>
 
+/* we have to include slab since .34 onward with intention for kfree() and friends*/
+#include <linux/slab.h>
+
 #include <asm/atomic.h>
 #include <asm/ioctls.h>
 #include <mach/msm_adsp.h>
@@ -39,6 +42,7 @@
 
 /* Please either check these values against AMSS_VERSION,
    or include a suitable header file if you have it.
+   i.e look into arch/arm/mach-msm/qdsp5/snd.c
 ----->>>*/
 
 #define RPC_SND_VERS    0x00020001
@@ -812,4 +816,3 @@ module_exit(vocpcm_exit);
 
 MODULE_DESCRIPTION("Incall recording pcm driver");
 MODULE_LICENSE("GPL v2");
-

@@ -47,6 +47,7 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  */
 
+#include <linux/debugfs.h>
 #include "drmP.h"
 #include "drm_core.h"
 
@@ -188,7 +189,7 @@ int drm_lastclose(struct drm_device * dev)
 			if (entry->bound)
 				drm_unbind_agp(entry->memory);
 			drm_free_agp(entry->memory, entry->pages);
-			drm_free(entry, sizeof(*entry), DRM_MEM_AGPLISTS);
+			kfree(entry);
 		}
 		INIT_LIST_HEAD(&dev->agp->memory);
 
@@ -207,21 +208,15 @@ int drm_lastclose(struct drm_device * dev)
 	/* Clear vma list (only built for debugging) */
 	list_for_each_entry_safe(vma, vma_temp, &dev->vmalist, head) {
 		list_del(&vma->head);
-		drm_free(vma, sizeof(*vma), DRM_MEM_VMAS);
+		kfree(vma);
 	}
 
 	if (drm_core_check_feature(dev, DRIVER_DMA_QUEUE) && dev->queuelist) {
 		for (i = 0; i < dev->queue_count; i++) {
-			if (dev->queuelist[i]) {
-				drm_free(dev->queuelist[i],
-					 sizeof(*dev->queuelist[0]),
-					 DRM_MEM_QUEUES);
-				dev->queuelist[i] = NULL;
-			}
+			kfree(dev->queuelist[i]);
+			dev->queuelist[i] = NULL;
 		}
-		drm_free(dev->queuelist,
-			 dev->queue_slots * sizeof(*dev->queuelist),
-			 DRM_MEM_QUEUES);
+		kfree(dev->queuelist);
 		dev->queuelist = NULL;
 	}
 	dev->queue_count = 0;
@@ -283,7 +278,7 @@ static void drm_cleanup(struct drm_device * dev)
 		dev->driver->unload(dev);
 
 	if (drm_core_has_AGP(dev) && dev->agp) {
-		drm_free(dev->agp, sizeof(*dev->agp), DRM_MEM_AGPLISTS);
+		kfree(dev->agp);
 		dev->agp = NULL;
 	}
 
@@ -346,8 +341,6 @@ static int __init drm_core_init(void)
 		goto err_p3;
 	}
 
-	drm_mem_init();
-
 	DRM_INFO("Initialized %s %d.%d.%d %s\n",
 		 CORE_NAME, CORE_MAJOR, CORE_MINOR, CORE_PATCHLEVEL, CORE_DATE);
 	return 0;
@@ -373,6 +366,18 @@ static void __exit drm_core_exit(void)
 
 module_init(drm_core_init);
 module_exit(drm_core_exit);
+
+/**
+ * Copy and IOCTL return string to user space
+ */
+#define DRM_COPY(name, value)                                        \
+       len = strlen(value);                                          \
+       if (len > name##_len) len = name##_len;                       \
+       name##_len = strlen(value);                                   \
+       if (len && name) {                                            \
+               if (copy_to_user(name, value, len))                   \
+                       return -EFAULT;                               \
+       }
 
 /**
  * Get version information
@@ -413,17 +418,18 @@ static int drm_version(struct drm_device *dev, void *data,
  * Looks up the ioctl function in the ::ioctls table, checking for root
  * previleges if so required, and dispatches to the respective function.
  */
-int drm_ioctl(struct inode *inode, struct file *filp,
+long drm_ioctl(struct file *filp,
 	      unsigned int cmd, unsigned long arg)
 {
 	struct drm_file *file_priv = filp->private_data;
-	struct drm_device *dev = file_priv->minor->dev;
+	struct drm_device *dev;
 	struct drm_ioctl_desc *ioctl;
 	drm_ioctl_t *func;
 	unsigned int nr = DRM_IOCTL_NR(cmd);
 	int retcode = -EINVAL;
 	char *kdata = NULL;
 
+	dev = file_priv->minor->dev;
 	atomic_inc(&dev->ioctl_count);
 	atomic_inc(&dev->counts[_DRM_STAT_IOCTLS]);
 	++file_priv->ioctl_count;
@@ -474,7 +480,13 @@ int drm_ioctl(struct inode *inode, struct file *filp,
 				goto err_i1;
 			}
 		}
-		retcode = func(dev, kdata, file_priv);
+		if (ioctl->flags & DRM_UNLOCKED)
+                       retcode = func(dev, kdata, file_priv);
+               else {
+                       lock_kernel();
+                       retcode = func(dev, kdata, file_priv);
+                       unlock_kernel();
+               }
 
 		if ((retcode == 0) && (cmd & IOC_OUT)) {
 			if (copy_to_user((void __user *)arg, kdata,

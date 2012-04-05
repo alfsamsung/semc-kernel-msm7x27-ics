@@ -58,7 +58,8 @@ int drm_platform_init(struct drm_driver *driver)
 
 	DRM_DEBUG("\n");
 
-	dev = drm_calloc(1, sizeof(*dev), DRM_MEM_STUB);
+//	dev = drm_calloc(1, sizeof(*dev), DRM_MEM_STUB);
+        dev = kzalloc(sizeof(*dev), GFP_KERNEL);
 	if (!dev)
 		return -ENOMEM;
 
@@ -83,6 +84,6 @@ int drm_platform_init(struct drm_driver *driver)
 	return 0;
 
 err_g1:
-	drm_free(dev, sizeof(*dev), DRM_MEM_STUB);
+	kfree(dev);
 	return ret;
 }

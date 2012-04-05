@@ -2123,7 +2123,7 @@ static void __init msm7x2x_init_irq(void)
 
 static struct msm_acpu_clock_platform_data msm7x27_clock_data = {
 	.acpu_switch_time_us = 50,
-	.max_speed_delta_khz = 256000,
+	.max_speed_delta_khz = 400000,	//256000 alf
 	.vdd_switch_time_us = 62,
 	.max_axi_khz = 160000,
 //	.max_axi_khz = 128000,
@@ -2474,8 +2474,15 @@ static struct msm_i2c_platform_data msm_i2c_pdata = {
 	.rmutex = 0,
 	.pri_clk = 60,
 	.pri_dat = 61,
+
+     /*
+      * Disable second msm-i2c interface (merged from v4735)
+      * No support for secondary i2c in Semc Delta HW
+      */
+#if 0
 	.aux_clk = 95,
 	.aux_dat = 96,
+#endif
 	.msm_i2c_config_gpio = msm_i2c_gpio_config,
 };
 

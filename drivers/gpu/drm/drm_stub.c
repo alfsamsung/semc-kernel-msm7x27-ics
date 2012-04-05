@@ -92,7 +92,7 @@ struct drm_master *drm_master_create(struct drm_minor *minor)
 {
 	struct drm_master *master;
 
-	master = drm_calloc(1, sizeof(*master), DRM_MEM_DRIVER);
+	master = kzalloc(sizeof(*master), GFP_KERNEL);
 	if (!master)
 		return NULL;
 
@@ -134,7 +134,7 @@ static void drm_master_destroy(struct kref *kref)
 	}
 
 	if (master->unique) {
-		drm_free(master->unique, master->unique_size, DRM_MEM_DRIVER);
+		kfree(master->unique);
 		master->unique = NULL;
 		master->unique_len = 0;
 	}
@@ -142,12 +142,12 @@ static void drm_master_destroy(struct kref *kref)
 	list_for_each_entry_safe(pt, next, &master->magicfree, head) {
 		list_del(&pt->head);
 		drm_ht_remove_item(&master->magiclist, &pt->hash_item);
-		drm_free(pt, sizeof(*pt), DRM_MEM_MAGIC);
+		kfree(pt);
 	}
 
 	drm_ht_remove(&master->magiclist);
 
-	drm_free(master, sizeof(*master), DRM_MEM_DRIVER);
+	kfree(master);
 }
 
 void drm_master_put(struct drm_master **master)
@@ -316,7 +316,7 @@ int drm_get_minor(struct drm_device *dev, struct drm_minor **minor, int type)
 			goto err_mem;
 		}
 	} else
-		new_minor->dev_root = NULL;
+		new_minor->proc_root = NULL;
 
 	ret = drm_sysfs_device_add(new_minor);
 	if (ret) {
@@ -354,11 +354,10 @@ err_idr:
 int drm_put_dev(struct drm_device * dev)
 {
 	if (dev->devname) {
-		drm_free(dev->devname, strlen(dev->devname) + 1,
-			 DRM_MEM_DRIVER);
+		kfree(dev->devname);
 		dev->devname = NULL;
 	}
-	drm_free(dev, sizeof(*dev), DRM_MEM_STUB);
+	kfree(dev);
 	return 0;
 }
 
