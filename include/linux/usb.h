@@ -315,6 +315,8 @@ struct usb_bus {
 	u8 otg_port;			/* 0, or number of OTG/HNP port */
 	unsigned is_b_host:1;		/* true during some HNP roleswitches */
 	unsigned b_hnp_enable:1;	/* OTG: did A-Host enable HNP? */
+	unsigned hnp_support:1;         /* OTG: HNP is supported on OTG port */
+        struct delayed_work hnp_polling;/* OTG: HNP polling work */
 
 	int devnum_next;		/* Next open device number in
 					 * round-robin allocation */
@@ -1255,7 +1257,7 @@ typedef void (*usb_complete_t)(struct urb *);
  * Alternatively, drivers may pass the URB_NO_xxx_DMA_MAP transfer flags,
  * which tell the host controller driver that no such mapping is needed since
  * the device driver is DMA-aware.  For example, a device driver might
- * allocate a DMA buffer with usb_buffer_alloc() or call usb_buffer_map().
+ * allocate a DMA buffer with usb_alloc_coherent() or call usb_buffer_map().
  * When these transfer flags are provided, host controller drivers will
  * attempt to use the dma addresses found in the transfer_dma and/or
  * setup_dma fields rather than determining a dma address themselves.  (Note
@@ -1521,10 +1523,22 @@ static inline int usb_urb_dir_out(struct urb *urb)
 	return (urb->transfer_flags & URB_DIR_MASK) == URB_DIR_OUT;
 }
 
-void *usb_buffer_alloc(struct usb_device *dev, size_t size,
+void *usb_alloc_coherent(struct usb_device *dev, size_t size,
 	gfp_t mem_flags, dma_addr_t *dma);
-void usb_buffer_free(struct usb_device *dev, size_t size,
+void usb_free_coherent(struct usb_device *dev, size_t size,
 	void *addr, dma_addr_t dma);
+
+/* Compatible macros while we switch over */
+static inline void *usb_buffer_alloc(struct usb_device *dev, size_t size,
+                                    gfp_t mem_flags, dma_addr_t *dma)
+{
+       return usb_alloc_coherent(dev, size, mem_flags, dma);
+}
+static inline void usb_buffer_free(struct usb_device *dev, size_t size,
+                                  void *addr, dma_addr_t dma)
+{
+       return usb_free_coherent(dev, size, addr, dma);
+}
 
 #if 0
 struct urb *usb_buffer_map(struct urb *urb);

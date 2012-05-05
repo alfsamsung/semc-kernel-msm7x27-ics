@@ -512,7 +512,7 @@ void dm_set_device_limits(struct dm_target *ti, struct block_device *bdev)
 	 *        combine_restrictions_low()
 	 */
 	rs->max_sectors =
-		min_not_zero(rs->max_sectors, q->max_sectors);
+		min_not_zero(rs->max_sectors, queue_max_sectors(q));
 
 	/*
 	 * Check if merge fn is supported.

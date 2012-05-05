@@ -174,7 +174,7 @@ void put_driver(struct device_driver *drv)
 EXPORT_SYMBOL_GPL(put_driver);
 
 static int driver_add_groups(struct device_driver *drv,
-			     struct attribute_group **groups)
+			     const struct attribute_group **groups)
 {
 	int error = 0;
 	int i;
@@ -194,7 +194,7 @@ static int driver_add_groups(struct device_driver *drv,
 }
 
 static void driver_remove_groups(struct device_driver *drv,
-				 struct attribute_group **groups)
+				 const struct attribute_group **groups)
 {
 	int i;
 

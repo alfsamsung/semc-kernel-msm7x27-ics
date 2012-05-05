@@ -27,6 +27,7 @@ int smd_open(const char *name, smd_channel_t **ch, void *priv,
 #define SMD_EVENT_DATA 1
 #define SMD_EVENT_OPEN 2
 #define SMD_EVENT_CLOSE 3
+#define SMD_EVENT_STATUS 4
 
 int smd_close(smd_channel_t *ch);
 
@@ -63,6 +64,8 @@ int smd_wait_until_writable(smd_channel_t *ch, int bytes);
  */
 int smd_tiocmget(smd_channel_t *ch);
 int smd_tiocmset(smd_channel_t *ch, unsigned int set, unsigned int clear);
+int
+smd_tiocmset_from_cb(smd_channel_t *ch, unsigned int set, unsigned int clear);
 
 #if defined(CONFIG_MSM_N_WAY_SMD)
 enum {

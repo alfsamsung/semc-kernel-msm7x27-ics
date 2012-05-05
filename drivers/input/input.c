@@ -548,7 +548,7 @@ static int input_fetch_keycode(struct input_dev *dev, int scancode)
 }
 
 static int input_default_getkeycode(struct input_dev *dev,
-				    int scancode, int *keycode)
+                                    int scancode, int *keycode)
 {
 	if (!dev->keycodesize)
 		return -EINVAL;
@@ -562,7 +562,7 @@ static int input_default_getkeycode(struct input_dev *dev,
 }
 
 static int input_default_setkeycode(struct input_dev *dev,
-				    int scancode, int keycode)
+                                    int scancode, int keycode)
 {
 	int old_keycode;
 	int i;
@@ -1138,7 +1138,7 @@ static struct attribute_group input_dev_caps_attr_group = {
 	.attrs	= input_dev_caps_attrs,
 };
 
-static struct attribute_group *input_dev_attr_groups[] = {
+static const struct attribute_group *input_dev_attr_groups[] = {
 	&input_dev_attr_group,
 	&input_dev_id_attr_group,
 	&input_dev_caps_attr_group,
@@ -1259,8 +1259,14 @@ static struct device_type input_dev_type = {
 	.uevent		= input_dev_uevent,
 };
 
-struct class input_class = {
-	.name		= "input",
+static char *input_nodename(struct device *dev)
+{
+       return kasprintf(GFP_KERNEL, "input/%s", dev_name(dev));
+}
+
+ struct class input_class = {
+        .name           = "input",
+        .nodename	= input_nodename,
 };
 EXPORT_SYMBOL_GPL(input_class);
 

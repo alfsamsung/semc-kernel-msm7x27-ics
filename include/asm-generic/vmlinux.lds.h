@@ -301,6 +301,15 @@
 /* Section used for early init (in .S files) */
 #define HEAD_TEXT  *(.head.text)
 
+ #ifdef CONFIG_CONSTRUCTORS
+#define KERNEL_CTORS()  . = ALIGN(8);                      \
+                        VMLINUX_SYMBOL(__ctors_start) = .; \
+                        *(.ctors)                          \
+                        VMLINUX_SYMBOL(__ctors_end) = .;
+#else
+#define KERNEL_CTORS()
+#endif
+
 /* init and exit section handling */
 #define INIT_DATA							\
 	*(.init.data)							\

@@ -26,7 +26,6 @@
 #include <linux/bootmem.h>
 
 #include <mach/hardware.h>
-#include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
 #include <asm/mach/flash.h>
@@ -113,7 +112,7 @@
 #ifdef CONFIG_SEMC_GPIO_EXTR
 #include  <linux/semc/semc_gpio_extr.h>
 #endif
-#define MSM_PMEM_MDP_SIZE	0xC74000
+#define MSM_PMEM_MDP_SIZE	0xb21000	//0xC74000 alf org
 #define MSM_PMEM_ADSP_SIZE	0x900000
 #ifdef CONFIG_CAPTURE_KERNEL
 #include "smd_private.h"
@@ -664,6 +663,28 @@ static int __init delta_init_usb(void)
 late_initcall(delta_init_usb);
 #endif
 
+#ifdef CONFIG_USB_EHCI_MSM
+static void msm_hsusb_vbus_power(unsigned phy_info, int on)
+{
+       if (on)
+               msm_hsusb_vbus_powerup();
+       else
+               msm_hsusb_vbus_shutdown();
+}
+
+static struct msm_usb_host_platform_data msm_usb_host_pdata = {
+       .phy_info       = (USB_PHY_INTEGRATED | USB_PHY_MODEL_65NM),
+};
+
+static void __init msm7x2x_init_host(void)
+{
+       if (machine_is_msm7x25_ffa() || machine_is_msm7x27_ffa())
+               return;
+
+       msm_add_host(0, &msm_usb_host_pdata);
+}
+#endif
+
 static int hsusb_rpc_connect(int connect)
 {
 #ifdef CONFIG_CAPTURE_KERNEL
@@ -689,6 +710,9 @@ static struct msm_otg_platform_data msm_otg_pdata = {
 	.pmic_register_vbus_sn   = msm_pm_app_register_vbus_sn,
 	.pmic_unregister_vbus_sn = msm_pm_app_unregister_vbus_sn,
 	.pmic_enable_ldo         = msm_pm_app_enable_usb_ldo,
+#ifdef CONFIG_USB_EHCI_MSM
+        .vbus_power = msm_hsusb_vbus_power,
+#endif
 };
 
 static struct msm_hsusb_gadget_platform_data msm_gadget_pdata;
@@ -754,12 +778,15 @@ static struct platform_device msm_device_snd = {
 	(1<<MSM_ADSP_CODEC_ADPCM)|(1<<MSM_ADSP_CODEC_YADPCM)| \
 	(1<<MSM_ADSP_CODEC_EVRC)|(1<<MSM_ADSP_CODEC_QCELP))
 #define DEC1_FORMAT ((1<<MSM_ADSP_CODEC_WAV)|(1<<MSM_ADSP_CODEC_ADPCM)| \
-	(1<<MSM_ADSP_CODEC_YADPCM)|(1<<MSM_ADSP_CODEC_QCELP))
+	(1<<MSM_ADSP_CODEC_YADPCM)|(1<<MSM_ADSP_CODEC_QCELP)| \
+        (1<<MSM_ADSP_CODEC_MP3))
 #define DEC2_FORMAT ((1<<MSM_ADSP_CODEC_WAV)|(1<<MSM_ADSP_CODEC_ADPCM)| \
-	(1<<MSM_ADSP_CODEC_YADPCM)|(1<<MSM_ADSP_CODEC_QCELP))
+	(1<<MSM_ADSP_CODEC_YADPCM)|(1<<MSM_ADSP_CODEC_QCELP)| \
+        (1<<MSM_ADSP_CODEC_MP3))
 #define DEC3_FORMAT ((1<<MSM_ADSP_CODEC_WAV)|(1<<MSM_ADSP_CODEC_ADPCM)| \
 	(1<<MSM_ADSP_CODEC_YADPCM)|(1<<MSM_ADSP_CODEC_QCELP))
 #define DEC4_FORMAT (1<<MSM_ADSP_CODEC_MIDI)
+
 
 static unsigned int dec_concurrency_table[] = {
 	/* Audio LP */
@@ -1834,7 +1861,11 @@ static void __init msm_mddi_toshiba_hvga_display_device_init(void)
 
 	panel_data->panel_info.mddi.vdopkt = MDDI_DEFAULT_PRIM_PIX_ATTR;
 
+#ifdef CONFIG_MSM7X27_VSYNC_ENABLE
+	panel_data->panel_info.lcd.vsync_enable = TRUE;
+#else
 	panel_data->panel_info.lcd.vsync_enable = FALSE;
+#endif
 	panel_data->panel_info.lcd.refx100 = 6200;  //6600 alf
 	panel_data->panel_info.lcd.v_back_porch = 1;
 	panel_data->panel_info.lcd.v_front_porch = 2;
@@ -1918,7 +1949,11 @@ static void __init msm_mddi_hitachi_hvga_display_device_init(void)
 
 	panel_data->panel_info.mddi.vdopkt = 0x0023;
 
+#ifdef CONFIG_MSM7X27_VSYNC_ENABLE
+	panel_data->panel_info.lcd.vsync_enable = TRUE;
+#else
 	panel_data->panel_info.lcd.vsync_enable = FALSE;
+#endif
 	panel_data->panel_info.lcd.refx100 = 8500;
 	panel_data->panel_info.lcd.v_back_porch = 1;
 	panel_data->panel_info.lcd.v_front_porch = 16;
@@ -2125,7 +2160,7 @@ static struct msm_acpu_clock_platform_data msm7x27_clock_data = {
 	.acpu_switch_time_us = 50,
 	.max_speed_delta_khz = 400000,	//256000 alf
 	.vdd_switch_time_us = 62,
-	.max_axi_khz = 160000,
+	.max_axi_khz = 200000,
 //	.max_axi_khz = 128000,
 };
 
@@ -2548,12 +2583,30 @@ static void __init msm7x2x_init(void)
 	kgsl_pdata.pt_max_count = 1;
 #endif	
 	msm_device_hsusb_peripheral.dev.platform_data = &msm_hsusb_pdata;
-	msm_device_otg.dev.platform_data = &msm_otg_pdata;
-
-	msm_gadget_pdata.swfi_latency =
-		msm7x27_pm_data
-		[MSM_PM_SLEEP_MODE_RAMP_DOWN_AND_WAIT_FOR_INTERRUPT].latency;
-	msm_device_gadget_peripheral.dev.platform_data = &msm_gadget_pdata;
+#ifdef CONFIG_USB_MSM_OTG_72K
+        msm_device_otg.dev.platform_data = &msm_otg_pdata;
+        if (machine_is_msm7x25_surf() || machine_is_msm7x25_ffa()) {
+                msm_otg_pdata.pemp_level =
+                         PRE_EMPHASIS_WITH_20_PERCENT;
+                msm_otg_pdata.drv_ampl = HS_DRV_AMPLITUDE_5_PERCENT;
+                msm_otg_pdata.cdr_autoreset = CDR_AUTO_RESET_ENABLE;
+                msm_otg_pdata.phy_reset_sig_inverted = 1;
+        }
+        if (machine_is_msm7x27_surf() || machine_is_msm7x27_ffa()) {
+                msm_otg_pdata.pemp_level =
+                        PRE_EMPHASIS_WITH_10_PERCENT;
+                msm_otg_pdata.drv_ampl = HS_DRV_AMPLITUDE_5_PERCENT;
+                msm_otg_pdata.cdr_autoreset = CDR_AUTO_RESET_DISABLE;
+                msm_otg_pdata.phy_reset_sig_inverted = 1;
+        }
+#ifdef CONFIG_USB_GADGET
+        msm_gadget_pdata.swfi_latency =
+                msm7x27_pm_data
+                [MSM_PM_SLEEP_MODE_RAMP_DOWN_AND_WAIT_FOR_INTERRUPT].latency;
+        msm_device_gadget_peripheral.dev.platform_data = &msm_gadget_pdata;
+#endif
+#endif
+	
 	msm_device_hsusb_host.dev.platform_data = &msm_hsusb_pdata;
 	msm_device_uart_dm1.dev.platform_data = &bt_uart_platform_data_delta;
 	platform_add_devices(devices, ARRAY_SIZE(devices));
@@ -2578,32 +2631,36 @@ static void __init msm7x2x_init(void)
 	msm_pm_set_platform_data(msm7x27_pm_data);
 }
 static unsigned pmem_kernel_ebi1_size = PMEM_KERNEL_EBI1_SIZE;
-static void __init pmem_kernel_ebi1_size_setup(char **p)
+static int __init pmem_kernel_ebi1_size_setup(char *p)
 {
-       pmem_kernel_ebi1_size = memparse(*p, p);
+        pmem_kernel_ebi1_size = memparse(p, NULL);
+        return 0;
 }
-__early_param("pmem_kernel_ebi1_size=", pmem_kernel_ebi1_size_setup);
+early_param("pmem_kernel_ebi1_size=", pmem_kernel_ebi1_size_setup);
 
 static unsigned pmem_mdp_size = MSM_PMEM_MDP_SIZE;
-static void __init pmem_mdp_size_setup(char **p)
+static int __init pmem_mdp_size_setup(char *p)
 {
-       pmem_mdp_size = memparse(*p, p);
+       pmem_mdp_size = memparse(p, NULL);
+       return 0;
 }
-__early_param("pmem_mdp_size=", pmem_mdp_size_setup);
+early_param("pmem_mdp_size=", pmem_mdp_size_setup);
 
 static unsigned pmem_adsp_size = MSM_PMEM_ADSP_SIZE;
-static void __init pmem_adsp_size_setup(char **p)
+static int __init pmem_adsp_size_setup(char *p)
 {
-       pmem_adsp_size = memparse(*p, p);
+       pmem_adsp_size = memparse(p, NULL);
+       return 0;
 }
-__early_param("pmem_adsp_size=", pmem_adsp_size_setup);
+early_param("pmem_adsp_size=", pmem_adsp_size_setup);
 
 static unsigned fb_size = MSM_FB_SIZE;
-static void __init fb_size_setup(char **p)
+static int __init fb_size_setup(char *p)
 {
-       fb_size = memparse(*p, p);
+       fb_size = memparse(p, NULL);
+       return 0;
 }
-__early_param("fb_size=", fb_size_setup);
+early_param("fb_size", fb_size_setup);
 
 static void __init msm_msm7x2x_allocate_memory_regions(void)
 {

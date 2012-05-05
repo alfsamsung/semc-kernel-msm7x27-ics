@@ -65,7 +65,7 @@ struct bus_type {
 	int (*resume_early)(struct device *dev);
 	int (*resume)(struct device *dev);
 
-	struct dev_pm_ops *pm;
+	const struct dev_pm_ops *pm;
 
 	struct bus_type_private *p;
 };
@@ -131,9 +131,9 @@ struct device_driver {
 	void (*shutdown) (struct device *dev);
 	int (*suspend) (struct device *dev, pm_message_t state);
 	int (*resume) (struct device *dev);
-	struct attribute_group **groups;
+	const struct attribute_group **groups;
 
-	struct dev_pm_ops *pm;
+	const struct dev_pm_ops *pm;;
 
 	struct driver_private *p;
 };
@@ -193,6 +193,7 @@ struct class {
 	struct kobject			*dev_kobj;
 
 	int (*dev_uevent)(struct device *dev, struct kobj_uevent_env *env);
+	char *(*nodename)(struct device *dev);
 
 	void (*class_release)(struct class *class);
 	void (*dev_release)(struct device *dev);
@@ -200,7 +201,7 @@ struct class {
 	int (*suspend)(struct device *dev, pm_message_t state);
 	int (*resume)(struct device *dev);
 
-	struct dev_pm_ops *pm;
+	const struct dev_pm_ops *pm;;
 	struct class_private *p;
 };
 
@@ -286,14 +287,15 @@ extern void class_destroy(struct class *cls);
  */
 struct device_type {
 	const char *name;
-	struct attribute_group **groups;
+	const struct attribute_group **groups;
 	int (*uevent)(struct device *dev, struct kobj_uevent_env *env);
+	char *(*nodename)(struct device *dev);
 	void (*release)(struct device *dev);
 
 	int (*suspend)(struct device *dev, pm_message_t state);
 	int (*resume)(struct device *dev);
 
-	struct dev_pm_ops *pm;
+	const struct dev_pm_ops *pm;;
 };
 
 /* interface for exporting device attributes */
@@ -375,7 +377,7 @@ struct device {
 
 	struct kobject kobj;
 	char	bus_id[BUS_ID_SIZE];	/* position on parent bus */
-	unsigned		uevent_suppress:1;
+	
 	const char		*init_name; /* initial name of the device */
 	struct device_type	*type;
 
@@ -417,7 +419,7 @@ struct device {
 
 	struct klist_node	knode_class;
 	struct class		*class;
-	struct attribute_group	**groups;	/* optional groups */
+	const struct attribute_group **groups;	/* optional groups */
 
 	void	(*release)(struct device *dev);
 };
@@ -463,6 +465,16 @@ static inline void dev_set_drvdata(struct device *dev, void *data)
 	dev->driver_data = data;
 }
 
+static inline unsigned int dev_get_uevent_suppress(const struct device *dev)
+{
+       return dev->kobj.uevent_suppress;
+}
+
+static inline void dev_set_uevent_suppress(struct device *dev, int val)
+{
+       dev->kobj.uevent_suppress = val;
+}
+
 static inline int device_is_registered(struct device *dev)
 {
 	return dev->kobj.state_in_sysfs;
@@ -484,6 +496,7 @@ extern struct device *device_find_child(struct device *dev, void *data,
 				int (*match)(struct device *dev, void *data));
 extern int device_rename(struct device *dev, char *new_name);
 extern int device_move(struct device *dev, struct device *new_parent);
+extern const char *device_get_nodename(struct device *dev, const char **tmp);
 
 /*
  * Root device objects for grouping under /sys/devices

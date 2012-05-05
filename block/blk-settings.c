@@ -217,6 +217,15 @@ void blk_queue_max_sectors(struct request_queue *q, unsigned int max_sectors)
 }
 EXPORT_SYMBOL(blk_queue_max_sectors);
 
+void blk_queue_max_hw_sectors(struct request_queue *q, unsigned int max_sectors)
+{
+       if (BLK_DEF_MAX_SECTORS > max_sectors)
+               q->max_hw_sectors = BLK_DEF_MAX_SECTORS;
+       else
+               q->max_hw_sectors = max_sectors;
+}
+EXPORT_SYMBOL(blk_queue_max_hw_sectors);
+
 /**
  * blk_queue_max_phys_segments - set max phys segments for a request for this queue
  * @q:  the request queue for the device
@@ -314,7 +323,7 @@ EXPORT_SYMBOL(blk_queue_hardsect_size);
  **/
 void blk_queue_stack_limits(struct request_queue *t, struct request_queue *b)
 {
-	/* zero is "infinity" */
+	/* zero is "infinity" */  
 	t->max_sectors = min_not_zero(t->max_sectors, b->max_sectors);
 	t->max_hw_sectors = min_not_zero(t->max_hw_sectors, b->max_hw_sectors);
 	t->seg_boundary_mask = min_not_zero(t->seg_boundary_mask, b->seg_boundary_mask);
@@ -394,11 +403,11 @@ int blk_queue_dma_drain(struct request_queue *q,
 			       dma_drain_needed_fn *dma_drain_needed,
 			       void *buf, unsigned int size)
 {
-	if (q->max_hw_segments < 2 || q->max_phys_segments < 2)
+	 if (queue_max_hw_segments(q) < 2 || queue_max_phys_segments(q) < 2)
 		return -EINVAL;
 	/* make room for appending the drain */
-	--q->max_hw_segments;
-	--q->max_phys_segments;
+	blk_queue_max_hw_segments(q, queue_max_hw_segments(q) - 1);
+        blk_queue_max_phys_segments(q, queue_max_phys_segments(q) - 1);
 	q->dma_drain_needed = dma_drain_needed;
 	q->dma_drain_buffer = buf;
 	q->dma_drain_size = size;

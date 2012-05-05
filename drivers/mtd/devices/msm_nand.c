@@ -1714,7 +1714,7 @@ static int __devinit msm_nand_probe(struct platform_device *pdev)
 	pr_info("allocated dma buffer at %p, dma_addr %x\n",
 		info->msm_nand.dma_buffer, info->msm_nand.dma_addr);
 
-	info->mtd.name = pdev->dev.bus_id;
+	info->mtd.name = dev_name(&pdev->dev);
 	info->mtd.priv = &info->msm_nand;
 	info->mtd.owner = THIS_MODULE;
 

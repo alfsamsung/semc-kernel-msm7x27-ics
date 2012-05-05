@@ -83,8 +83,19 @@
 /*
  * lib/bitmap.c provides these functions:
  */
+extern void bitmap_set(unsigned long *map, int i, int len);
+extern void bitmap_clear(unsigned long *map, int start, int nr);
+
+extern unsigned long bitmap_find_next_zero_area_off(unsigned long *map,unsigned long size,unsigned long start,unsigned int nr,unsigned long align_mask,unsigned long align_offset);
+
+static inline unsigned long bitmap_find_next_zero_area(unsigned long *map,unsigned long size,unsigned long start,unsigned int nr,unsigned long align_mask)
+{
+  return bitmap_find_next_zero_area_off(map, size, start, nr,align_mask, 0);
+
+}
 
 extern int __bitmap_empty(const unsigned long *bitmap, int bits);
+extern int bitmap_parselist_user(const char __user *ubuf, unsigned int ulen,unsigned long *dst, int nbits);
 extern int __bitmap_full(const unsigned long *bitmap, int bits);
 extern int __bitmap_equal(const unsigned long *bitmap1,
                 	const unsigned long *bitmap2, int bits);
@@ -94,13 +105,13 @@ extern void __bitmap_shift_right(unsigned long *dst,
                         const unsigned long *src, int shift, int bits);
 extern void __bitmap_shift_left(unsigned long *dst,
                         const unsigned long *src, int shift, int bits);
-extern void __bitmap_and(unsigned long *dst, const unsigned long *bitmap1,
+extern int __bitmap_and(unsigned long *dst, const unsigned long *bitmap1,
 			const unsigned long *bitmap2, int bits);
 extern void __bitmap_or(unsigned long *dst, const unsigned long *bitmap1,
 			const unsigned long *bitmap2, int bits);
 extern void __bitmap_xor(unsigned long *dst, const unsigned long *bitmap1,
 			const unsigned long *bitmap2, int bits);
-extern void __bitmap_andnot(unsigned long *dst, const unsigned long *bitmap1,
+extern int __bitmap_andnot(unsigned long *dst, const unsigned long *bitmap1,
 			const unsigned long *bitmap2, int bits);
 extern int __bitmap_intersects(const unsigned long *bitmap1,
 			const unsigned long *bitmap2, int bits);

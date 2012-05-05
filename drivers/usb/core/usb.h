@@ -102,6 +102,10 @@ static inline int usb_autoresume_device(struct usb_device *udev)
 
 #endif
 
+#ifdef CONFIG_USB_OTG
+extern void usb_hnp_polling_work(struct work_struct *work);
+#endif
+
 extern struct workqueue_struct *ksuspend_usb_wq;
 extern struct bus_type usb_bus_type;
 extern struct device_type usb_device_type;
@@ -143,8 +147,8 @@ static inline int is_active(const struct usb_interface *f)
 extern const char *usbcore_name;
 
 /* sysfs stuff */
-extern struct attribute_group *usb_device_groups[];
-extern struct attribute_group *usb_interface_groups[];
+extern const struct attribute_group *usb_device_groups[];
+extern const struct attribute_group *usb_interface_groups[];
 
 /* usbfs stuff */
 extern struct mutex usbfs_mutex;

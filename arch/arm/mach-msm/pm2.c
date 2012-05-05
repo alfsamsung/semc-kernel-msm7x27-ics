@@ -737,7 +737,7 @@ static int msm_pm_read_proc
 
 	if (!off) {
 		SNPRINTF(p, count, "Clocks against last TCXO shutdown:\n");
-		for_each_bit(i, msm_pm_clocks_no_tcxo_shutdown, NR_CLKS) {
+		for_each_set_bit(i, msm_pm_clocks_no_tcxo_shutdown, NR_CLKS) {
 			clk_name[0] = '\0';
 			msm_clock_get_name(i, clk_name, sizeof(clk_name));
 			SNPRINTF(p, count, "  %s (id=%d)\n", clk_name, i);

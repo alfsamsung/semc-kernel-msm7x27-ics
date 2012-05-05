@@ -293,6 +293,21 @@ static inline void ptep_modify_prot_commit(struct mm_struct *mm,
 #define arch_flush_lazy_cpu_mode()	do {} while (0)
 #endif
 
+/*
+ * A facility to provide batching of the reload of page tables and
+ * other process state with the actual context switch code for
+ * paravirtualized guests.  By convention, only one of the batched
+ * update (lazy) modes (CPU, MMU) should be active at any given time,
+ * entry should never be nested, and entry and exits should always be
+ * paired.  This is for sanity of maintaining and reasoning about the
+ * kernel code.  In this case, the exit (end of the context switch) is
+ * in architecture-specific code, and so doesn't need a generic
+ * definition.
+ */
+#ifndef __HAVE_ARCH_START_CONTEXT_SWITCH
+#define arch_start_context_switch(prev) do {} while (0)
+#endif
+
 #ifndef __HAVE_PFNMAP_TRACKING
 /*
  * Interface that can be used by architecture code to keep track of

@@ -697,11 +697,12 @@ ENTRY(__switch_to)
 #ifdef CONFIG_MMU
 	ldr	r6, [r2, #TI_CPU_DOMAIN]
 #endif
+
 #if __LINUX_ARM_ARCH__ >= 6
 #ifdef CONFIG_CPU_32v6K
-	clrex
+       clrex
 #else
-	strex	r5, r4, [ip]			@ Clear exclusive monitor
+       strex   r5, r4, [ip]                    @ Clear exclusive monitor
 #endif
 #endif
 #if defined(CONFIG_HAS_TLS_REG)

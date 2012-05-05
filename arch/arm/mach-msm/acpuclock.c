@@ -797,9 +797,9 @@ static void __init acpu_freq_tbl_fixup(void)
 
 		if (pll0_needs_fixup && t->pll == ACPU_PLL_0)
 			SLOWER_BY(t->a11clk_src_div, 2);
-		if (axi_160mhz && drv_state.max_axi_khz >= 200000
+		if (axi_160mhz && drv_state.max_axi_khz >= 160000
 		    && t->ahbclk_khz > 128000)
-			t->axiclk_khz = 200000;
+			t->axiclk_khz = 160000;
 		if (axi_200mhz && drv_state.max_axi_khz >= 200000
 		    && t->ahbclk_khz > 160000)
 			t->axiclk_khz = 200000;

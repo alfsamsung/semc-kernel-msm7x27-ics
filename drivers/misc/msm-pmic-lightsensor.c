@@ -208,7 +208,9 @@ static ssize_t ls_read(struct file *file, char __user *buf,
 	mutex_lock(&ls.update_lock);
 
 	if (ls.state & LS_SUSPEND) {
+#if DEBUG
 		printk(KERN_ERR "%s:  is suspended!\n", DEV_NAME);
+#endif
 		mutex_unlock(&ls.update_lock);
 		return -EBUSY;
 	}

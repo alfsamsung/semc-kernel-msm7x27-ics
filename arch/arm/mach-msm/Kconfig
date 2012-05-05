@@ -1016,4 +1016,12 @@ config PMIC_TIME
 	default n
 	help
 	  This exports pmic time in a sysfs entry.
+
+config MSM7X27_VSYNC_ENABLE
+	bool "Enable Vsync"
+	depends on (ARCH_MSM)
+	default n
+	help
+	  Enable vsync on panels.
+
 endif

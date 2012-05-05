@@ -37,6 +37,8 @@
 #define REQUEST_STOP		0
 #define REQUEST_START		1
 #define REQUEST_RESUME		2
+#define REQUEST_HNP_SUSPEND     3
+#define REQUEST_HNP_RESUME      4
 
 enum hsusb_phy_type {
 	UNDEFINED,
@@ -69,6 +71,25 @@ enum chg_type {
 #endif /*  CONFIG_SUPPORT_ALIEN_USB_CHARGER */
 };
 #endif
+
+enum pre_emphasis_level {
+       PRE_EMPHASIS_DEFAULT,
+       PRE_EMPHASIS_DISABLE,
+       PRE_EMPHASIS_WITH_10_PERCENT = (1 << 5),
+       PRE_EMPHASIS_WITH_20_PERCENT = (3 << 4),
+};
+enum cdr_auto_reset {
+       CDR_AUTO_RESET_DEFAULT,
+       CDR_AUTO_RESET_ENABLE,
+       CDR_AUTO_RESET_DISABLE,
+};
+enum hs_drv_amplitude {
+       HS_DRV_AMPLITUDE_DEFAULT,
+       HS_DRV_AMPLITUDE_ZERO_PERCENT,
+       HS_DRV_AMPLITUDE_25_PERCENTI = (1 << 2),
+       HS_DRV_AMPLITUDE_5_PERCENT = (1 << 3),
+       HS_DRV_AMPLITUDE_75_PERCENT = (3 << 2),
+};
 
 struct msm_hsusb_gadget_platform_data {
 	int *phy_init_seq;
@@ -109,20 +130,32 @@ struct msm_otg_platform_data {
 	unsigned int core_clk;
 	int pmic_vbus_irq;
 	int pclk_required_during_lpm;
-
+	enum pre_emphasis_level pemp_level;
+        enum cdr_auto_reset     cdr_autoreset;
+        enum hs_drv_amplitude   drv_ampl;
+        int                     phy_reset_sig_inverted;
+	/* if usb link is in sps there is no need for
+         * usb pclk as dayatona fabric clock will be
+         * used instead
+         */
+        int usb_in_sps;
+	
 	/* pmic notfications apis */
 	int (*pmic_notif_init) (void);
 	void (*pmic_notif_deinit) (void);
 	int (*pmic_register_vbus_sn) (void (*callback)(int online));
 	void (*pmic_unregister_vbus_sn) (void (*callback)(int online));
 	int (*pmic_enable_ldo) (int);
+	void (*vbus_power) (unsigned phy_info, int on);
+		
 };
 
 struct msm_usb_host_platform_data {
 	unsigned phy_info;
-	int (*phy_reset)(void __iomem *addr);
+	unsigned int power_budget;
 	void (*config_gpio)(unsigned int config);
 	void (*vbus_power) (unsigned phy_info, int on);
+	int  (*vbus_init)(int init);
 };
 
 #endif

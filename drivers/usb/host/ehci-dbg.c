@@ -37,6 +37,84 @@
 
 #ifdef	DEBUG
 
+/* check the values in the HCSPARAMS register
+ * (host controller _Structural_ parameters)
+ * see EHCI spec, Table 2-4 for each value
+ */
+static void dbg_hcs_params (struct ehci_hcd *ehci, char *label)
+{
+	u32	params = ehci_readl(ehci, &ehci->caps->hcs_params);
+
+	ehci_dbg (ehci,
+		"%s hcs_params 0x%x dbg=%d%s cc=%d pcc=%d%s%s ports=%d\n",
+		label, params,
+		HCS_DEBUG_PORT (params),
+		HCS_INDICATOR (params) ? " ind" : "",
+		HCS_N_CC (params),
+		HCS_N_PCC (params),
+		HCS_PORTROUTED (params) ? "" : " ordered",
+		HCS_PPC (params) ? "" : " !ppc",
+		HCS_N_PORTS (params)
+		);
+	/* Port routing, per EHCI 0.95 Spec, Section 2.2.5 */
+	if (HCS_PORTROUTED (params)) {
+		int i;
+		char buf [46], tmp [7], byte;
+
+		buf[0] = 0;
+		for (i = 0; i < HCS_N_PORTS (params); i++) {
+			// FIXME MIPS won't readb() ...
+			byte = readb (&ehci->caps->portroute[(i>>1)]);
+			sprintf(tmp, "%d ",
+				((i & 0x1) ? ((byte)&0xf) : ((byte>>4)&0xf)));
+			strcat(buf, tmp);
+		}
+		ehci_dbg (ehci, "%s portroute %s\n",
+				label, buf);
+	}
+}
+#else
+
+static inline void dbg_hcs_params (struct ehci_hcd *ehci, char *label) {}
+
+#endif
+
+#ifdef	DEBUG
+
+/* check the values in the HCCPARAMS register
+ * (host controller _Capability_ parameters)
+ * see EHCI Spec, Table 2-5 for each value
+ * */
+static void dbg_hcc_params (struct ehci_hcd *ehci, char *label)
+{
+	u32	params = ehci_readl(ehci, &ehci->caps->hcc_params);
+
+	if (HCC_ISOC_CACHE (params)) {
+		ehci_dbg (ehci,
+			"%s hcc_params %04x caching frame %s%s%s\n",
+			label, params,
+			HCC_PGM_FRAMELISTLEN(params) ? "256/512/1024" : "1024",
+			HCC_CANPARK(params) ? " park" : "",
+			HCC_64BIT_ADDR(params) ? " 64 bit addr" : "");
+	} else {
+		ehci_dbg (ehci,
+			"%s hcc_params %04x thresh %d uframes %s%s%s\n",
+			label,
+			params,
+			HCC_ISOC_THRES(params),
+			HCC_PGM_FRAMELISTLEN(params) ? "256/512/1024" : "1024",
+			HCC_CANPARK(params) ? " park" : "",
+			HCC_64BIT_ADDR(params) ? " 64 bit addr" : "");
+	}
+}
+#else
+
+static inline void dbg_hcc_params (struct ehci_hcd *ehci, char *label) {}
+
+#endif
+
+#ifdef	DEBUG
+
 static void __maybe_unused
 dbg_qtd (const char *label, struct ehci_hcd *ehci, struct ehci_qtd *qtd)
 {
@@ -56,10 +134,11 @@ dbg_qtd (const char *label, struct ehci_hcd *ehci, struct ehci_qtd *qtd)
 static void __maybe_unused
 dbg_qh (const char *label, struct ehci_hcd *ehci, struct ehci_qh *qh)
 {
+	struct ehci_qh_hw *hw = qh->hw;
+
 	ehci_dbg (ehci, "%s qh %p n%08x info %x %x qtd %x\n", label,
-		qh, qh->hw_next, qh->hw_info1, qh->hw_info2,
-		qh->hw_current);
-	dbg_qtd ("overlay", ehci, (struct ehci_qtd *) &qh->hw_qtd_next);
+		qh, hw->hw_next, hw->hw_info1, hw->hw_info2, hw->hw_current);
+	dbg_qtd("overlay", ehci, (struct ehci_qtd *) &hw->hw_qtd_next);
 }
 
 static void __maybe_unused
@@ -322,31 +401,32 @@ static void qh_lines (
 	char			*next = *nextp;
 	char			mark;
 	__le32			list_end = EHCI_LIST_END(ehci);
+	struct ehci_qh_hw	*hw = qh->hw;
 
-	if (qh->hw_qtd_next == list_end)	/* NEC does this */
+	if (hw->hw_qtd_next == list_end)	/* NEC does this */
 		mark = '@';
 	else
-		mark = token_mark(ehci, qh->hw_token);
+		mark = token_mark(ehci, hw->hw_token);
 	if (mark == '/') {	/* qh_alt_next controls qh advance? */
-		if ((qh->hw_alt_next & QTD_MASK(ehci))
-				== ehci->async->hw_alt_next)
+		if ((hw->hw_alt_next & QTD_MASK(ehci))
+				== ehci->async->hw->hw_alt_next)
 			mark = '#';	/* blocked */
-		else if (qh->hw_alt_next == list_end)
+		else if (hw->hw_alt_next == list_end)
 			mark = '.';	/* use hw_qtd_next */
 		/* else alt_next points to some other qtd */
 	}
-	scratch = hc32_to_cpup(ehci, &qh->hw_info1);
-	hw_curr = (mark == '*') ? hc32_to_cpup(ehci, &qh->hw_current) : 0;
+	scratch = hc32_to_cpup(ehci, &hw->hw_info1);
+	hw_curr = (mark == '*') ? hc32_to_cpup(ehci, &hw->hw_current) : 0;
 	temp = scnprintf (next, size,
 			"qh/%p dev%d %cs ep%d %08x %08x (%08x%c %s nak%d)",
 			qh, scratch & 0x007f,
 			speed_char (scratch),
 			(scratch >> 8) & 0x000f,
-			scratch, hc32_to_cpup(ehci, &qh->hw_info2),
-			hc32_to_cpup(ehci, &qh->hw_token), mark,
-			(cpu_to_hc32(ehci, QTD_TOGGLE) & qh->hw_token)
+			scratch, hc32_to_cpup(ehci, &hw->hw_info2),
+			hc32_to_cpup(ehci, &hw->hw_token), mark,
+			(cpu_to_hc32(ehci, QTD_TOGGLE) & hw->hw_token)
 				? "data1" : "data0",
-			(hc32_to_cpup(ehci, &qh->hw_alt_next) >> 1) & 0x0f);
+			(hc32_to_cpup(ehci, &hw->hw_alt_next) >> 1) & 0x0f);
 	size -= temp;
 	next += temp;
 
@@ -357,10 +437,10 @@ static void qh_lines (
 		mark = ' ';
 		if (hw_curr == td->qtd_dma)
 			mark = '*';
-		else if (qh->hw_qtd_next == cpu_to_hc32(ehci, td->qtd_dma))
+		else if (hw->hw_qtd_next == cpu_to_hc32(ehci, td->qtd_dma))
 			mark = '+';
 		else if (QTD_LENGTH (scratch)) {
-			if (td->hw_alt_next == ehci->async->hw_alt_next)
+			if (td->hw_alt_next == ehci->async->hw->hw_alt_next)
 				mark = '#';
 			else if (td->hw_alt_next != list_end)
 				mark = '/';
@@ -472,12 +552,15 @@ static ssize_t fill_periodic_buffer(struct debug_buffer *buf)
 		next += temp;
 
 		do {
+			struct ehci_qh_hw *hw;
+
 			switch (hc32_to_cpu(ehci, tag)) {
 			case Q_TYPE_QH:
+				hw = p.qh->hw;
 				temp = scnprintf (next, size, " qh%d-%04x/%p",
 						p.qh->period,
 						hc32_to_cpup(ehci,
-								&p.qh->hw_info2)
+							&hw->hw_info2)
 							/* uframe masks */
 							& (QH_CMASK | QH_SMASK),
 						p.qh);
@@ -498,7 +581,7 @@ static ssize_t fill_periodic_buffer(struct debug_buffer *buf)
 				/* show more info the first time around */
 				if (temp == seen_count) {
 					u32	scratch = hc32_to_cpup(ehci,
-							&p.qh->hw_info1);
+							&hw->hw_info1);
 					struct ehci_qtd	*qtd;
 					char		*type = "";
 
@@ -531,7 +614,7 @@ static ssize_t fill_periodic_buffer(struct debug_buffer *buf)
 				} else
 					temp = 0;
 				if (p.qh) {
-					tag = Q_NEXT_TYPE(ehci, p.qh->hw_next);
+					tag = Q_NEXT_TYPE(ehci, hw->hw_next);
 					p = p.qh->qh_next;
 				}
 				break;
@@ -801,8 +884,7 @@ static int debug_close(struct inode *inode, struct file *file)
 	struct debug_buffer *buf = file->private_data;
 
 	if (buf) {
-		if (buf->output_buf)
-			vfree(buf->output_buf);
+		vfree(buf->output_buf);
 		kfree(buf);
 	}
 

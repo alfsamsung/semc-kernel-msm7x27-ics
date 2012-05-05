@@ -510,9 +510,11 @@ static void handle_smd_irq(struct list_head *list, void (*notify)(void))
 	int do_notify = 0;
 	unsigned ch_flags;
 	unsigned tmp;
+	unsigned char state_change;
 
 	spin_lock_irqsave(&smd_lock, flags);
 	list_for_each_entry(ch, list, ch_list) {
+		state_change = 0;
 		ch_flags = 0;
 		if (ch_is_open(ch)) {
 			if (ch->recv->fHEAD) {
@@ -532,12 +534,16 @@ static void handle_smd_irq(struct list_head *list, void (*notify)(void))
 			}
 		}
 		tmp = ch->recv->state;
-		if (tmp != ch->last_state)
+		 if (tmp != ch->last_state) {
 			smd_state_change(ch, ch->last_state, tmp);
+			state_change = 1;
+		}
 		if (ch_flags) {
 			ch->update_state(ch);
 			ch->notify(ch->priv, SMD_EVENT_DATA);
 		}
+		if (ch_flags & 0x4 && !state_change)
+                        ch->notify(ch->priv, SMD_EVENT_STATUS);
 	}
 	if (do_notify)
 		notify();
@@ -1081,11 +1087,10 @@ int smd_tiocmget(smd_channel_t *ch)
 		(ch->send->fDSR ? TIOCM_DTR : 0);
 }
 
-int smd_tiocmset(smd_channel_t *ch, unsigned int set, unsigned int clear)
+/* this api will be called while holding smd_lock */
+int
+smd_tiocmset_from_cb(smd_channel_t *ch, unsigned int set, unsigned int clear)
 {
-	unsigned long flags;
-
-	spin_lock_irqsave(&smd_lock, flags);
 	if (set & TIOCM_DTR)
 		ch->send->fDSR = 1;
 
@@ -1101,6 +1106,17 @@ int smd_tiocmset(smd_channel_t *ch, unsigned int set, unsigned int clear)
 	ch->send->fSTATE = 1;
 	barrier();
 	ch->notify_other_cpu();
+
+        return 0;
+}
+EXPORT_SYMBOL(smd_tiocmset_from_cb);
+
+int smd_tiocmset(smd_channel_t *ch, unsigned int set, unsigned int clear)
+{
+        unsigned long flags;
+
+        spin_lock_irqsave(&smd_lock, flags);
+        smd_tiocmset_from_cb(ch, set, clear);
 	spin_unlock_irqrestore(&smd_lock, flags);
 
 	return 0;

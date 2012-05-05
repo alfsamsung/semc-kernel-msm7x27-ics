@@ -1412,11 +1412,11 @@ static inline void __generic_make_request(struct bio *bio)
 			goto end_io;
 		}
 
-		if (unlikely(nr_sectors > q->max_hw_sectors)) {
+		if (unlikely(nr_sectors > queue_max_hw_sectors(q))) {
 			printk(KERN_ERR "bio too big device %s (%u > %u)\n",
-				bdevname(bio->bi_bdev, b),
-				bio_sectors(bio),
-				q->max_hw_sectors);
+			       bdevname(bio->bi_bdev, b),
+			       bio_sectors(bio),
+			       queue_max_hw_sectors(q));
 			goto end_io;
 		}
 
@@ -1597,8 +1597,8 @@ int blk_rq_check_limits(struct request_queue *q, struct request *rq)
 	 * limitation.
 	 */
 	blk_recalc_rq_segments(rq);
-	if (rq->nr_phys_segments > q->max_phys_segments ||
-	    rq->nr_phys_segments > q->max_hw_segments) {
+	if (rq->nr_phys_segments > queue_max_phys_segments(q) ||
+	    rq->nr_phys_segments > queue_max_hw_segments(q)) {
 		printk(KERN_ERR "%s: over max segments limit.\n", __func__);
 		return -EIO;
 	}
