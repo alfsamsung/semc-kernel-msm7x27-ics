@@ -96,6 +96,31 @@ void blk_queue_lld_busy(struct request_queue *q, lld_busy_fn *fn)
 EXPORT_SYMBOL_GPL(blk_queue_lld_busy);
 
 /**
+ * blk_set_default_limits - reset limits to default values
+ * @limits:  the queue_limits structure to reset
+ *
+ * Description:
+ *   Returns a queue_limit struct to its default state.  Can be used by
+ *   stacking drivers like DM that stage table swaps and reuse an
+ *   existing device queue.
+ */
+void blk_set_default_limits(struct queue_limits *lim)
+{
+       lim->max_phys_segments = MAX_PHYS_SEGMENTS;
+       lim->max_hw_segments = MAX_HW_SEGMENTS;
+       lim->seg_boundary_mask = BLK_SEG_BOUNDARY_MASK;
+       lim->max_segment_size = MAX_SEGMENT_SIZE;
+       lim->max_sectors = lim->max_hw_sectors = SAFE_MAX_SECTORS;
+       lim->logical_block_size = lim->physical_block_size = lim->io_min = 512;
+       lim->bounce_pfn = BLK_BOUNCE_ANY;
+       lim->alignment_offset = 0;
+       lim->io_opt = 0;
+       lim->misaligned = 0;
+       lim->no_cluster = 0;
+}
+EXPORT_SYMBOL(blk_set_default_limits);
+
+/**
  * blk_queue_make_request - define an alternate make_request function for a device
  * @q:  the request queue for the device to be affected
  * @mfn: the alternate make_request function
@@ -123,18 +148,8 @@ void blk_queue_make_request(struct request_queue *q, make_request_fn *mfn)
 	 * set defaults
 	 */
 	q->nr_requests = BLKDEV_MAX_RQ;
-	blk_queue_max_phys_segments(q, MAX_PHYS_SEGMENTS);
-	blk_queue_max_hw_segments(q, MAX_HW_SEGMENTS);
-	blk_queue_segment_boundary(q, BLK_SEG_BOUNDARY_MASK);
-	blk_queue_max_segment_size(q, MAX_SEGMENT_SIZE);
-
+	
 	q->make_request_fn = mfn;
-	q->backing_dev_info.ra_pages =
-			(VM_MAX_READAHEAD * 1024) / PAGE_CACHE_SIZE;
-	q->backing_dev_info.state = 0;
-	q->backing_dev_info.capabilities = BDI_CAP_MAP_COPY;
-	blk_queue_max_sectors(q, SAFE_MAX_SECTORS);
-	blk_queue_logical_block_size(q, 512);
 	blk_queue_dma_alignment(q, 511);
 	blk_queue_congestion_threshold(q);
 	q->nr_batching = BLK_BATCH_REQ;
@@ -146,6 +161,8 @@ void blk_queue_make_request(struct request_queue *q, make_request_fn *mfn)
 
 	q->unplug_timer.function = blk_unplug_timeout;
 	q->unplug_timer.data = (unsigned long)q;
+	
+	blk_set_default_limits(&q->limits);
 
 	/*
 	 * by default assume old behaviour and bounce for any highmem page
@@ -446,7 +463,7 @@ EXPORT_SYMBOL(blk_queue_stack_limits);
 /**
  * blk_stack_limits - adjust queue_limits for stacked devices
  * @t:	the stacking driver limits (top)
- * @bdev:  the underlying queue limits (bottom)
+ * @b:  the underlying queue limits (bottom)
  * @offset:  offset to beginning of data within component device
  *
  * Description:
@@ -459,6 +476,7 @@ int blk_stack_limits(struct queue_limits *t, struct queue_limits *b,
 {
 	t->max_sectors = min_not_zero(t->max_sectors, b->max_sectors);
 	t->max_hw_sectors = min_not_zero(t->max_hw_sectors, b->max_hw_sectors);
+	t->bounce_pfn = min_not_zero(t->bounce_pfn, b->bounce_pfn);
 
 	t->seg_boundary_mask = min_not_zero(t->seg_boundary_mask,
 					    b->seg_boundary_mask);
@@ -501,10 +519,11 @@ int blk_stack_limits(struct queue_limits *t, struct queue_limits *b,
 
 	return 0;
 }
+EXPORT_SYMBOL(blk_stack_limits);
 
 /**
  * disk_stack_limits - adjust queue limits for stacked drivers
- * @t:	MD/DM gendisk (top)
+ * @disk:  MD/DM gendisk (top)
  * @bdev:  the underlying block device (bottom)
  * @offset:  offset to beginning of data within component device
  *
