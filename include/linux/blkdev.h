@@ -315,12 +315,15 @@ struct queue_limits {
 	unsigned int		io_min;
 	unsigned int		io_opt;
 	unsigned int            max_discard_sectors;
+	unsigned int            discard_granularity;
+        unsigned int            discard_alignment;
 
 	unsigned short		logical_block_size;
 	unsigned short		max_hw_segments;
 	unsigned short		max_phys_segments;
 
 	unsigned char		misaligned;
+	unsigned char           discard_misaligned;
 	unsigned char		no_cluster;
 };
 
@@ -1074,6 +1077,21 @@ static inline int queue_sector_alignment_offset(struct request_queue *q,
 						sector_t sector)
 {
 	return queue_limit_alignment_offset(&q->limits, sector << 9);
+}
+
+static inline int queue_discard_alignment(struct request_queue *q)
+{
+       if (q->limits.discard_misaligned)
+               return -1;
+
+       return q->limits.discard_alignment;
+}
+
+static inline int queue_sector_discard_alignment(struct request_queue *q,
+                                                sector_t sector)
+{
+       return ((sector << 9) - q->limits.discard_alignment)
+               & (q->limits.discard_granularity - 1);
 }
 
 static inline int queue_dma_alignment(struct request_queue *q)

@@ -7,6 +7,7 @@
 #include <linux/bio.h>
 #include <linux/blkdev.h>
 #include <linux/bootmem.h>	/* for max_pfn/max_low_pfn */
+#include <linux/gcd.h>
 
 #include "blk.h"
 
@@ -94,7 +95,10 @@ void blk_set_default_limits(struct queue_limits *lim)
        lim->seg_boundary_mask = BLK_SEG_BOUNDARY_MASK;
        lim->max_segment_size = MAX_SEGMENT_SIZE;
        lim->max_sectors = lim->max_hw_sectors = SAFE_MAX_SECTORS;
-       lim->max_discard_sectors = SAFE_MAX_SECTORS;
+       lim->max_discard_sectors = 0;
+       lim->discard_granularity = 0;
+       lim->discard_alignment = 0;
+       lim->discard_misaligned = 0;
        lim->logical_block_size = lim->physical_block_size = lim->io_min = 512;
        lim->bounce_pfn = BLK_BOUNCE_ANY;
        lim->alignment_offset = 0;
@@ -473,6 +477,16 @@ void blk_queue_stack_limits(struct request_queue *t, struct request_queue *b)
 }
 EXPORT_SYMBOL(blk_queue_stack_limits);
 
+static unsigned int lcm(unsigned int a, unsigned int b)
+{
+       if (a && b)
+               return (a * b) / gcd(a, b);
+       else if (b)
+               return b;
+
+       return a;
+}
+
 /**
  * blk_stack_limits - adjust queue_limits for stacked devices
  * @t:	the stacking driver limits (top)
@@ -487,6 +501,10 @@ EXPORT_SYMBOL(blk_queue_stack_limits);
 int blk_stack_limits(struct queue_limits *t, struct queue_limits *b,
 		     sector_t offset)
 {
+	int ret;
+
+        ret = 0;
+
 	t->max_sectors = min_not_zero(t->max_sectors, b->max_sectors);
 	t->max_hw_sectors = min_not_zero(t->max_hw_sectors, b->max_hw_sectors);
 	t->bounce_pfn = min_not_zero(t->bounce_pfn, b->bounce_pfn);
@@ -516,21 +534,40 @@ int blk_stack_limits(struct queue_limits *t, struct queue_limits *b,
 	if (offset &&
 	    (offset & (b->physical_block_size - 1)) != b->alignment_offset) {
 		t->misaligned = 1;
-		return -1;
+		ret = -1;
+        }
+ 
+        if (offset &&
+            (offset & (b->discard_granularity - 1)) != b->discard_alignment) {
+                t->discard_misaligned = 1;
+                ret = -1;
 	}
 
 	/* If top has no alignment offset, inherit from bottom */
 	if (!t->alignment_offset)
 		t->alignment_offset =
 			b->alignment_offset & (b->physical_block_size - 1);
+			
+	if (!t->discard_alignment)
+                t->discard_alignment =
+                        b->discard_alignment & (b->discard_granularity - 1);
 
 	/* Top device aligned on logical block boundary? */
 	if (t->alignment_offset & (t->logical_block_size - 1)) {
 		t->misaligned = 1;
-		return -1;
+		ret = -1;
 	}
 
-	return 0;
+	/* Find lcm() of optimal I/O size and granularity */
+        t->io_opt = lcm(t->io_opt, b->io_opt);
+        t->discard_granularity = lcm(t->discard_granularity,
+                                     b->discard_granularity);
+ 
+        /* Verify that optimal I/O size is a multiple of io_min */
+        if (t->io_min && t->io_opt % t->io_min)
+                ret = -1;
+ 
+        return ret;
 }
 EXPORT_SYMBOL(blk_stack_limits);
 
