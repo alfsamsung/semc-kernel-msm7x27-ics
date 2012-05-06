@@ -94,7 +94,8 @@ void blk_set_default_limits(struct queue_limits *lim)
        lim->max_hw_segments = MAX_HW_SEGMENTS;
        lim->seg_boundary_mask = BLK_SEG_BOUNDARY_MASK;
        lim->max_segment_size = MAX_SEGMENT_SIZE;
-       lim->max_sectors = lim->max_hw_sectors = SAFE_MAX_SECTORS;
+       lim->max_sectors = BLK_DEF_MAX_SECTORS;
+       lim->max_hw_sectors = INT_MAX;
        lim->max_discard_sectors = 0;
        lim->discard_granularity = 0;
        lim->discard_alignment = 0;
@@ -151,6 +152,7 @@ void blk_queue_make_request(struct request_queue *q, make_request_fn *mfn)
 	q->unplug_timer.data = (unsigned long)q;
 	
 	blk_set_default_limits(&q->limits);
+	blk_queue_max_sectors(q, SAFE_MAX_SECTORS);
 
 	 /*
          * If the caller didn't supply a lock, fall back to our embedded
@@ -451,27 +453,7 @@ EXPORT_SYMBOL(blk_queue_io_opt);
  **/
 void blk_queue_stack_limits(struct request_queue *t, struct request_queue *b)
 {
-	/* zero is "infinity" */
-	t->limits.max_sectors = min_not_zero(queue_max_sectors(t),
-					     queue_max_sectors(b));
-
-	t->limits.max_hw_sectors = min_not_zero(queue_max_hw_sectors(t),
-						queue_max_hw_sectors(b));
-
-	t->limits.seg_boundary_mask = min_not_zero(queue_segment_boundary(t),
-						   queue_segment_boundary(b));
-
-	t->limits.max_phys_segments = min_not_zero(queue_max_phys_segments(t),
-						   queue_max_phys_segments(b));
-
-	t->limits.max_hw_segments = min_not_zero(queue_max_hw_segments(t),
-						 queue_max_hw_segments(b));
-
-	t->limits.max_segment_size = min_not_zero(queue_max_segment_size(t),
-						  queue_max_segment_size(b));
-
-	t->limits.logical_block_size = max(queue_logical_block_size(t),
-					   queue_logical_block_size(b));
+	blk_stack_limits(&t->limits, &b->limits, 0);
 
 	if (!t->queue_lock)
 		WARN_ON_ONCE(1);
