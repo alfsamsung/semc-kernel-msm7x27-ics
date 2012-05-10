@@ -16,6 +16,10 @@
 
 #define VALID_FLAGS (SYNC_FILE_RANGE_WAIT_BEFORE|SYNC_FILE_RANGE_WRITE| \
 			SYNC_FILE_RANGE_WAIT_AFTER)
+			
+static int fsync_disabled;
+module_param(fsync_disabled, int, 0600);
+MODULE_PARM_DESC(delay, "Change fsync() to work as a no-op: this is DANGEROUS");
 
 /*
  * sync everything.  Start out by waking pdflush, because that writes back
@@ -57,6 +61,9 @@ int file_fsync(struct file *filp, struct dentry *dentry, int datasync)
 	struct inode * inode = dentry->d_inode;
 	struct super_block * sb;
 	int ret, err;
+	
+	if (unlikely(fsync_disabled))
+	return 0;
 
 	/* sync the inode to buffers */
 	ret = write_inode_now(inode, 0);
@@ -75,6 +82,21 @@ int file_fsync(struct file *filp, struct dentry *dentry, int datasync)
 	return ret;
 }
 
+static int do_fsync(unsigned int fd, int datasync)
+{
+	struct file *file;
+	int ret = -EBADF;
+	
+	if (unlikely(fsync_disabled))
+	return 0;
+
+	file = fget(fd);
+	if (file) {
+		ret = vfs_fsync(file, file->f_path.dentry, datasync);
+		fput(file);
+	}
+	return ret;
+}
 /**
  * vfs_fsync - perform a fsync or fdatasync on a file
  * @file:		file to sync
@@ -130,19 +152,6 @@ out:
 	return ret;
 }
 EXPORT_SYMBOL(vfs_fsync);
-
-static int do_fsync(unsigned int fd, int datasync)
-{
-	struct file *file;
-	int ret = -EBADF;
-
-	file = fget(fd);
-	if (file) {
-		ret = vfs_fsync(file, file->f_path.dentry, datasync);
-		fput(file);
-	}
-	return ret;
-}
 
 SYSCALL_DEFINE1(fsync, unsigned int, fd)
 {
@@ -209,6 +218,9 @@ SYSCALL_DEFINE(sync_file_range)(int fd, loff_t offset, loff_t nbytes,
 	loff_t endbyte;			/* inclusive */
 	int fput_needed;
 	umode_t i_mode;
+	
+	if (unlikely(fsync_disabled))
+	return 0;
 
 	ret = -EINVAL;
 	if (flags & ~VALID_FLAGS)

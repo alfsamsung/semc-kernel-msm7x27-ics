@@ -391,7 +391,7 @@ static void mdp_dma_schedule(struct msm_fb_data_type *mfd, uint32 term)
 		return;
 	}
 	/* SW vsync logic starts here */
-
+#ifdef CONFIG_MSM7X27_VSYNC_ENABLE
 	/* get current rd counter */
 	mdp_lcd_rd_cnt = mdp_get_lcd_line_counter(mfd);
 	if (mdp_dma2_update_time_in_usec != 0) {
@@ -424,7 +424,7 @@ static void mdp_dma_schedule(struct msm_fb_data_type *mfd, uint32 term)
 		/* MDP wrp is slower than LCD rdp */
 		mdp_lcd_rd_cnt -= mdp_lcd_rd_cnt_offset_slow;
 	}
-
+#endif
 	if (mdp_lcd_rd_cnt < 0)
 		mdp_lcd_rd_cnt = mfd->total_lcd_lines + mdp_lcd_rd_cnt;
 	else if (mdp_lcd_rd_cnt > mfd->total_lcd_lines)

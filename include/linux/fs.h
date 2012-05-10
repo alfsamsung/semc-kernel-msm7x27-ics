@@ -1203,7 +1203,7 @@ struct super_block {
 	 * Saved pool identifier for cleancache (-1 means none)
 	 */
 	int cleancache_poolid;
-
+		
 	/*
 	 * storage for asynchronous operations
 	 */
@@ -2024,24 +2024,57 @@ static inline int xip_truncate_page(struct address_space *mapping, loff_t from)
 #endif
 
 #ifdef CONFIG_BLOCK
+struct bio;
+typedef void (dio_submit_t)(int rw, struct bio *bio, struct inode *inode,
+                            loff_t file_offset);
+void dio_end_io(struct bio *bio, int error);
+
+ssize_t __blockdev_direct_IO_newtrunc(int rw, struct kiocb *iocb, struct inode *inode,
+        struct block_device *bdev, const struct iovec *iov, loff_t offset,
+        unsigned long nr_segs, get_block_t get_block, dio_iodone_t end_io,
+        dio_submit_t submit_io, int lock_type);
 ssize_t __blockdev_direct_IO(int rw, struct kiocb *iocb, struct inode *inode,
-	struct block_device *bdev, const struct iovec *iov, loff_t offset,
-	unsigned long nr_segs, get_block_t get_block, dio_iodone_t end_io,
-	int lock_type);
+        struct block_device *bdev, const struct iovec *iov, loff_t offset,
+        unsigned long nr_segs, get_block_t get_block, dio_iodone_t end_io,
+	dio_submit_t submit_io, int lock_type);
 
 enum {
-	DIO_LOCKING = 1, /* need locking between buffered and direct access */
-	DIO_NO_LOCKING,  /* bdev; no locking at all between buffered/direct */
-	DIO_OWN_LOCKING, /* filesystem locks buffered and direct internally */
+	/* need locking between buffered and direct access */
+        DIO_LOCKING     = 0x01,
+ 
+        /* filesystem does not support filling holes */
+        DIO_SKIP_HOLES  = 0x02,
+	//DIO_NO_LOCKING,  /* bdev; no locking at all between buffered/direct */
+	//DIO_OWN_LOCKING, /* filesystem locks buffered and direct internally */
 };
 
-static inline ssize_t blockdev_direct_IO(int rw, struct kiocb *iocb,
-	struct inode *inode, struct block_device *bdev, const struct iovec *iov,
-	loff_t offset, unsigned long nr_segs, get_block_t get_block,
-	dio_iodone_t end_io)
+static inline ssize_t blockdev_direct_IO_newtrunc(int rw, struct kiocb *iocb,
+       struct inode *inode, struct block_device *bdev, const struct iovec *iov,
+       loff_t offset, unsigned long nr_segs, get_block_t get_block,
+       dio_iodone_t end_io)
 {
-	return __blockdev_direct_IO(rw, iocb, inode, bdev, iov, offset,
-				nr_segs, get_block, end_io, DIO_LOCKING);
+       return __blockdev_direct_IO_newtrunc(rw, iocb, inode, bdev, iov, offset,
+                                   nr_segs, get_block, end_io, NULL,
+                                   DIO_LOCKING | DIO_SKIP_HOLES);
+}
+
+static inline ssize_t blockdev_direct_IO_no_locking_newtrunc(int rw, struct kiocb *iocb,
+       struct inode *inode, struct block_device *bdev, const struct iovec *iov,
+       loff_t offset, unsigned long nr_segs, get_block_t get_block,
+       dio_iodone_t end_io)
+{
+       return __blockdev_direct_IO_newtrunc(rw, iocb, inode, bdev, iov, offset,
+                               nr_segs, get_block, end_io, NULL, 0);
+}
+
+static inline ssize_t blockdev_direct_IO(int rw, struct kiocb *iocb,
+        struct inode *inode, struct block_device *bdev, const struct iovec *iov,
+        loff_t offset, unsigned long nr_segs, get_block_t get_block,
+        dio_iodone_t end_io)
+{
+        return __blockdev_direct_IO(rw, iocb, inode, bdev, iov, offset,
+                                     nr_segs, get_block, end_io, NULL,
+                                     DIO_LOCKING | DIO_SKIP_HOLES);
 }
 
 static inline ssize_t blockdev_direct_IO_no_locking(int rw, struct kiocb *iocb,
@@ -2050,17 +2083,17 @@ static inline ssize_t blockdev_direct_IO_no_locking(int rw, struct kiocb *iocb,
 	dio_iodone_t end_io)
 {
 	return __blockdev_direct_IO(rw, iocb, inode, bdev, iov, offset,
-				nr_segs, get_block, end_io, DIO_NO_LOCKING);
+                                    nr_segs, get_block, end_io, NULL, 0);
 }
-
+/*
 static inline ssize_t blockdev_direct_IO_own_locking(int rw, struct kiocb *iocb,
 	struct inode *inode, struct block_device *bdev, const struct iovec *iov,
 	loff_t offset, unsigned long nr_segs, get_block_t get_block,
 	dio_iodone_t end_io)
 {
 	return __blockdev_direct_IO(rw, iocb, inode, bdev, iov, offset,
-				nr_segs, get_block, end_io, DIO_OWN_LOCKING);
-}
+                                    nr_segs, get_block, end_io, NULL, 0);
+}*/
 #endif
 
 extern const struct file_operations generic_ro_fops;
@@ -2112,12 +2145,14 @@ extern int dcache_dir_open(struct inode *, struct file *);
 extern int dcache_dir_close(struct inode *, struct file *);
 extern loff_t dcache_dir_lseek(struct file *, loff_t, int);
 extern int dcache_readdir(struct file *, void *, filldir_t);
+extern int simple_setattr(struct dentry *, struct iattr *);
 extern int simple_getattr(struct vfsmount *, struct dentry *, struct kstat *);
 extern int simple_statfs(struct dentry *, struct kstatfs *);
 extern int simple_link(struct dentry *, struct inode *, struct dentry *);
 extern int simple_unlink(struct inode *, struct dentry *);
 extern int simple_rmdir(struct inode *, struct dentry *);
 extern int simple_rename(struct inode *, struct dentry *, struct inode *, struct dentry *);
+extern int simple_setsize(struct inode *, loff_t);
 extern int simple_sync_file(struct file *, struct dentry *, int);
 extern int simple_empty(struct dentry *);
 extern int simple_readpage(struct file *file, struct page *page);
@@ -2150,8 +2185,10 @@ extern int buffer_migrate_page(struct address_space *,
 #define buffer_migrate_page NULL
 #endif
 
-extern int inode_change_ok(struct inode *, struct iattr *);
-extern int __must_check inode_setattr(struct inode *, struct iattr *);
+extern int inode_change_ok(const struct inode *, struct iattr *);
+extern int inode_newsize_ok(const struct inode *, loff_t offset);
+extern int __must_check inode_setattr(struct inode *, const struct iattr *);
+extern void generic_setattr(struct inode *inode, const struct iattr *attr);
 
 extern void file_update_time(struct file *file);
 

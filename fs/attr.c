@@ -12,13 +12,12 @@
 #include <linux/capability.h>
 #include <linux/fsnotify.h>
 #include <linux/fcntl.h>
-#include <linux/quotaops.h>
 #include <linux/security.h>
 
 /* Taken over from the old code... */
 
 /* POSIX UID/GID verification for setting inode attributes. */
-int inode_change_ok(struct inode *inode, struct iattr *attr)
+int inode_change_ok(const struct inode *inode, struct iattr *attr)
 {
 	int retval = -EPERM;
 	unsigned int ia_valid = attr->ia_valid;
@@ -63,16 +62,68 @@ error:
 
 EXPORT_SYMBOL(inode_change_ok);
 
-int inode_setattr(struct inode * inode, struct iattr * attr)
+/**
+ * inode_newsize_ok - may this inode be truncated to a given size
+ * @inode:     the inode to be truncated
+ * @offset:    the new size to assign to the inode
+ * @Returns:   0 on success, -ve errno on failure
+ * 
+ * inode_newsize_ok must be called with i_mutex held.
+ *
+ * inode_newsize_ok will check filesystem limits and ulimits to check that the
+ * new inode size is within limits. inode_newsize_ok will also send SIGXFSZ
+ * when necessary. Caller must not proceed with inode size change if failure is
+ * returned. @inode must be a file (not directory), with appropriate
+ * permissions to allow truncate (inode_newsize_ok does NOT check these
+ * conditions).
+ * 
+ */
+int inode_newsize_ok(const struct inode *inode, loff_t offset)
+{
+       if (inode->i_size < offset) {
+               unsigned long limit;
+
+               limit = rlimit(RLIMIT_FSIZE);
+               if (limit != RLIM_INFINITY && offset > limit)
+                       goto out_sig;
+               if (offset > inode->i_sb->s_maxbytes)
+                       goto out_big;
+       } else {
+               /*
+                * truncation of in-use swapfiles is disallowed - it would
+                * cause subsequent swapout to scribble on the now-freed
+                * blocks.
+                */
+               if (IS_SWAPFILE(inode))
+                       return -ETXTBSY;
+       }
+
+       return 0;
+out_sig:
+       send_sig(SIGXFSZ, current, 0);
+out_big:
+       return -EFBIG;
+}
+EXPORT_SYMBOL(inode_newsize_ok);
+
+/**
+ * generic_setattr - copy simple metadata updates into the generic inode
+ * @inode:     the inode to be updated
+ * @attr:      the new attributes
+ *
+ * generic_setattr must be called with i_mutex held.
+ *
+ * generic_setattr updates the inode's metadata with that specified
+ * in attr. Noticably missing is inode size update, which is more complex
+ * as it requires pagecache updates. See simple_setsize.
+ *
+ * The inode is not marked as dirty after this operation. The rationale is
+ * that for "simple" filesystems, the struct inode is the inode storage.
+ * The caller is free to mark the inode dirty afterwards if needed.
+ */
+void generic_setattr(struct inode *inode, const struct iattr *attr)
 {
 	unsigned int ia_valid = attr->ia_valid;
-
-	if (ia_valid & ATTR_SIZE &&
-	    attr->ia_size != i_size_read(inode)) {
-		int error = vmtruncate(inode, attr->ia_size);
-		if (error)
-			return error;
-	}
 
 	if (ia_valid & ATTR_UID)
 		inode->i_uid = attr->ia_uid;
@@ -94,6 +145,28 @@ int inode_setattr(struct inode * inode, struct iattr * attr)
 			mode &= ~S_ISGID;
 		inode->i_mode = mode;
 	}
+}
+EXPORT_SYMBOL(generic_setattr);
+
+/*
+ * note this function is deprecated, the new truncate sequence should be
+ * used instead -- see eg. simple_setsize, generic_setattr.
+ */
+int inode_setattr(struct inode *inode, const struct iattr *attr)
+{
+       unsigned int ia_valid = attr->ia_valid;
+
+       if (ia_valid & ATTR_SIZE &&
+           attr->ia_size != i_size_read(inode)) {
+               int error;
+
+               error = vmtruncate(inode, attr->ia_size);
+               if (error)
+                       return error;
+       }
+
+       generic_setattr(inode, attr);
+
 	mark_inode_dirty(inode);
 
 	return 0;
@@ -170,13 +243,8 @@ int notify_change(struct dentry * dentry, struct iattr * attr)
 		error = inode->i_op->setattr(dentry, attr);
 	} else {
 		error = inode_change_ok(inode, attr);
-		if (!error) {
-			if ((ia_valid & ATTR_UID && attr->ia_uid != inode->i_uid) ||
-			    (ia_valid & ATTR_GID && attr->ia_gid != inode->i_gid))
-				error = DQUOT_TRANSFER(inode, attr) ? -EDQUOT : 0;
-			if (!error)
-				error = inode_setattr(inode, attr);
-		}
+		if (!error)
+                        error = inode_setattr(inode, attr);
 	}
 
 	if (ia_valid & ATTR_SIZE)

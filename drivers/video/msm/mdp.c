@@ -997,8 +997,10 @@ static int mdp_probe(struct platform_device *pdev)
 	case EBI2_PANEL:
 		INIT_WORK(&mfd->dma_update_worker,
 			  mdp_lcd_update_workqueue_handler);
+#ifdef CONFIG_MSM7X27_VSYNC_ENABLE
 		INIT_WORK(&mfd->vsync_resync_worker,
 			  mdp_vsync_resync_workqueue_handler);
+#endif
 		mfd->hw_refresh = FALSE;
 
 		if (mfd->panel.type == EXT_MDDI_PANEL) {
@@ -1045,7 +1047,9 @@ static int mdp_probe(struct platform_device *pdev)
 
 		mdp4_display_intf_sel(if_no, intf);
 #endif
+#ifdef CONFIG_MSM7X27_VSYNC_ENABLE
 		mdp_config_vsync(mfd);
+#endif
 		break;
 
 #ifdef CONFIG_FB_MSM_DTV

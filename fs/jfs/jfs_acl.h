@@ -22,7 +22,7 @@
 
 int jfs_permission(struct inode *, int);
 int jfs_init_acl(tid_t, struct inode *, struct inode *);
-int jfs_setattr(struct dentry *, struct iattr *);
+int jfs_acl_chmod(struct inode *inode);
 
 #else
 
@@ -30,6 +30,11 @@ static inline int jfs_init_acl(tid_t tid, struct inode *inode,
 			       struct inode *dir)
 {
 	return 0;
+}
+
+static inline int jfs_acl_chmod(struct inode *inode)
+{
+       return 0;
 }
 
 #endif
