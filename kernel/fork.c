@@ -139,9 +139,17 @@ static struct kmem_cache *mm_cachep;
 /* Notifier list called when a task struct is freed */
 static ATOMIC_NOTIFIER_HEAD(task_free_notifier);
 
+static void account_kernel_stack(struct thread_info *ti, int account)
+{
+       struct zone *zone = page_zone(virt_to_page(ti));
+
+       mod_zone_page_state(zone, NR_KERNEL_STACK, account);
+}
+
 void free_task(struct task_struct *tsk)
 {
 	prop_local_destroy_single(&tsk->dirties);
+	account_kernel_stack(tsk->stack, -1);
 	free_thread_info(tsk->stack);
 	rt_mutex_debug_task_free(tsk);
 	ftrace_graph_exit_task(tsk);
@@ -266,6 +274,9 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 	tsk->btrace_seq = 0;
 #endif
 	tsk->splice_pipe = NULL;
+	
+	account_kernel_stack(ti, 1);
+	
 	return tsk;
 
 out:
@@ -1353,6 +1364,21 @@ struct task_struct * __cpuinit fork_idle(int cpu)
 
 	return task;
 }
+
+/* Notifier list called when a task struct is freed */
+static ATOMIC_NOTIFIER_HEAD(task_fork_notifier);
+
+int task_fork_register(struct notifier_block *n)
+{
+return atomic_notifier_chain_register(&task_fork_notifier, n);
+}
+EXPORT_SYMBOL(task_fork_register);
+
+int task_fork_unregister(struct notifier_block *n)
+{
+return atomic_notifier_chain_unregister(&task_fork_notifier, n);
+}
+EXPORT_SYMBOL(task_fork_unregister);
 
 /*
  *  Ok, this is the main fork-routine.
