@@ -2317,6 +2317,48 @@ void trace_softirqs_off(unsigned long ip)
 		debug_atomic_inc(&redundant_softirqs_off);
 }
 
+static void __lockdep_trace_alloc(gfp_t gfp_mask, unsigned long flags)
+{
+        struct task_struct *curr = current;
+
+        if (unlikely(!debug_locks))
+                return;
+
+        /* no reclaim without waiting on it */
+        if (!(gfp_mask & __GFP_WAIT))
+                return;
+
+        /* this guy won't enter reclaim */
+        if ((curr->flags & PF_MEMALLOC) && !(gfp_mask & __GFP_NOMEMALLOC))
+                return;
+
+        /* We're only interested __GFP_FS allocations for now */
+        if (!(gfp_mask & __GFP_FS))
+                return;
+
+        if (DEBUG_LOCKS_WARN_ON(irqs_disabled_flags(flags)))
+                return;
+
+        mark_held_locks(curr, RECLAIM_FS);
+}
+
+static void check_flags(unsigned long flags);
+
+void lockdep_trace_alloc(gfp_t gfp_mask)
+{
+        unsigned long flags;
+
+        if (unlikely(current->lockdep_recursion))
+                return;
+
+        raw_local_irq_save(flags);
+        check_flags(flags);
+        current->lockdep_recursion = 1;
+        __lockdep_trace_alloc(gfp_mask, flags);
+        current->lockdep_recursion = 0;
+        raw_local_irq_restore(flags);
+}
+
 static int mark_irqflags(struct task_struct *curr, struct held_lock *hlock)
 {
 	/*
@@ -2965,6 +3007,36 @@ void lock_release(struct lockdep_map *lock, int nested,
 	raw_local_irq_restore(flags);
 }
 EXPORT_SYMBOL_GPL(lock_release);
+
+int lock_is_held(struct lockdep_map *lock)
+{
+        unsigned long flags;
+        int ret = 0;
+
+        if (unlikely(current->lockdep_recursion))
+                return ret;
+
+         raw_local_irq_save(flags);
+         check_flags(flags);
+
+        current->lockdep_recursion = 1;
+        ret = __lock_is_held(lock);
+        current->lockdep_recursion = 0;
+        raw_local_irq_restore(flags);
+
+        return ret;
+}
+EXPORT_SYMBOL_GPL(lock_is_held);
+
+void lockdep_set_current_reclaim_state(gfp_t gfp_mask)
+{
+        current->lockdep_reclaim_gfp = gfp_mask;
+}
+
+void lockdep_clear_current_reclaim_state(void)
+{
+        current->lockdep_reclaim_gfp = 0;
+}
 
 #ifdef CONFIG_LOCK_STAT
 static int

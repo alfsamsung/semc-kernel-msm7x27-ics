@@ -324,6 +324,10 @@ static inline void lock_set_subclass(struct lockdep_map *lock,
 	lock_set_class(lock, lock->name, lock->key, subclass, ip);
 }
 
+extern void lockdep_set_current_reclaim_state(gfp_t gfp_mask);
+extern void lockdep_clear_current_reclaim_state(void);
+extern void lockdep_trace_alloc(gfp_t mask);
+
 # define INIT_LOCKDEP				.lockdep_recursion = 0,
 
 #define lockdep_depth(tsk)	(debug_locks ? (tsk)->lockdep_depth : 0)
@@ -342,6 +346,9 @@ static inline void lockdep_on(void)
 # define lock_release(l, n, i)			do { } while (0)
 # define lock_set_class(l, n, k, s, i)		do { } while (0)
 # define lock_set_subclass(l, s, i)		do { } while (0)
+# define lockdep_set_current_reclaim_state(g)   do { } while (0)
+# define lockdep_clear_current_reclaim_state()  do { } while (0)
+# define lockdep_trace_alloc(g)                 do { } while (0)
 # define lockdep_init()				do { } while (0)
 # define lockdep_info()				do { } while (0)
 # define lockdep_init_map(lock, name, key, sub) \

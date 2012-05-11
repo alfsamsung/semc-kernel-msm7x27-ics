@@ -2109,7 +2109,9 @@ SYSCALL_DEFINE2(swapon, const char __user *, specialfile, int, swap_flags)
 		swap_list.head = swap_list.next = type;
 	else
 		swap_info[prev]->next = type;
+#ifdef CONFIG_FRONTSWAP
         frontswap_init(type);
+#endif
 	spin_unlock(&swap_lock);
 	mutex_unlock(&swapon_mutex);
 	error = 0;

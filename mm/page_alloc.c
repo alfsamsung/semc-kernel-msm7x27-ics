@@ -199,6 +199,9 @@ int page_group_by_mobility_disabled __read_mostly;
 
 static void set_pageblock_migratetype(struct page *page, int migratetype)
 {
+	if (unlikely(page_group_by_mobility_disabled))
+               migratetype = MIGRATE_UNMOVABLE;
+
 	set_pageblock_flags_group(page, (unsigned long)migratetype,
 					PB_migrate, PB_migrate_end);
 }
@@ -1102,14 +1105,14 @@ void split_page(struct page *page, unsigned int order)
  * or two.
  */
 static struct page *buffered_rmqueue(struct zone *preferred_zone,
-			struct zone *zone, int order, gfp_t gfp_flags)
+			struct zone *zone, int order, gfp_t gfp_flags,
+                        int migratetype)
 {
 	unsigned long flags;
 	struct page *page;
 	int cold = !!(gfp_flags & __GFP_COLD);
 	int cpu;
-	int migratetype = allocflags_to_migratetype(gfp_flags);
-
+	
 again:
 	cpu  = get_cpu();
 	if (likely(order == 0)) {
@@ -1429,23 +1432,21 @@ static void zlc_mark_zone_full(struct zonelist *zonelist, struct zoneref *z)
  */
 static struct page *
 get_page_from_freelist(gfp_t gfp_mask, nodemask_t *nodemask, unsigned int order,
-		struct zonelist *zonelist, int high_zoneidx, int alloc_flags)
+		struct zonelist *zonelist, int high_zoneidx, int alloc_flags,
+		struct zone *preferred_zone, int migratetype)
 {
 	struct zoneref *z;
 	struct page *page = NULL;
 	int classzone_idx;
-	struct zone *zone, *preferred_zone;
+	struct zone *zone;
 	nodemask_t *allowednodes = NULL;/* zonelist_cache approximation */
 	int zlc_active = 0;		/* set if using zonelist_cache */
 	int did_zlc_setup = 0;		/* just call zlc_setup() one time */
 
-	(void)first_zones_zonelist(zonelist, high_zoneidx, nodemask,
-							&preferred_zone);
-	if (!preferred_zone)
+	if (WARN_ON_ONCE(order >= MAX_ORDER))
 		return NULL;
-
+	
 	classzone_idx = zone_idx(preferred_zone);
-
 zonelist_scan:
 	/*
 	 * Scan zonelist, looking for a zone with enough free.
@@ -1476,7 +1477,8 @@ zonelist_scan:
 			}
 		}
 
-		page = buffered_rmqueue(preferred_zone, zone, order, gfp_mask);
+		page = buffered_rmqueue(preferred_zone, zone, order,
+                                               gfp_mask, migratetype);
 		if (page)
 			break;
 this_zone_full:
@@ -1499,46 +1501,220 @@ try_next_zone:
 	return page;
 }
 
-/*
- * This is the 'heart' of the zoned buddy allocator.
- */
-struct page *
-__alloc_pages_internal(gfp_t gfp_mask, unsigned int order,
-			struct zonelist *zonelist, nodemask_t *nodemask)
+static inline int
+should_alloc_retry(gfp_t gfp_mask, unsigned int order,
+                               unsigned long pages_reclaimed)
 
 {
-	const gfp_t wait = gfp_mask & __GFP_WAIT;
-	enum zone_type high_zoneidx = gfp_zone(gfp_mask);
-	struct zoneref *z;
-	struct zone *zone;
-	struct page *page;
-	struct reclaim_state reclaim_state;
-	struct task_struct *p = current;
-	int do_retry;
-	int alloc_flags;
-	unsigned long did_some_progress;
-	unsigned long pages_reclaimed = 0;
+	/* Do not loop if specifically requested */
+       if (gfp_mask & __GFP_NORETRY)
+               return 0;
 
-	might_sleep_if(wait);
+	/*
+        * In this implementation, order <= PAGE_ALLOC_COSTLY_ORDER
+        * means __GFP_NOFAIL, but that may not be true in other
+        * implementations.
+        */
+       if (order <= PAGE_ALLOC_COSTLY_ORDER)
+               return 1;
 
-	if (should_fail_alloc_page(gfp_mask, order))
-		return NULL;
+	/*
+        * For order > PAGE_ALLOC_COSTLY_ORDER, if __GFP_REPEAT is
+        * specified, then we retry until we no longer reclaim any pages
+        * (above), or we've reclaimed an order of pages at least as
+        * large as the allocation's order. In both cases, if the
+        * allocation still fails, we stop retrying.
+        */
+       if (gfp_mask & __GFP_REPEAT && pages_reclaimed < (1 << order))
+               return 1;
 
-restart:
-	z = zonelist->_zonerefs;  /* the list of zones suitable for gfp_mask */
+	/*
+        * Don't let big-order allocations loop unless the caller
+        * explicitly requests that.
+        */
+       if (gfp_mask & __GFP_NOFAIL)
+               return 1;
 
-	if (unlikely(!z->zone)) {
-		/*
-		 * Happens if we have an empty zonelist as a result of
-		 * GFP_THISNODE being used on a memoryless node
-		 */
-		return NULL;
-	}
+       return 0;
+}
 
-	page = get_page_from_freelist(gfp_mask|__GFP_HARDWALL, nodemask, order,
-			zonelist, high_zoneidx, ALLOC_WMARK_LOW|ALLOC_CPUSET);
+static inline struct page *
+__alloc_pages_may_oom(gfp_t gfp_mask, unsigned int order,
+       struct zonelist *zonelist, enum zone_type high_zoneidx,
+       nodemask_t *nodemask, struct zone *preferred_zone,
+       int migratetype)
+{
+       struct page *page;
+
+       /* Acquire the OOM killer lock for the zones in zonelist */
+       if (!try_set_zone_oom(zonelist, gfp_mask)) {
+               schedule_timeout_uninterruptible(1);
+	
+	return NULL;
+}
+/*
+        * Go through the zonelist yet one more time, keep very high watermark
+        * here, this is only to catch a parallel oom killing, we must fail if
+        * we're still under heavy pressure.
+        */
+       page = get_page_from_freelist(gfp_mask|__GFP_HARDWALL, nodemask,
+               order, zonelist, high_zoneidx,
+               ALLOC_WMARK_HIGH|ALLOC_CPUSET,
+		 preferred_zone, migratetype);
 	if (page)
-		goto got_pg;
+		 goto out;
+	
+       if (!(gfp_mask & __GFP_NOFAIL)) {
+               /* The OOM killer will not help higher order allocs */
+               if (order > PAGE_ALLOC_COSTLY_ORDER)
+                       goto out;
+               /*
+                * GFP_THISNODE contains __GFP_NORETRY and we never hit this.
+                * Sanity check for bare calls of __GFP_THISNODE, not real OOM.
+                * The caller should handle page allocation failure by itself if
+                * it specifies __GFP_THISNODE.
+                * Note: Hugepage uses it but will hit PAGE_ALLOC_COSTLY_ORDER.
+                */
+               if (gfp_mask & __GFP_THISNODE)
+                       goto out;
+       }
+
+       /* Exhausted what can be done so it's blamo time */
+       out_of_memory(zonelist, gfp_mask, order, nodemask);
+
+out:
+       clear_zonelist_oom(zonelist, gfp_mask);
+       return page;
+}
+
+/* The really slow allocator path where we enter direct reclaim */
+static inline struct page *
+__alloc_pages_direct_reclaim(gfp_t gfp_mask, unsigned int order,
+       struct zonelist *zonelist, enum zone_type high_zoneidx,
+       nodemask_t *nodemask, int alloc_flags, struct zone *preferred_zone,
+       int migratetype, unsigned long *did_some_progress)
+{
+       struct page *page = NULL;
+       struct reclaim_state reclaim_state;
+       struct task_struct *p = current;
+
+       cond_resched();
+
+       /* We now go into synchronous reclaim */
+       cpuset_memory_pressure_bump();
+
+       /*
+        * The task's cpuset might have expanded its set of allowable nodes
+        */
+       p->flags |= PF_MEMALLOC;
+       lockdep_set_current_reclaim_state(gfp_mask);
+       reclaim_state.reclaimed_slab = 0;
+       p->reclaim_state = &reclaim_state;
+
+       *did_some_progress = try_to_free_pages(zonelist, order, gfp_mask, nodemask);
+
+       p->reclaim_state = NULL;
+       lockdep_clear_current_reclaim_state();
+       p->flags &= ~PF_MEMALLOC;
+
+       cond_resched();
+
+       if (order != 0)
+               drain_all_pages();
+
+       if (likely(*did_some_progress))
+               page = get_page_from_freelist(gfp_mask, nodemask, order,
+                                       zonelist, high_zoneidx,
+                                       alloc_flags, preferred_zone,
+                                       migratetype);
+       return page;
+}
+
+/*
+ * This is called in the allocator slow-path if the allocation request is of
+ * sufficient urgency to ignore watermarks and take other desperate measures
+ */
+static inline struct page *
+__alloc_pages_high_priority(gfp_t gfp_mask, unsigned int order,
+       struct zonelist *zonelist, enum zone_type high_zoneidx,
+        nodemask_t *nodemask, struct zone *preferred_zone,
+        int migratetype)
+{
+       struct page *page;
+
+       do {
+               page = get_page_from_freelist(gfp_mask, nodemask, order,
+                       zonelist, high_zoneidx, ALLOC_NO_WATERMARKS,
+                       preferred_zone, migratetype);
+
+               if (!page && gfp_mask & __GFP_NOFAIL)
+                       congestion_wait(BLK_RW_ASYNC, HZ/50);
+       } while (!page && (gfp_mask & __GFP_NOFAIL));
+
+       return page;
+}
+
+static inline
+void wake_all_kswapd(unsigned int order, struct zonelist *zonelist,
+                                               enum zone_type high_zoneidx)
+{
+       struct zoneref *z;
+       struct zone *zone;
+
+       for_each_zone_zonelist(zone, z, zonelist, high_zoneidx)
+               wakeup_kswapd(zone, order);
+}
+
+static inline int
+gfp_to_alloc_flags(gfp_t gfp_mask)
+{
+       struct task_struct *p = current;
+       int alloc_flags = ALLOC_WMARK_MIN | ALLOC_CPUSET;
+       const gfp_t wait = gfp_mask & __GFP_WAIT;
+
+       /* __GFP_HIGH is assumed to be the same as ALLOC_HIGH to save a branch. */
+       BUILD_BUG_ON(__GFP_HIGH != ALLOC_HIGH);
+
+       /*
+        * The caller may dip into page reserves a bit more if the caller
+        * cannot run direct reclaim, or if the caller has realtime scheduling
+        * policy or is asking for __GFP_HIGH memory.  GFP_ATOMIC requests will
+        * set both ALLOC_HARDER (!wait) and ALLOC_HIGH (__GFP_HIGH).
+        */
+       alloc_flags |= (gfp_mask & __GFP_HIGH);
+
+       if (!wait) {
+               alloc_flags |= ALLOC_HARDER;
+               /*
+                * Ignore cpuset if GFP_ATOMIC (!wait) rather than fail alloc.
+                * See also cpuset_zone_allowed() comment in kernel/cpuset.c.
+                */
+               alloc_flags &= ~ALLOC_CPUSET;
+       } else if (unlikely(rt_task(p)))
+               alloc_flags |= ALLOC_HARDER;
+
+       if (likely(!(gfp_mask & __GFP_NOMEMALLOC))) {
+               if (!in_interrupt() &&
+                   ((p->flags & PF_MEMALLOC) ||
+                    unlikely(test_thread_flag(TIF_MEMDIE))))
+                       alloc_flags |= ALLOC_NO_WATERMARKS;
+       }
+
+       return alloc_flags;
+}
+
+static inline struct page *
+__alloc_pages_slowpath(gfp_t gfp_mask, unsigned int order,
+       struct zonelist *zonelist, enum zone_type high_zoneidx,
+        nodemask_t *nodemask, struct zone *preferred_zone,
+        int migratetype)
+{
+       const gfp_t wait = gfp_mask & __GFP_WAIT;
+       struct page *page = NULL;
+       int alloc_flags;
+       unsigned long pages_reclaimed = 0;
+       unsigned long did_some_progress;
+       struct task_struct *p = current;
 
 	/*
 	 * GFP_THISNODE (meaning __GFP_THISNODE, __GFP_NORETRY and
@@ -1551,150 +1727,84 @@ restart:
 	if (NUMA_BUILD && (gfp_mask & GFP_THISNODE) == GFP_THISNODE)
 		goto nopage;
 
-	for_each_zone_zonelist(zone, z, zonelist, high_zoneidx)
-		wakeup_kswapd(zone, order);
+	wake_all_kswapd(order, zonelist, high_zoneidx);
 
 	/*
 	 * OK, we're below the kswapd watermark and have kicked background
 	 * reclaim. Now things get more complex, so set up alloc_flags according
 	 * to how we want to proceed.
-	 *
-	 * The caller may dip into page reserves a bit more if the caller
-	 * cannot run direct reclaim, or if the caller has realtime scheduling
-	 * policy or is asking for __GFP_HIGH memory.  GFP_ATOMIC requests will
-	 * set both ALLOC_HARDER (!wait) and ALLOC_HIGH (__GFP_HIGH).
 	 */
-	alloc_flags = ALLOC_WMARK_MIN;
-	if ((unlikely(rt_task(p)) && !in_interrupt()) || !wait)
-		alloc_flags |= ALLOC_HARDER;
-	if (gfp_mask & __GFP_HIGH)
-		alloc_flags |= ALLOC_HIGH;
-	if (wait)
-		alloc_flags |= ALLOC_CPUSET;
-
-	/*
-	 * Go through the zonelist again. Let __GFP_HIGH and allocations
-	 * coming from realtime tasks go deeper into reserves.
-	 *
-	 * This is the last chance, in general, before the goto nopage.
-	 * Ignore cpuset if GFP_ATOMIC (!wait) rather than fail alloc.
-	 * See also cpuset_zone_allowed() comment in kernel/cpuset.c.
-	 */
+	alloc_flags = gfp_to_alloc_flags(gfp_mask);
+	
+restart:
+	/* This is the last chance, in general, before the goto nopage. */
 	page = get_page_from_freelist(gfp_mask, nodemask, order, zonelist,
-						high_zoneidx, alloc_flags);
+			high_zoneidx, alloc_flags & ~ALLOC_NO_WATERMARKS,
+                        preferred_zone, migratetype);
 	if (page)
 		goto got_pg;
-
-	/* This allocation should allow future memory freeing. */
-
+	
 rebalance:
-	if (((p->flags & PF_MEMALLOC) || unlikely(test_thread_flag(TIF_MEMDIE)))
-			&& !in_interrupt()) {
-		if (!(gfp_mask & __GFP_NOMEMALLOC)) {
-nofail_alloc:
-			/* go through the zonelist yet again, ignoring mins */
-			page = get_page_from_freelist(gfp_mask, nodemask, order,
-				zonelist, high_zoneidx, ALLOC_NO_WATERMARKS);
-			if (page)
-				goto got_pg;
-			if (gfp_mask & __GFP_NOFAIL) {
-				congestion_wait(BLK_RW_ASYNC, HZ/50);
-				goto nofail_alloc;
-			}
-		}
-		goto nopage;
+	 /* Allocate without watermarks if the context allows */
+	if (alloc_flags & ALLOC_NO_WATERMARKS) {
+               page = __alloc_pages_high_priority(gfp_mask, order,
+                               zonelist, high_zoneidx, nodemask,
+                               preferred_zone, migratetype);
+               if (page)
+                       goto got_pg;
 	}
 
 	/* Atomic allocations - we can't balance anything */
 	if (!wait)
 		goto nopage;
+	
+	/* Avoid recursion of direct reclaim */
+	if (p->flags & PF_MEMALLOC)
+               goto nopage;
 
-	cond_resched();
+	/* Avoid allocations with no watermarks from looping endlessly */
+	if (test_thread_flag(TIF_MEMDIE) && !(gfp_mask & __GFP_NOFAIL))
+		goto nopage;
 
-	/* We now go into synchronous reclaim */
-	cpuset_memory_pressure_bump();
+	/* Try direct reclaim and then allocating */
+       page = __alloc_pages_direct_reclaim(gfp_mask, order,
+                                       zonelist, high_zoneidx,
+                                       nodemask,
+                                       alloc_flags, preferred_zone,
+                                       migratetype, &did_some_progress);
+       if (page)
+               goto got_pg;
+
 	/*
-	 * The task's cpuset might have expanded its set of allowable nodes
-	 */
-	cpuset_update_task_memory_state();
-	p->flags |= PF_MEMALLOC;
-	reclaim_state.reclaimed_slab = 0;
-	p->reclaim_state = &reclaim_state;
+        * If we failed to make any progress reclaiming, then we are
+        * running out of options and have to consider going OOM
+        */
+       if (!did_some_progress) {
+               if ((gfp_mask & __GFP_FS) && !(gfp_mask & __GFP_NORETRY)) {
+                       page = __alloc_pages_may_oom(gfp_mask, order,
+                                       zonelist, high_zoneidx,
+                                       nodemask, preferred_zone,
+                                       migratetype);
+                       if (page)
+                               goto got_pg;
 
-	did_some_progress = try_to_free_pages(zonelist, order, gfp_mask);
+			/*
+                        * The OOM killer does not trigger for high-order allocations
+                        * but if no progress is being made, there are no other
+                        * options and retrying is unlikely to help
+                        */
+                       if (order > PAGE_ALLOC_COSTLY_ORDER)
+                               goto nopage;
 
-	p->reclaim_state = NULL;
-	p->flags &= ~PF_MEMALLOC;
-
-	cond_resched();
-
-	if (order != 0)
-		drain_all_pages();
-
-	if (likely(did_some_progress)) {
-		page = get_page_from_freelist(gfp_mask, nodemask, order,
-					zonelist, high_zoneidx, alloc_flags);
-		if (page)
-			goto got_pg;
-	} else if ((gfp_mask & __GFP_FS) && !(gfp_mask & __GFP_NORETRY)) {
-		if (!try_set_zone_oom(zonelist, gfp_mask)) {
-			schedule_timeout_uninterruptible(1);
 			goto restart;
 		}
-
-		/*
-		 * Go through the zonelist yet one more time, keep
-		 * very high watermark here, this is only to catch
-		 * a parallel oom killing, we must fail if we're still
-		 * under heavy pressure.
-		 */
-		page = get_page_from_freelist(gfp_mask|__GFP_HARDWALL, nodemask,
-			order, zonelist, high_zoneidx,
-			ALLOC_WMARK_HIGH|ALLOC_CPUSET);
-		if (page) {
-			clear_zonelist_oom(zonelist, gfp_mask);
-			goto got_pg;
-		}
-
-		/* The OOM killer will not help higher order allocs so fail */
-		if (order > PAGE_ALLOC_COSTLY_ORDER) {
-			clear_zonelist_oom(zonelist, gfp_mask);
-			goto nopage;
-		}
-
-		out_of_memory(zonelist, gfp_mask, order);
-		clear_zonelist_oom(zonelist, gfp_mask);
-		goto restart;
 	}
 
-	/*
-	 * Don't let big-order allocations loop unless the caller explicitly
-	 * requests that.  Wait for some write requests to complete then retry.
-	 *
-	 * In this implementation, order <= PAGE_ALLOC_COSTLY_ORDER
-	 * means __GFP_NOFAIL, but that may not be true in other
-	 * implementations.
-	 *
-	 * For order > PAGE_ALLOC_COSTLY_ORDER, if __GFP_REPEAT is
-	 * specified, then we retry until we no longer reclaim any pages
-	 * (above), or we've reclaimed an order of pages at least as
-	 * large as the allocation's order. In both cases, if the
-	 * allocation still fails, we stop retrying.
-	 */
+	 /* Check if we should retry the allocation */
 	pages_reclaimed += did_some_progress;
-	do_retry = 0;
-	if (!(gfp_mask & __GFP_NORETRY)) {
-		if (order <= PAGE_ALLOC_COSTLY_ORDER) {
-			do_retry = 1;
-		} else {
-			if (gfp_mask & __GFP_REPEAT &&
-				pages_reclaimed < (1 << order))
-					do_retry = 1;
-		}
-		if (gfp_mask & __GFP_NOFAIL)
-			do_retry = 1;
-	}
-	if (do_retry) {
+	
+	if (should_alloc_retry(gfp_mask, order, pages_reclaimed)) {
+               /* Wait for some write requests to complete then retry */
 		congestion_wait(BLK_RW_ASYNC, HZ/50);
 		goto rebalance;
 	}
@@ -1709,8 +1819,52 @@ nopage:
 	}
 got_pg:
 	return page;
+	
 }
-EXPORT_SYMBOL(__alloc_pages_internal);
+
+/*
+ * This is the 'heart' of the zoned buddy allocator.
+ */
+struct page *
+__alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order,
+                       struct zonelist *zonelist, nodemask_t *nodemask)
+{
+       enum zone_type high_zoneidx = gfp_zone(gfp_mask);
+       struct zone *preferred_zone;
+       struct page *page;
+       int migratetype = allocflags_to_migratetype(gfp_mask);
+
+       lockdep_trace_alloc(gfp_mask);
+
+       might_sleep_if(gfp_mask & __GFP_WAIT);
+
+       if (should_fail_alloc_page(gfp_mask, order))
+               return NULL;
+	/*
+        * Check the zones suitable for the gfp_mask contain at least one
+        * valid zone. It's possible to have an empty zonelist as a result
+        * of GFP_THISNODE and a memoryless node
+        */
+       if (unlikely(!zonelist->_zonerefs->zone))
+               return NULL;
+
+       /* The preferred zone is used for statistics later */
+       first_zones_zonelist(zonelist, high_zoneidx, nodemask, &preferred_zone);
+       if (!preferred_zone)
+               return NULL;
+
+       /* First allocation attempt */
+       page = get_page_from_freelist(gfp_mask|__GFP_HARDWALL, nodemask, order,
+                       zonelist, high_zoneidx, ALLOC_WMARK_LOW|ALLOC_CPUSET,
+                       preferred_zone, migratetype);
+       if (unlikely(!page))
+               page = __alloc_pages_slowpath(gfp_mask, order,
+                               zonelist, high_zoneidx, nodemask,
+                               preferred_zone, migratetype);
+
+       return page;
+}
+EXPORT_SYMBOL(__alloc_pages_nodemask);
 
 /*
  * Common helper functions.
@@ -1938,7 +2092,7 @@ void show_free_areas(void)
 #ifdef CONFIG_UNEVICTABLE_LRU
 		" unevictable:%lu"
 #endif
-		" dirty:%lu writeback:%lu unstable:%lu buffer:%lu\n"
+		" dirty:%lu writeback:%lu unstable:%lu\n"
 		" free:%lu slab_reclaimable:%lu slab_unreclaimable:%lu\n"
                 " mapped:%lu shmem:%lu pagetables:%lu bounce:%lu\n",
 		global_page_state(NR_ACTIVE_ANON),
@@ -1951,7 +2105,6 @@ void show_free_areas(void)
 		global_page_state(NR_FILE_DIRTY),
 		global_page_state(NR_WRITEBACK),
 		global_page_state(NR_UNSTABLE_NFS),
-		nr_blockdev_pages(),
 		global_page_state(NR_FREE_PAGES),
 		global_page_state(NR_SLAB_RECLAIMABLE),
 		global_page_state(NR_SLAB_UNRECLAIMABLE),
