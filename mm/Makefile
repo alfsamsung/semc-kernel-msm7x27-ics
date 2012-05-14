@@ -38,6 +38,7 @@ obj-$(CONFIG_FRONTSWAP)  += frontswap.o
 obj-$(CONFIG_CLEANCACHE) += cleancache.o
 obj-$(CONFIG_SLAB) += slab.o
 obj-$(CONFIG_SLUB) += slub.o
+obj-$(CONFIG_SLQB) += slqb.o
 obj-$(CONFIG_FAILSLAB) += failslab.o
 obj-$(CONFIG_MEMORY_HOTPLUG) += memory_hotplug.o
 obj-$(CONFIG_FS_XIP) += filemap_xip.o

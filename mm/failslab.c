@@ -11,7 +11,7 @@ static struct {
 	.ignore_gfp_wait = 1,
 };
 
-bool should_failslab(size_t size, gfp_t gfpflags)
+bool should_failslab(size_t size, gfp_t gfpflags, unsigned long cache_flags)
 {
 	if (gfpflags & __GFP_NOFAIL)
 		return false;
@@ -19,6 +19,9 @@ bool should_failslab(size_t size, gfp_t gfpflags)
         if (failslab.ignore_gfp_wait && (gfpflags & __GFP_WAIT))
 		return false;
 
+	if (failslab.cache_filter && !(cache_flags & SLAB_FAILSLAB))
+		return false;
+ 
 	return should_fail(&failslab.attr, size);
 }
 
