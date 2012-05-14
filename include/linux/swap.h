@@ -339,7 +339,7 @@ struct backing_dev_info;
 
 /* linux/mm/thrash.c */
 extern struct mm_struct *swap_token_mm;
-extern void grab_swap_token(void);
+extern void grab_swap_token(struct mm_struct *);
 extern void __put_swap_token(struct mm_struct *);
 
 static inline int has_swap_token(struct mm_struct *mm)
