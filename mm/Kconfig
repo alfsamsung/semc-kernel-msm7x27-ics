@@ -272,7 +272,7 @@ config CLEANCACHE
 
 		If unsure, say Y to enable cleancache
 
-+config FRONTSWAP
+config FRONTSWAP
         bool "Enable frontswap pseudo-RAM driver to cache swap pages"
         default y
         help

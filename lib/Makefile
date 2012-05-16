@@ -7,13 +7,12 @@ ORIG_CFLAGS := $(KBUILD_CFLAGS)
 KBUILD_CFLAGS = $(subst -pg,,$(ORIG_CFLAGS))
 endif
 
-lib-y := ctype.o string.o vsprintf.o cmdline.o \
-	 rbtree.o radix-tree.o dump_stack.o \
-	 idr.o int_sqrt.o extable.o prio_tree.o \
-	 sha1.o irq_regs.o reciprocal_div.o argv_split.o \
-	 proportions.o prio_heap.o ratelimit.o show_mem.o \
-	 is_single_threaded.o memory_alloc.o decompress.o \
-	 memcopy.o
+lib-y := ctype.o string.o vsprintf.o cmdline.o rbtree.o \
+	 radix-tree.o dump_stack.o idr.o int_sqrt.o sha1.o\
+	 extable.o prio_tree.o irq_regs.o reciprocal_div.o \
+	 argv_split.o proportions.o prio_heap.o ratelimit.o \
+	 show_mem.o is_single_threaded.o memory_alloc.o \
+	 decompress.o memcopy.o
 	 
 
 lib-$(CONFIG_MMU) += ioremap.o
@@ -92,6 +91,10 @@ obj-$(CONFIG_HAVE_LMB) += lmb.o
 obj-$(CONFIG_HAVE_ARCH_TRACEHOOK) += syscall.o
 
 obj-$(CONFIG_DYNAMIC_PRINTK_DEBUG) += dynamic_printk.o
+
+CFLAGS_snappy.o += $(call cc-disable-warning, declaration-after-statement) \
+		   -DNDEBUG=1
+obj-$(CONFIG_SNAPPY) += snappy.o
 
 hostprogs-y	:= gen_crc32table
 clean-files	:= crc32table.h
