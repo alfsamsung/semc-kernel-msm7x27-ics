@@ -112,8 +112,8 @@
 #ifdef CONFIG_SEMC_GPIO_EXTR
 #include  <linux/semc/semc_gpio_extr.h>
 #endif
-#define MSM_PMEM_MDP_SIZE	0xb21000	//0xC74000 alf org
-#define MSM_PMEM_ADSP_SIZE	0x900000
+#define MSM_PMEM_MDP_SIZE	0xBEC000	//0xb21000(small)	//0xC74000-org
+#define MSM_PMEM_ADSP_SIZE	0x7EA000	//0x900000-org
 #ifdef CONFIG_CAPTURE_KERNEL
 #include "smd_private.h"
 #endif
@@ -141,7 +141,7 @@
 #define MSM_FB_SIZE		0xB6000
 #endif
 
-#define MSM_GPU_PHYS_BASE    SZ_4M
+#define MSM_GPU_PHYS_BASE    SZ_2M
 
 #define PMEM_KERNEL_EBI1_SIZE	0x1C000
 
