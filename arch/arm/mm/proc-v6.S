@@ -10,6 +10,7 @@
  *
  *  This is the "shell" of the ARMv6 processor support.
  */
+#include <linux/init.h>
 #include <linux/linkage.h>
 #include <asm/assembler.h>
 #include <asm/asm-offsets.h>
@@ -39,14 +40,11 @@ ENTRY(cpu_v6_proc_init)
 	mov	pc, lr
 
 ENTRY(cpu_v6_proc_fin)
-	stmfd	sp!, {lr}
-	cpsid	if				@ disable interrupts
-	bl	v6_flush_kern_cache_all
-	mrc	p15, 0, r0, c1, c0, 0		@ ctrl register
-	bic	r0, r0, #0x1000			@ ...i............
-	bic	r0, r0, #0x0006			@ .............ca.
-	mcr	p15, 0, r0, c1, c0, 0		@ disable caches
-	ldmfd	sp!, {pc}
+	 mrc     p15, 0, r0, c1, c0, 0           @ ctrl register
+	 bic     r0, r0, #0x1000                 @ ...i............
+	 bic     r0, r0, #0x0006                 @ .............ca.
+	 mcr     p15, 0, r0, c1, c0, 0           @ disable caches
+	 mov     pc, lr
 
 /*
  *	cpu_v6_reset(loc)
@@ -61,6 +59,11 @@ ENTRY(cpu_v6_proc_fin)
  */
 	.align	5
 ENTRY(cpu_v6_reset)
+	mrc     p15, 0, r1, c1, c0, 0           @ ctrl register
+	bic     r1, r1, #0x1                    @ ...............m
+	mcr     p15, 0, r1, c1, c0, 0           @ disable MMU
+	mov     r1, #0
+	mcr     p15, 0, r1, c7, c5, 4           @ ISB
 	mov	pc, r0
 
 /*
@@ -132,7 +135,7 @@ cpu_v6_name:
 	.asciz	"ARMv6-compatible processor"
 	.align
 
-	.section ".text.init", #alloc, #execinstr
+	__INIT
 
 /*
  *	__v6_setup
