@@ -4,7 +4,7 @@
 
 config ZRAM
 	tristate "Compressed RAM block device support"
-	depends on BLOCK
+	depends on BLOCK && SYSFS
 	select XVMALLOC
 	select SNAPPY_COMPRESS
 	select SNAPPY_DECOMPRESS
