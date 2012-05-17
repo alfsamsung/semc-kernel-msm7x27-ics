@@ -13,15 +13,17 @@
  *  'linux/arch/arm/lib/traps.S'.  Mostly a debugging aid, but will probably
  *  kill the offending process.
  */
-#include <linux/module.h>
 #include <linux/signal.h>
-#include <linux/spinlock.h>
 #include <linux/personality.h>
 #include <linux/kallsyms.h>
-#include <linux/delay.h>
-#include <linux/hardirq.h>
-#include <linux/init.h>
+#include <linux/spinlock.h>
 #include <linux/uaccess.h>
+#include <linux/hardirq.h>
+#include <linux/kdebug.h>
+#include <linux/module.h>
+#include <linux/kexec.h>
+#include <linux/delay.h>
+#include <linux/init.h>
 
 #include <asm/atomic.h>
 #include <asm/cacheflush.h>
@@ -206,13 +208,20 @@ void show_stack(struct task_struct *tsk, unsigned long *sp)
 #define S_SMP ""
 #endif
 
-static void __die(const char *str, int err, struct thread_info *thread, struct pt_regs *regs)
+static int __die(const char *str, int err, struct thread_info *thread, struct pt_regs *regs)
 {
 	struct task_struct *tsk = thread->task;
 	static int die_counter;
+	int ret;
 
 	printk("Internal error: %s: %x [#%d]" S_PREEMPT S_SMP "\n",
 	       str, err, ++die_counter);
+	
+	/* trap and error numbers are mostly meaningless on ARM */
+	ret = notify_die(DIE_OOPS, str, regs, err, tsk->thread.trap_no, SIGSEGV);
+	if (ret == NOTIFY_STOP)
+		return ret;
+
 	print_modules();
 	__show_regs(regs);
 	printk("Process %s (pid: %d, stack limit = 0x%p)\n",
@@ -224,6 +233,7 @@ static void __die(const char *str, int err, struct thread_info *thread, struct p
 		dump_backtrace(regs, tsk);
 		dump_instr(regs);
 	}
+	return ret;
 }
 
 DEFINE_SPINLOCK(die_lock);
@@ -231,16 +241,21 @@ DEFINE_SPINLOCK(die_lock);
 /*
  * This function is protected against re-entrancy.
  */
-NORET_TYPE void die(const char *str, struct pt_regs *regs, int err)
+void die(const char *str, struct pt_regs *regs, int err)
 {
 	struct thread_info *thread = current_thread_info();
-
+	int ret;
+	
 	oops_enter();
 
 	console_verbose();
 	spin_lock_irq(&die_lock);
 	bust_spinlocks(1);
-	__die(str, err, thread, regs);
+	ret = __die(str, err, thread, regs);
+
+	if (regs && kexec_should_crash(thread->task))
+		crash_kexec(regs);
+
 	bust_spinlocks(0);
 	add_taint(TAINT_DIE);
 	spin_unlock_irq(&die_lock);
@@ -252,7 +267,8 @@ NORET_TYPE void die(const char *str, struct pt_regs *regs, int err)
 		panic("Fatal exception");
 
 	oops_exit();
-	do_exit(SIGSEGV);
+	 if (ret != NOTIFY_STOP)
+		do_exit(SIGSEGV);
 }
 
 void arm_notify_die(const char *str, struct pt_regs *regs,

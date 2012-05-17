@@ -36,22 +36,8 @@ int platform_physical_low_power_pages(unsigned long, unsigned long);
 
 #ifdef CONFIG_ARCH_MSM_ARM11
 void write_to_strongly_ordered_memory(void);
-void map_zero_page_strongly_ordered(void);
+void map_page_strongly_ordered(void);
 
-
-#include <asm/mach-types.h>
-
-#ifdef CONFIG_ARCH_MSM7X27
-#define arch_barrier_extra() do \
-	{ \
-		write_to_strongly_ordered_memory(); \
-	} while (0)
-#else
-#define arch_barrier_extra() do \
-	{ if (machine_is_msm7x27_surf() || machine_is_msm7x27_ffa())  \
-		write_to_strongly_ordered_memory(); \
-	} while (0)
-#endif
 #endif
 
 #ifdef CONFIG_CACHE_L2X0

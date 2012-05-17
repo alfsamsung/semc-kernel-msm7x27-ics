@@ -255,6 +255,7 @@ const struct mem_type *get_mem_type(unsigned int type)
 {
 	return type < ARRAY_SIZE(mem_types) ? &mem_types[type] : NULL;
 }
+EXPORT_SYMBOL(get_mem_type);
 
 /*
  * Adjust the PMD section entries according to the CPU in use.
@@ -932,6 +933,18 @@ void __init paging_init(struct machine_desc *mdesc)
 	zero_page = alloc_bootmem_low_pages(PAGE_SIZE);
 	empty_zero_page = virt_to_page(zero_page);
 	flush_dcache_page(empty_zero_page);
+	
+#if defined(CONFIG_ARCH_MSM7X27)
+       /*
+        * ensure that the strongly ordered page is mapped before the
+        * first call to write_to_strongly_ordered_memory. This page
+        * is necessary for the msm 7x27 due to hardware quirks. The
+        * map call is made here to ensure the bootmem call is made
+        * in the right window (after initialization, before full
+        * allocators are initialized)
+        */
+       map_page_strongly_ordered();
+#endif
 }
 
 /*
