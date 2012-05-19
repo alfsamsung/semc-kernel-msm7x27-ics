@@ -181,7 +181,7 @@ asmlinkage void __do_softirq(void)
 	account_system_vtime(current);
 
 	__local_bh_disable((unsigned long)__builtin_return_address(0));
-	trace_softirq_enter();
+	lockdep_softirq_enter();
 
 	cpu = smp_processor_id();
 restart:
@@ -196,8 +196,9 @@ restart:
 		if (pending & 1) {
 			int prev_count = preempt_count();
 
+			trace_softirq_entry(h, softirq_vec);
 			h->action(h);
-
+			trace_softirq_exit(h, softirq_vec);
 			if (unlikely(prev_count != preempt_count())) {
 				printk(KERN_ERR "huh, entered softirq %td %p"
 				       "with preempt_count %08x,"
@@ -221,7 +222,7 @@ restart:
 	if (pending)
 		wakeup_softirqd();
 
-	trace_softirq_exit();
+	lockdep_softirq_exit();
 
 	account_system_vtime(current);
 	_local_bh_enable();

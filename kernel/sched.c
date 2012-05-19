@@ -72,7 +72,6 @@
 #include <linux/debugfs.h>
 #include <linux/ctype.h>
 #include <linux/ftrace.h>
-#include <trace/sched.h>
 #include <linux/earlysuspend.h>
 
 #include <asm/tlb.h>
@@ -121,12 +120,6 @@
  * single value that denotes runtime == period, ie unlimited time.
  */
 #define RUNTIME_INF	((u64)~0ULL)
-
-DEFINE_TRACE(sched_wait_task);
-DEFINE_TRACE(sched_wakeup);
-DEFINE_TRACE(sched_wakeup_new);
-DEFINE_TRACE(sched_switch);
-DEFINE_TRACE(sched_migrate_task);
 
 #ifdef CONFIG_SMP
 

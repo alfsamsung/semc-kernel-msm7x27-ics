@@ -1,56 +1,339 @@
-#ifndef _TRACE_SCHED_H
+#if !defined(_TRACE_SCHED_H) || defined(TRACE_HEADER_MULTI_READ)
 #define _TRACE_SCHED_H
 
 #include <linux/sched.h>
 #include <linux/tracepoint.h>
 
-DECLARE_TRACE(sched_kthread_stop,
-	TPPROTO(struct task_struct *t),
-		TPARGS(t));
+#undef TRACE_SYSTEM
+#define TRACE_SYSTEM sched
 
-DECLARE_TRACE(sched_kthread_stop_ret,
-	TPPROTO(int ret),
-		TPARGS(ret));
+/*
+ * Tracepoint for calling kthread_stop, performed to end a kthread:
+ */
+TRACE_EVENT(sched_kthread_stop,
 
-DECLARE_TRACE(sched_wait_task,
-	TPPROTO(struct rq *rq, struct task_struct *p),
-		TPARGS(rq, p));
+	TP_PROTO(struct task_struct *t),
 
-DECLARE_TRACE(sched_wakeup,
-	TPPROTO(struct rq *rq, struct task_struct *p, int success),
-		TPARGS(rq, p, success));
+	TP_ARGS(t),
 
-DECLARE_TRACE(sched_wakeup_new,
-	TPPROTO(struct rq *rq, struct task_struct *p, int success),
-		TPARGS(rq, p, success));
+	TP_STRUCT__entry(
+		__array(	char,	comm,	TASK_COMM_LEN	)
+		__field(	pid_t,	pid			)
+	),
 
-DECLARE_TRACE(sched_switch,
-	TPPROTO(struct rq *rq, struct task_struct *prev,
-		struct task_struct *next),
-		TPARGS(rq, prev, next));
+	TP_fast_assign(
+		memcpy(__entry->comm, t->comm, TASK_COMM_LEN);
+		__entry->pid	= t->pid;
+	),
 
-DECLARE_TRACE(sched_migrate_task,
-	TPPROTO(struct task_struct *p, int orig_cpu, int dest_cpu),
-		TPARGS(p, orig_cpu, dest_cpu));
+	TP_printk("task %s:%d", __entry->comm, __entry->pid)
+);
 
-DECLARE_TRACE(sched_process_free,
-	TPPROTO(struct task_struct *p),
-		TPARGS(p));
+/*
+ * Tracepoint for the return value of the kthread stopping:
+ */
+TRACE_EVENT(sched_kthread_stop_ret,
 
-DECLARE_TRACE(sched_process_exit,
-	TPPROTO(struct task_struct *p),
-		TPARGS(p));
+	TP_PROTO(int ret),
 
-DECLARE_TRACE(sched_process_wait,
-	TPPROTO(struct pid *pid),
-		TPARGS(pid));
+	TP_ARGS(ret),
 
-DECLARE_TRACE(sched_process_fork,
-	TPPROTO(struct task_struct *parent, struct task_struct *child),
-		TPARGS(parent, child));
+	TP_STRUCT__entry(
+		__field(	int,	ret	)
+	),
 
-DECLARE_TRACE(sched_signal_send,
-	TPPROTO(int sig, struct task_struct *p),
-		TPARGS(sig, p));
+	TP_fast_assign(
+		__entry->ret	= ret;
+	),
 
-#endif
+	TP_printk("ret %d", __entry->ret)
+);
+
+/*
+ * Tracepoint for waiting on task to unschedule:
+ *
+ * (NOTE: the 'rq' argument is not used by generic trace events,
+ *        but used by the latency tracer plugin. )
+ */
+TRACE_EVENT(sched_wait_task,
+
+	TP_PROTO(struct rq *rq, struct task_struct *p),
+
+	TP_ARGS(rq, p),
+
+	TP_STRUCT__entry(
+		__array(	char,	comm,	TASK_COMM_LEN	)
+		__field(	pid_t,	pid			)
+		__field(	int,	prio			)
+	),
+
+	TP_fast_assign(
+		memcpy(__entry->comm, p->comm, TASK_COMM_LEN);
+		__entry->pid	= p->pid;
+		__entry->prio	= p->prio;
+	),
+
+	TP_printk("task %s:%d [%d]",
+		  __entry->comm, __entry->pid, __entry->prio)
+);
+
+/*
+ * Tracepoint for waking up a task:
+ *
+ * (NOTE: the 'rq' argument is not used by generic trace events,
+ *        but used by the latency tracer plugin. )
+ */
+TRACE_EVENT(sched_wakeup,
+
+	TP_PROTO(struct rq *rq, struct task_struct *p, int success),
+
+	TP_ARGS(rq, p, success),
+
+	TP_STRUCT__entry(
+		__array(	char,	comm,	TASK_COMM_LEN	)
+		__field(	pid_t,	pid			)
+		__field(	int,	prio			)
+		__field(	int,	success			)
+	),
+
+	TP_fast_assign(
+		memcpy(__entry->comm, p->comm, TASK_COMM_LEN);
+		__entry->pid		= p->pid;
+		__entry->prio		= p->prio;
+		__entry->success	= success;
+	),
+
+	TP_printk("task %s:%d [%d] success=%d",
+		  __entry->comm, __entry->pid, __entry->prio,
+		  __entry->success)
+);
+
+/*
+ * Tracepoint for waking up a new task:
+ *
+ * (NOTE: the 'rq' argument is not used by generic trace events,
+ *        but used by the latency tracer plugin. )
+ */
+TRACE_EVENT(sched_wakeup_new,
+
+	TP_PROTO(struct rq *rq, struct task_struct *p, int success),
+
+	TP_ARGS(rq, p, success),
+
+	TP_STRUCT__entry(
+		__array(	char,	comm,	TASK_COMM_LEN	)
+		__field(	pid_t,	pid			)
+		__field(	int,	prio			)
+		__field(	int,	success			)
+	),
+
+	TP_fast_assign(
+		memcpy(__entry->comm, p->comm, TASK_COMM_LEN);
+		__entry->pid		= p->pid;
+		__entry->prio		= p->prio;
+		__entry->success	= success;
+	),
+
+	TP_printk("task %s:%d [%d] success=%d",
+		  __entry->comm, __entry->pid, __entry->prio,
+		  __entry->success)
+);
+
+/*
+ * Tracepoint for task switches, performed by the scheduler:
+ *
+ * (NOTE: the 'rq' argument is not used by generic trace events,
+ *        but used by the latency tracer plugin. )
+ */
+TRACE_EVENT(sched_switch,
+
+	TP_PROTO(struct rq *rq, struct task_struct *prev,
+		 struct task_struct *next),
+
+	TP_ARGS(rq, prev, next),
+
+	TP_STRUCT__entry(
+		__array(	char,	prev_comm,	TASK_COMM_LEN	)
+		__field(	pid_t,	prev_pid			)
+		__field(	int,	prev_prio			)
+		__array(	char,	next_comm,	TASK_COMM_LEN	)
+		__field(	pid_t,	next_pid			)
+		__field(	int,	next_prio			)
+	),
+
+	TP_fast_assign(
+		memcpy(__entry->next_comm, next->comm, TASK_COMM_LEN);
+		__entry->prev_pid	= prev->pid;
+		__entry->prev_prio	= prev->prio;
+		memcpy(__entry->prev_comm, prev->comm, TASK_COMM_LEN);
+		__entry->next_pid	= next->pid;
+		__entry->next_prio	= next->prio;
+	),
+
+	TP_printk("task %s:%d [%d] ==> %s:%d [%d]",
+		__entry->prev_comm, __entry->prev_pid, __entry->prev_prio,
+		__entry->next_comm, __entry->next_pid, __entry->next_prio)
+);
+
+/*
+ * Tracepoint for a task being migrated:
+ */
+TRACE_EVENT(sched_migrate_task,
+
+	TP_PROTO(struct task_struct *p, int orig_cpu, int dest_cpu),
+
+	TP_ARGS(p, orig_cpu, dest_cpu),
+
+	TP_STRUCT__entry(
+		__array(	char,	comm,	TASK_COMM_LEN	)
+		__field(	pid_t,	pid			)
+		__field(	int,	prio			)
+		__field(	int,	orig_cpu		)
+		__field(	int,	dest_cpu		)
+	),
+
+	TP_fast_assign(
+		memcpy(__entry->comm, p->comm, TASK_COMM_LEN);
+		__entry->pid		= p->pid;
+		__entry->prio		= p->prio;
+		__entry->orig_cpu	= orig_cpu;
+		__entry->dest_cpu	= dest_cpu;
+	),
+
+	TP_printk("task %s:%d [%d] from: %d  to: %d",
+		  __entry->comm, __entry->pid, __entry->prio,
+		  __entry->orig_cpu, __entry->dest_cpu)
+);
+
+/*
+ * Tracepoint for freeing a task:
+ */
+TRACE_EVENT(sched_process_free,
+
+	TP_PROTO(struct task_struct *p),
+
+	TP_ARGS(p),
+
+	TP_STRUCT__entry(
+		__array(	char,	comm,	TASK_COMM_LEN	)
+		__field(	pid_t,	pid			)
+		__field(	int,	prio			)
+	),
+
+	TP_fast_assign(
+		memcpy(__entry->comm, p->comm, TASK_COMM_LEN);
+		__entry->pid		= p->pid;
+		__entry->prio		= p->prio;
+	),
+
+	TP_printk("task %s:%d [%d]",
+		  __entry->comm, __entry->pid, __entry->prio)
+);
+
+/*
+ * Tracepoint for a task exiting:
+ */
+TRACE_EVENT(sched_process_exit,
+
+	TP_PROTO(struct task_struct *p),
+
+	TP_ARGS(p),
+
+	TP_STRUCT__entry(
+		__array(	char,	comm,	TASK_COMM_LEN	)
+		__field(	pid_t,	pid			)
+		__field(	int,	prio			)
+	),
+
+	TP_fast_assign(
+		memcpy(__entry->comm, p->comm, TASK_COMM_LEN);
+		__entry->pid		= p->pid;
+		__entry->prio		= p->prio;
+	),
+
+	TP_printk("task %s:%d [%d]",
+		  __entry->comm, __entry->pid, __entry->prio)
+);
+
+/*
+ * Tracepoint for a waiting task:
+ */
+TRACE_EVENT(sched_process_wait,
+
+	TP_PROTO(struct pid *pid),
+
+	TP_ARGS(pid),
+
+	TP_STRUCT__entry(
+		__array(	char,	comm,	TASK_COMM_LEN	)
+		__field(	pid_t,	pid			)
+		__field(	int,	prio			)
+	),
+
+	TP_fast_assign(
+		memcpy(__entry->comm, current->comm, TASK_COMM_LEN);
+		__entry->pid		= pid_nr(pid);
+		__entry->prio		= current->prio;
+	),
+
+	TP_printk("task %s:%d [%d]",
+		  __entry->comm, __entry->pid, __entry->prio)
+);
+
+/*
+ * Tracepoint for do_fork:
+ */
+TRACE_EVENT(sched_process_fork,
+
+	TP_PROTO(struct task_struct *parent, struct task_struct *child),
+
+	TP_ARGS(parent, child),
+
+	TP_STRUCT__entry(
+		__array(	char,	parent_comm,	TASK_COMM_LEN	)
+		__field(	pid_t,	parent_pid			)
+		__array(	char,	child_comm,	TASK_COMM_LEN	)
+		__field(	pid_t,	child_pid			)
+	),
+
+	TP_fast_assign(
+		memcpy(__entry->parent_comm, parent->comm, TASK_COMM_LEN);
+		__entry->parent_pid	= parent->pid;
+		memcpy(__entry->child_comm, child->comm, TASK_COMM_LEN);
+		__entry->child_pid	= child->pid;
+	),
+
+	TP_printk("parent %s:%d  child %s:%d",
+		__entry->parent_comm, __entry->parent_pid,
+		__entry->child_comm, __entry->child_pid)
+);
+
+/*
+ * Tracepoint for sending a signal:
+ */
+TRACE_EVENT(sched_signal_send,
+
+	TP_PROTO(int sig, struct task_struct *p),
+
+	TP_ARGS(sig, p),
+
+	TP_STRUCT__entry(
+		__field(	int,	sig			)
+		__array(	char,	comm,	TASK_COMM_LEN	)
+		__field(	pid_t,	pid			)
+	),
+
+	TP_fast_assign(
+		memcpy(__entry->comm, p->comm, TASK_COMM_LEN);
+		__entry->pid	= p->pid;
+		__entry->sig	= sig;
+	),
+
+	TP_printk("sig: %d  task %s:%d",
+		  __entry->sig, __entry->comm, __entry->pid)
+);
+
+#endif /* _TRACE_SCHED_H */
+
+/* This part must be outside protection */
+#include <trace/define_trace.h>
