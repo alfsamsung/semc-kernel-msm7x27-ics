@@ -20,8 +20,7 @@ struct platform_device {
 	struct device	dev;
 	u32		num_resources;
 	struct resource	* resource;
-	void		*platform_data;
-	
+		
 	const struct platform_device_id *id_entry;
 };
 
