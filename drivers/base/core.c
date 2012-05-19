@@ -879,15 +879,12 @@ int device_add(struct device *dev)
 	if (!dev)
 		goto done;
 
-	dev->p = kzalloc(sizeof(*dev->p), GFP_KERNEL);
 	if (!dev->p) {
-		error = -ENOMEM;
-		goto done;
+		error = device_private_init(dev);
+		if (error)
+                       goto done;
 	}
-	dev->p->device = dev;
-	klist_init(&dev->p->klist_children, klist_children_get,
-		   klist_children_put);
-
+	
 	/*
 	 * for statically allocated devices, which should all be converted
 	 * some day, we need to initialize the name. We prevent reading back
