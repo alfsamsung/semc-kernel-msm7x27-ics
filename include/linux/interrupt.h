@@ -10,7 +10,6 @@
 #include <linux/irqreturn.h>
 #include <linux/irqnr.h>
 #include <linux/hardirq.h>
-#include <linux/sched.h>
 #include <linux/irqflags.h>
 #include <linux/smp.h>
 #include <linux/percpu.h>
@@ -463,6 +462,7 @@ static inline void init_irq_proc(void)
 }
 #endif
 
+struct seq_file;
 int show_interrupts(struct seq_file *p, void *v);
 
 struct irq_desc;

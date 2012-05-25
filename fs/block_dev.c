@@ -412,10 +412,28 @@ static loff_t block_llseek(struct file *file, loff_t offset, int origin)
  *	NULL first argument is nfsd_sync_dir() and that's not a directory.
  */
  
-static int block_fsync(struct file *filp, struct dentry *dentry, int datasync)
+int blkdev_fsync(struct file *filp, struct dentry *dentry, int datasync)
 {
-	return sync_blockdev(I_BDEV(filp->f_mapping->host));
+	struct inode *bd_inode = filp->f_mapping->host;
+	struct block_device *bdev = I_BDEV(bd_inode);
+	int error;
+
+	/*
+        * There is no need to serialise calls to blkdev_issue_flush with
+        * i_mutex and doing so causes performance issues with concurrent
+        * O_SYNC writers to a block device.
+        */
+	mutex_unlock(&bd_inode->i_mutex);
+	
+	error = blkdev_issue_flush(bdev, NULL);
+	if (error == -EOPNOTSUPP)
+		error = 0;
+	
+	mutex_lock(&bd_inode->i_mutex);
+	
+	return error;
 }
+EXPORT_SYMBOL(blkdev_fsync);
 
 /*
  * pseudo-fs
@@ -1404,6 +1422,32 @@ static long block_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 
 	return blkdev_ioctl(bdev, mode, cmd, arg);
 }
+/*
+ * Write data to the block device.  Only intended for the block device itself
+ * and the raw driver which basically is a fake block device.
+ *
+ * Does not take i_mutex for the write and thus is not for general purpose
+ * use.
+ */
+ssize_t blkdev_aio_write(struct kiocb *iocb, const struct iovec *iov,
+                         unsigned long nr_segs, loff_t pos)
+{
+        struct file *file = iocb->ki_filp;
+        ssize_t ret;
+
+        BUG_ON(iocb->ki_pos != pos);
+
+        ret = __generic_file_aio_write(iocb, iov, nr_segs, &iocb->ki_pos);
+        if (ret > 0 || ret == -EIOCBQUEUED) {
+                ssize_t err;
+
+                err = generic_write_sync(file, pos, ret);
+                if (err < 0 && ret > 0)
+                        ret = err;
+        }
+        return ret;
+}
+EXPORT_SYMBOL_GPL(blkdev_aio_write);
 
 /*
  * Try to release a page associated with block device when the system
@@ -1437,9 +1481,9 @@ const struct file_operations def_blk_fops = {
 	.read		= do_sync_read,
 	.write		= do_sync_write,
   	.aio_read	= generic_file_aio_read,
-  	.aio_write	= generic_file_aio_write_nolock,
+  	.aio_write	= blkdev_aio_write,
 	.mmap		= generic_file_mmap,
-	.fsync		= block_fsync,
+	.fsync		= blkdev_fsync,
 	.unlocked_ioctl	= block_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= compat_blkdev_ioctl,

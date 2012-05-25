@@ -1864,7 +1864,10 @@ extern int __filemap_fdatawrite_range(struct address_space *mapping,
 extern int filemap_fdatawrite_range(struct address_space *mapping,
 				loff_t start, loff_t end);
 
+extern int vfs_fsync_range(struct file *file, struct dentry *dentry,
+                           loff_t start, loff_t end, int datasync);
 extern int vfs_fsync(struct file *file, struct dentry *dentry, int datasync);
+extern int generic_write_sync(struct file *file, loff_t pos, loff_t count);
 extern void sync_supers(void);
 extern void sync_filesystems(int wait);
 extern void __fsync_super(struct super_block *sb);
@@ -1975,9 +1978,11 @@ extern int generic_file_readonly_mmap(struct file *, struct vm_area_struct *);
 extern int file_read_actor(read_descriptor_t * desc, struct page *page, unsigned long offset, unsigned long size);
 int generic_write_checks(struct file *file, loff_t *pos, size_t *count, int isblk);
 extern ssize_t generic_file_aio_read(struct kiocb *, const struct iovec *, unsigned long, loff_t);
+extern ssize_t __generic_file_aio_write(struct kiocb *, const struct iovec *, unsigned long,
+                loff_t *);
 extern ssize_t generic_file_aio_write(struct kiocb *, const struct iovec *, unsigned long, loff_t);
-extern ssize_t generic_file_aio_write_nolock(struct kiocb *, const struct iovec *,
-		unsigned long, loff_t);
+//extern ssize_t generic_file_aio_write_nolock(struct kiocb *, const struct iovec *,
+//		unsigned long, loff_t);
 extern ssize_t generic_file_direct_write(struct kiocb *, const struct iovec *,
 		unsigned long *, loff_t, loff_t *, size_t, size_t);
 extern ssize_t generic_file_buffered_write(struct kiocb *, const struct iovec *,
@@ -1986,7 +1991,12 @@ extern ssize_t do_sync_read(struct file *filp, char __user *buf, size_t len, lof
 extern ssize_t do_sync_write(struct file *filp, const char __user *buf, size_t len, loff_t *ppos);
 extern int generic_segment_checks(const struct iovec *iov,
 		unsigned long *nr_segs, size_t *count, int access_flags);
-extern void block_sync_page(struct page *page);
+//extern void block_sync_page(struct page *page);
+extern int blkdev_fsync(struct file *filp, struct dentry *dentry, int datasync);
+
+/* fs/block_dev.c */
+extern ssize_t blkdev_aio_write(struct kiocb *iocb, const struct iovec *iov,
+                                unsigned long nr_segs, loff_t pos);
 
 /* fs/splice.c */
 extern ssize_t generic_file_splice_read(struct file *, loff_t *,
@@ -2205,8 +2215,7 @@ static inline ino_t parent_ino(struct dentry *dentry)
 	return res;
 }
 
-/* Transaction based IO helpers */
-
+#include <asm/page.h>
 /*
  * An argresp is stored in an allocated page and holds the
  * size of the argument or response, along with its content
