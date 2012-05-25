@@ -37,24 +37,50 @@
 #include <linux/cache.h>
 #include <linux/spinlock.h>
 #include <linux/threads.h>
-#include <linux/percpu.h>
 #include <linux/cpumask.h>
 #include <linux/seqlock.h>
 #include <linux/lockdep.h>
 #include <linux/completion.h>
 
-/* Internal to kernel, but needed by rcupreempt.h. */
-extern int rcu_scheduler_active;
+  
+/* Exported common interfaces */
+extern void rcu_barrier(void);
+extern void rcu_barrier_bh(void);
+extern void rcu_barrier_sched(void);
+#if defined(CONFIG_TREE_RCU) || defined(CONFIG_TREE_PREEMPT_RCU) || defined(CONFIG_TINY_RCU)
+extern void synchronize_sched_expedited(void);
+#endif
+/*TODO alf remove rcu_classic -remove the if*/
+extern int sched_expedited_torture_stats(char *page);
 
+/* Internal to kernel */
+extern void rcu_init(void);
+extern int rcu_scheduler_active;
+extern void rcu_scheduler_starting(void);
+
+/*TODO alf remove rcu_classic*/
 #if defined(CONFIG_CLASSIC_RCU)
 #include <linux/rcuclassic.h>
-#elif defined(CONFIG_TREE_RCU)
+#include <linux/percpu.h>
+
+#define synchronize_sched() __synchronize_sched()
+extern int rcu_scheduler_active;
+extern void synchronize_rcu(void);
+extern void rcu_init(void);
+extern void rcu_scheduler_starting(void);
+#endif
+/*TODO alf remove rcu_classic*/
+
+
+#if defined(CONFIG_TREE_RCU) || defined(CONFIG_TREE_PREEMPT_RCU)
 #include <linux/rcutree.h>
-#elif defined(CONFIG_PREEMPT_RCU)
-#include <linux/rcupreempt.h>
+#elif defined(CONFIG_TINY_RCU)
+#include <linux/rcutiny.h>
+#elif defined(CONFIG_CLASSIC_RCU)	/*TODO alf remove rcu_classic*/
+#include <linux/rcuclassic.h>		/*TODO alf remove rcu_classic*/
 #else
 #error "Unknown RCU implementation specified to kernel configuration"
-#endif /* #else #if defined(CONFIG_CLASSIC_RCU) */
+#endif 
 
 #define RCU_HEAD_INIT 	{ .next = NULL, .func = NULL }
 #define RCU_HEAD(head) struct rcu_head head = RCU_HEAD_INIT
@@ -217,23 +243,6 @@ struct rcu_synchronize {
 
 extern void wakeme_after_rcu(struct rcu_head  *head);
 
-/**
- * synchronize_sched - block until all CPUs have exited any non-preemptive
- * kernel code sequences.
- *
- * This means that all preempt_disable code sequences, including NMI and
- * hardware-interrupt handlers, in progress on entry will have completed
- * before this primitive returns.  However, this does not guarantee that
- * softirq handlers will have completed, since in some kernels, these
- * handlers can run in process context, and can block.
- *
- * This primitive provides the guarantees made by the (now removed)
- * synchronize_kernel() API.  In contrast, synchronize_rcu() only
- * guarantees that rcu_read_lock() sections will have completed.
- * In "classic RCU", these two guarantees happen to be one and
- * the same, but can differ in realtime RCU implementations.
- */
-#define synchronize_sched() __synchronize_sched()
 
 /**
  * call_rcu - Queue an RCU callback for invocation after a grace period.
@@ -269,16 +278,5 @@ extern void call_rcu(struct rcu_head *head,
  */
 extern void call_rcu_bh(struct rcu_head *head,
 			void (*func)(struct rcu_head *head));
-
-/* Exported common interfaces */
-extern void synchronize_rcu(void);
-extern void rcu_barrier(void);
-extern void rcu_barrier_bh(void);
-extern void rcu_barrier_sched(void);
-
-/* Internal to kernel */
-extern void rcu_init(void);
-extern void rcu_scheduler_starting(void);
-extern int rcu_needs_cpu(int cpu);
 
 #endif /* __LINUX_RCUPDATE_H */

@@ -206,8 +206,11 @@ restart:
 				       h->action, prev_count, preempt_count());
 				preempt_count() = prev_count;
 			}
-
-			rcu_bh_qsctr_inc(cpu);
+#if defined(CONFIG_CLASSIC_RCU)
+			 rcu_bh_qsctr_inc(cpu);
+#else
+			 rcu_bh_qs(cpu);
+#endif
 		}
 		h++;
 		pending >>= 1;
@@ -628,7 +631,11 @@ static int ksoftirqd(void * __bind_cpu)
 			preempt_enable_no_resched();
 			cond_resched();
 			preempt_disable();
+#if defined(CONFIG_CLASSIC_RCU)
 			rcu_qsctr_inc((long)__bind_cpu);
+#else
+			rcu_sched_qs((long)__bind_cpu);
+#endif
 		}
 		preempt_enable();
 		set_current_state(TASK_INTERRUPTIBLE);
