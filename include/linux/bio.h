@@ -170,6 +170,7 @@ struct bio {
 #define BIO_RW_FAILFAST_DEV		7
 #define BIO_RW_FAILFAST_TRANSPORT	8
 #define BIO_RW_FAILFAST_DRIVER		9
+#define BIO_RW_NOIDLE   10
 
 #define bio_rw_flagged(bio, flag)	((bio)->bi_rw & (1 << (flag)))
 
@@ -188,6 +189,7 @@ struct bio {
 #define bio_rw_ahead(bio)	bio_rw_flagged(bio, BIO_RW_AHEAD)
 #define bio_rw_meta(bio)	bio_rw_flagged(bio, BIO_RW_META)
 #define bio_discard(bio)	bio_rw_flagged(bio, BIO_RW_DISCARD)
+#define bio_noidle(bio)         bio_rw_flagged(bio, BIO_RW_NOIDLE)
 
 /*
  * upper 16 bits of bi_rw define the io priority of this bio

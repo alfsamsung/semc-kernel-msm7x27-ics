@@ -72,6 +72,7 @@ deps_config := \
 	drivers/staging/zcache/Kconfig \
 	drivers/staging/zram/Kconfig \
 	drivers/staging/snappy/Kconfig \
+	drivers/staging/ramzswap/Kconfig \
 	drivers/staging/android/Kconfig \
 	drivers/staging/epl/Kconfig \
 	drivers/staging/frontier/Kconfig \

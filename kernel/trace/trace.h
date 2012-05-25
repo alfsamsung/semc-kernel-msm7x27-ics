@@ -10,7 +10,7 @@
 #include <linux/ftrace.h>
 #include <trace/boot.h>
 #include <linux/kmemtrace.h>
-#include <trace/power.h>
+
 
 enum trace_type {
 	__TRACE_FIRST_TYPE = 0,
@@ -33,10 +33,10 @@ enum trace_type {
 	TRACE_HW_BRANCHES,
 	TRACE_KMEM_ALLOC,
 	TRACE_KMEM_FREE,
-	TRACE_POWER,
-
+	
 	__TRACE_LAST_TYPE
 };
+
 
 /*
  * The trace entry - the most basic unit of tracing. This is what
@@ -174,6 +174,12 @@ struct trace_power {
 	struct power_trace	state_data;
 };
 
+enum kmemtrace_type_id {
+       KMEMTRACE_TYPE_KMALLOC = 0,     /* kmalloc() or kfree(). */
+       KMEMTRACE_TYPE_CACHE,           /* kmem_cache_*(). */
+       KMEMTRACE_TYPE_PAGES,           /* __get_free_pages() and friends. */
+};
+
 struct kmemtrace_alloc_entry {
 	struct trace_entry	ent;
 	enum kmemtrace_type_id type_id;
@@ -301,8 +307,7 @@ extern void __ftrace_bad_type(void);
 		IF_ASSIGN(var, ent, struct ftrace_graph_ret_entry,	\
 			  TRACE_GRAPH_RET);		\
 		IF_ASSIGN(var, ent, struct hw_branch_entry, TRACE_HW_BRANCHES);\
- 		IF_ASSIGN(var, ent, struct trace_power, TRACE_POWER); \
-		IF_ASSIGN(var, ent, struct kmemtrace_alloc_entry,	\
+ 		IF_ASSIGN(var, ent, struct kmemtrace_alloc_entry,	\
 			  TRACE_KMEM_ALLOC);	\
 		IF_ASSIGN(var, ent, struct kmemtrace_free_entry,	\
 			  TRACE_KMEM_FREE);	\

@@ -14,7 +14,7 @@
 
 #include <linux/kmemtrace.h>
 
-#include "trace_output.h"
+//#include "trace_output.h"
 #include "trace.h"
 
 /* Select an alternative, minimalistic output than the original one */

@@ -158,9 +158,14 @@ static inline void tracepoint_synchronize_unregister(void)
 
 #define PARAMS(args...) args
 
+#endif /* _LINUX_TRACEPOINT_H */
+
 #ifndef TRACE_FORMAT
 #define TRACE_FORMAT(name, proto, args, fmt)		\
 	DECLARE_TRACE(name, PARAMS(proto), PARAMS(args))
+
+#define TRACE_EVENT_FORMAT(name, proto, args, fmt, struct, tpfmt)      \
+       TRACE_FORMAT(name, PARAMS(proto), PARAMS(args), PARAMS(fmt))
 #endif
 
 #ifndef TRACE_EVENT
@@ -266,8 +271,12 @@ static inline void tracepoint_synchronize_unregister(void)
  * /debug/tracing/events/.
  */
 
-#define TRACE_EVENT(name, proto, args, struct, assign, print)	\
-	DECLARE_TRACE(name, PARAMS(proto), PARAMS(args))
-#endif
+#define TRACE_EVENT(name, proto, args, struct, assign, print)   \
+        DECLARE_TRACE(name, PARAMS(proto), PARAMS(args))
+#define TRACE_EVENT_FN(name, proto, args, struct,               \
+                 assign, print, reg, unreg)                      \
+        DECLARE_TRACE(name, PARAMS(proto), PARAMS(args))
 
 #endif
+
+
