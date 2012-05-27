@@ -155,9 +155,13 @@ static int check_quotactl_valid(struct super_block *sb, int type, int cmd, qid_t
 	return error;
 }
 
-static void quota_sync_sb(struct super_block *sb, int type)
+#ifdef CONFIG_QUOTA
+void sync_quota_sb(struct super_block *sb, int type)
 {
 	int cnt;
+	
+	if (!sb->s_qcop->quota_sync)
+               return;
 
 	sb->s_qcop->quota_sync(sb, type);
 
@@ -186,16 +190,12 @@ static void quota_sync_sb(struct super_block *sb, int type)
 	}
 	mutex_unlock(&sb_dqopt(sb)->dqonoff_mutex);
 }
+#endif
 
-void sync_dquots(struct super_block *sb, int type)
+static void sync_dquots(int type)
 {
+	struct super_block *sb;
 	int cnt;
-
-	if (sb) {
-		if (sb->s_qcop->quota_sync)
-			quota_sync_sb(sb, type);
-		return;
-	}
 
 	spin_lock(&sb_lock);
 restart:
@@ -216,8 +216,8 @@ restart:
 		sb->s_count++;
 		spin_unlock(&sb_lock);
 		down_read(&sb->s_umount);
-		if (sb->s_root && sb->s_qcop->quota_sync)
-			quota_sync_sb(sb, type);
+		if (sb->s_root)
+                       sync_quota_sb(sb, type);
 		up_read(&sb->s_umount);
 		spin_lock(&sb_lock);
 		if (__put_super_and_need_restart(sb))
@@ -291,7 +291,10 @@ static int do_quotactl(struct super_block *sb, int type, int cmd, qid_t id, void
 			return sb->s_qcop->set_dqblk(sb, type, id, &idq);
 		}
 		case Q_SYNC:
-			sync_dquots(sb, type);
+			if (sb)
+                               sync_quota_sb(sb, type);
+                       else
+                               sync_dquots(type);
 			return 0;
 
 		case Q_XQUOTAON:

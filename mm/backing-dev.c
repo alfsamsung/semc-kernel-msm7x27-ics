@@ -1,13 +1,37 @@
 
 #include <linux/wait.h>
 #include <linux/backing-dev.h>
+#include <linux/kthread.h>
+#include <linux/freezer.h>
 #include <linux/fs.h>
+#include <linux/pagemap.h>
+#include <linux/mm.h>
 #include <linux/sched.h>
 #include <linux/module.h>
 #include <linux/writeback.h>
 #include <linux/device.h>
 
+ 
+void default_unplug_io_fn(struct backing_dev_info *bdi, struct page *page)
+{
+}
+EXPORT_SYMBOL(default_unplug_io_fn);
 
+struct backing_dev_info default_backing_dev_info = {
+        .name           = "default",
+        .ra_pages       = VM_MAX_READAHEAD * 1024 / PAGE_CACHE_SIZE,
+        .state          = 0,
+        .capabilities   = BDI_CAP_MAP_COPY,
+        .unplug_io_fn   = default_unplug_io_fn,
+};
+EXPORT_SYMBOL_GPL(default_backing_dev_info);
+
+struct backing_dev_info noop_backing_dev_info = {
+        .name           = "noop",
+        .capabilities   = BDI_CAP_NO_ACCT_AND_WRITEBACK,
+};
+EXPORT_SYMBOL_GPL(noop_backing_dev_info);
+ 
 static struct class *bdi_class;
 
 #ifdef CONFIG_DEBUG_FS

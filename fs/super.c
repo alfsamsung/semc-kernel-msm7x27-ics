@@ -37,8 +37,8 @@
 #include <linux/kobject.h>
 #include <linux/mutex.h>
 #include <linux/file.h>
-#include <linux/backing-dev.h>
 #include <asm/uaccess.h>
+#include <linux/cleancache.h>
 #include "internal.h"
 
 
@@ -55,7 +55,7 @@ DEFINE_SPINLOCK(sb_lock);
 static struct super_block *alloc_super(struct file_system_type *type)
 {
 	struct super_block *s = kzalloc(sizeof(struct super_block),  GFP_USER);
-	static const struct super_operations default_op;
+	static struct super_operations default_op;
 
 	if (s) {
 		if (security_sb_alloc(s)) {
@@ -63,6 +63,9 @@ static struct super_block *alloc_super(struct file_system_type *type)
 			s = NULL;
 			goto out;
 		}
+		INIT_LIST_HEAD(&s->s_dirty);
+		INIT_LIST_HEAD(&s->s_io);
+		INIT_LIST_HEAD(&s->s_more_io);
 		INIT_LIST_HEAD(&s->s_files);
 		INIT_LIST_HEAD(&s->s_instances);
 		INIT_HLIST_HEAD(&s->s_anon);
@@ -93,7 +96,7 @@ static struct super_block *alloc_super(struct file_system_type *type)
 		 * subclass.
 		 */
 		down_write_nested(&s->s_umount, SINGLE_DEPTH_NESTING);
-		s->s_count = 1;
+		s->s_count = S_BIAS;
 		atomic_set(&s->s_active, 1);
 		mutex_init(&s->s_vfs_rename_mutex);
 		mutex_init(&s->s_dquot.dqio_mutex);
@@ -105,6 +108,7 @@ static struct super_block *alloc_super(struct file_system_type *type)
 		s->s_qcop = sb_quotactl_ops;
 		s->s_op = &default_op;
 		s->s_time_gran = 1000000000;
+        	s->cleancache_poolid = -1;
 	}
 out:
 	return s;
@@ -135,6 +139,7 @@ static int __put_super(struct super_block *sb)
 	int ret = 0;
 
 	if (!--sb->s_count) {
+		list_del_init(&sb->s_list);
 		destroy_super(sb);
 		ret = 1;
 	}
@@ -151,7 +156,7 @@ static int __put_super(struct super_block *sb)
 int __put_super_and_need_restart(struct super_block *sb)
 {
 	/* check for race with generic_shutdown_super() */
-	if (list_empty(&sb->s_list)) {
+	if (list_empty(&sb->s_instances)) {
 		/* super block is removed, need to restart... */
 		__put_super(sb);
 		return 1;
@@ -169,7 +174,7 @@ int __put_super_and_need_restart(struct super_block *sb)
  *	Drops a temporary reference, frees superblock if there's no
  *	references left.
  */
-void put_super(struct super_block *sb)
+static void put_super(struct super_block *sb)
 {
 	spin_lock(&sb_lock);
 	__put_super(sb);
@@ -178,48 +183,59 @@ void put_super(struct super_block *sb)
 
 
 /**
- *	deactivate_locked_super	-	drop an active reference to superblock
- *	@s: superblock to deactivate
- *
- *	Drops an active reference to superblock, converting it into a temprory
- *	one if there is no other active references left.  In that case we
- *	tell fs driver to shut it down and drop the temporary reference we
- *	had just acquired.
- *
- *	Caller holds exclusive lock on superblock; that lock is released.
- */
-void deactivate_locked_super(struct super_block *s)
-{
-	struct file_system_type *fs = s->s_type;
-	if (atomic_dec_and_test(&s->s_active)) {
-		vfs_dq_off(s, 0);
-		fs->kill_sb(s);
-		put_filesystem(fs);
-		put_super(s);
-	} else {
-		up_write(&s->s_umount);
-	}
-}
-
-EXPORT_SYMBOL(deactivate_locked_super);
-
-/**
  *	deactivate_super	-	drop an active reference to superblock
  *	@s: superblock to deactivate
  *
- *	Variant of deactivate_locked_super(), except that superblock is *not*
- *	locked by caller.  If we are going to drop the final active reference,
- *	lock will be acquired prior to that.
+ *	Drops an active reference to superblock, acquiring a temprory one if
+ *	there is no active references left.  In that case we lock superblock,
+ *	tell fs driver to shut it down and drop the temporary reference we
+ *	had just acquired.
  */
 void deactivate_super(struct super_block *s)
 {
-        if (!atomic_add_unless(&s->s_active, -1, 1)) {
+	struct file_system_type *fs = s->s_type;
+	if (atomic_dec_and_lock(&s->s_active, &sb_lock)) {
+		s->s_count -= S_BIAS-1;
+		spin_unlock(&sb_lock);
+		DQUOT_OFF(s, 0);
 		down_write(&s->s_umount);
-		deactivate_locked_super(s);
+		cleancache_invalidate_fs(s);
+		fs->kill_sb(s);
+		
+		put_filesystem(fs);
+		put_super(s);
 	}
 }
 
 EXPORT_SYMBOL(deactivate_super);
+
+/**
+ *     deactivate_locked_super -       drop an active reference to superblock
+ *     @s: superblock to deactivate
+ *
+ *     Equivalent of up_write(&s->s_umount); deactivate_super(s);, except that
+ *     it does not unlock it until it's all over.  As the result, it's safe to
+ *     use to dispose of new superblock on ->get_sb() failure exits - nobody
+ *     will see the sucker until it's all over.  Equivalent using up_write +
+ *     deactivate_super is safe for that purpose only if superblock is either
+ *     safe to use or has NULL ->s_root when we unlock.
+ */
+void deactivate_locked_super(struct super_block *s)
+{
+       struct file_system_type *fs = s->s_type;
+       if (atomic_dec_and_lock(&s->s_active, &sb_lock)) {
+               s->s_count -= S_BIAS-1;
+               spin_unlock(&sb_lock);
+               vfs_dq_off(s, 0);
+               fs->kill_sb(s);
+               put_filesystem(fs);
+               put_super(s);
+       } else {
+               up_write(&s->s_umount);
+       }
+}
+
+EXPORT_SYMBOL(deactivate_locked_super);
 
 /**
  *	grab_super - acquire an active reference
@@ -234,18 +250,22 @@ EXPORT_SYMBOL(deactivate_super);
  */
 static int grab_super(struct super_block *s) __releases(sb_lock)
 {
-	if (atomic_inc_not_zero(&s->s_active)) {
-		spin_unlock(&sb_lock);
-		down_write(&s->s_umount);
-		return 1;
-	}
-	/* it's going away */
 	s->s_count++;
 	spin_unlock(&sb_lock);
-	/* wait for it to die */
 	down_write(&s->s_umount);
+	if (s->s_root) {
+		spin_lock(&sb_lock);
+		if (s->s_count > S_BIAS) {
+			atomic_inc(&s->s_active);
+			s->s_count--;
+			spin_unlock(&sb_lock);
+			return 1;
+		}
+		spin_unlock(&sb_lock);
+	}
 	up_write(&s->s_umount);
 	put_super(s);
+	yield();
 	return 0;
 }
 
@@ -289,12 +309,15 @@ void generic_shutdown_super(struct super_block *sb)
 	if (sb->s_root) {
 		shrink_dcache_for_umount(sb);
 		sync_filesystem(sb);
-		get_fs_excl();
+		lock_super(sb);
 		sb->s_flags &= ~MS_ACTIVE;
-
+		
 		/* bad name - it should be evict_inodes() */
 		invalidate_inodes(sb);
+		lock_kernel();
 
+		if (sop->write_super && sb->s_dirt)
+			sop->write_super(sb);
 		if (sop->put_super)
 			sop->put_super(sb);
 
@@ -304,12 +327,13 @@ void generic_shutdown_super(struct super_block *sb)
 			   "Self-destruct in 5 seconds.  Have a nice day...\n",
 			   sb->s_id);
 		}
-		put_fs_excl();
+
+		unlock_kernel();
+		unlock_super(sb);
 	}
 	spin_lock(&sb_lock);
 	/* should be initialized for __put_super_and_need_restart() */
-	list_del_init(&sb->s_list);
-	list_del(&sb->s_instances);
+	list_del_init(&sb->s_instances);
 	spin_unlock(&sb_lock);
 	up_write(&sb->s_umount);
 }
@@ -381,14 +405,16 @@ void drop_super(struct super_block *sb)
 
 EXPORT_SYMBOL(drop_super);
 
-/**
- * sync_supers - helper for periodic superblock writeback
- *
- * Call the write_super method if present on all dirty superblocks in
- * the system.  This is for the periodic writeback used by most older
- * filesystems.  For data integrity superblock writeback use
- * sync_filesystems() instead.
- *
+static inline void write_super(struct super_block *sb)
+{
+	lock_super(sb);
+	if (sb->s_root && sb->s_dirt)
+		if (sb->s_op->write_super)
+			sb->s_op->write_super(sb);
+	unlock_super(sb);
+}
+
+/*
  * Note: check the dirty flag before waiting, so we don't
  * hold up the sync while mounting a device. (The newly
  * mounted device won't need syncing.)
@@ -400,15 +426,14 @@ void sync_supers(void)
 	spin_lock(&sb_lock);
 restart:
 	list_for_each_entry(sb, &super_blocks, s_list) {
+		if (list_empty(&sb->s_instances))
+			continue;
 		if (sb->s_op->write_super && sb->s_dirt) {
 			sb->s_count++;
 			spin_unlock(&sb_lock);
-
 			down_read(&sb->s_umount);
-			if (sb->s_root && sb->s_dirt)
-				sb->s_op->write_super(sb);
+			write_super(sb);
 			up_read(&sb->s_umount);
-
 			spin_lock(&sb_lock);
 			if (__put_super_and_need_restart(sb))
 				goto restart;
@@ -435,6 +460,8 @@ struct super_block * get_super(struct block_device *bdev)
 	spin_lock(&sb_lock);
 rescan:
 	list_for_each_entry(sb, &super_blocks, s_list) {
+		if (list_empty(&sb->s_instances))
+			continue;
 		if (sb->s_bdev == bdev) {
 			sb->s_count++;
 			spin_unlock(&sb_lock);
@@ -471,6 +498,8 @@ struct super_block *get_active_super(struct block_device *bdev)
 
 	spin_lock(&sb_lock);
 	list_for_each_entry(sb, &super_blocks, s_list) {
+		if (list_empty(&sb->s_instances))
+			continue;
 		if (sb->s_bdev != bdev)
 			continue;
 
@@ -490,6 +519,8 @@ struct super_block * user_get_super(dev_t dev)
 	spin_lock(&sb_lock);
 rescan:
 	list_for_each_entry(sb, &super_blocks, s_list) {
+		if (list_empty(&sb->s_instances))
+			continue;
 		if (sb->s_dev ==  dev) {
 			sb->s_count++;
 			spin_unlock(&sb_lock);
@@ -532,6 +563,45 @@ out:
 }
 
 /**
+ *	mark_files_ro - mark all files read-only
+ *	@sb: superblock in question
+ *
+ *	All files are marked read-only.  We don't care about pending
+ *	delete files so this should be used in 'force' mode only.
+ */
+
+static void mark_files_ro(struct super_block *sb)
+{
+	struct file *f;
+
+retry:
+	file_list_lock();
+	list_for_each_entry(f, &sb->s_files, f_u.fu_list) {
+		struct vfsmount *mnt;
+		if (!S_ISREG(f->f_path.dentry->d_inode->i_mode))
+		       continue;
+		if (!file_count(f))
+			continue;
+		if (!(f->f_mode & FMODE_WRITE))
+			continue;
+		f->f_mode &= ~FMODE_WRITE;
+		if (file_check_writeable(f) != 0)
+			continue;
+		file_release_write(f);
+		mnt = mntget(f->f_path.mnt);
+		file_list_unlock();
+		/*
+		 * This can sleep, so we can't hold
+		 * the file_list_lock() spinlock.
+		 */
+		mnt_drop_write(mnt);
+		mntput(mnt);
+		goto retry;
+	}
+	file_list_unlock();
+}
+
+/**
  *	do_remount_sb - asks filesystem to change mount options.
  *	@sb:	superblock in question
  *	@flags:	numeric part of options
@@ -543,90 +613,77 @@ out:
 int do_remount_sb(struct super_block *sb, int flags, void *data, int force)
 {
 	int retval;
-	int remount_rw, remount_ro;
-
+	int remount_rw;
+	
 	if (sb->s_frozen != SB_UNFROZEN)
-		return -EBUSY;
-
+               return -EBUSY;
+	
 #ifdef CONFIG_BLOCK
 	if (!(flags & MS_RDONLY) && bdev_read_only(sb->s_bdev))
 		return -EACCES;
 #endif
-
 	if (flags & MS_RDONLY)
 		acct_auto_close(sb);
 	shrink_dcache_sb(sb);
 	sync_filesystem(sb);
 
-	remount_ro = (flags & MS_RDONLY) && !(sb->s_flags & MS_RDONLY);
-	remount_rw = !(flags & MS_RDONLY) && (sb->s_flags & MS_RDONLY);
-
 	/* If we are remounting RDONLY and current sb is read/write,
 	   make sure there are no rw files opened */
-	if (remount_ro) {
+	if ((flags & MS_RDONLY) && !(sb->s_flags & MS_RDONLY)) {
 		if (force)
 			mark_files_ro(sb);
 		else if (!fs_may_remount_ro(sb))
 			return -EBUSY;
-		retval = vfs_dq_off(sb, 1);
+		retval = DQUOT_OFF(sb, 1);
 		if (retval < 0 && retval != -ENOSYS)
 			return -EBUSY;
 	}
+	remount_rw = !(flags & MS_RDONLY) && (sb->s_flags & MS_RDONLY);
 
 	if (sb->s_op->remount_fs) {
+		lock_super(sb);
 		retval = sb->s_op->remount_fs(sb, &flags, data);
+		unlock_super(sb);
 		if (retval)
 			return retval;
 	}
 	sb->s_flags = (sb->s_flags & ~MS_RMT_MASK) | (flags & MS_RMT_MASK);
 	if (remount_rw)
-		vfs_dq_quota_on_remount(sb);
-	/*
-	 * Some filesystems modify their metadata via some other path than the
-	 * bdev buffer cache (eg. use a private mapping, or directories in
-	 * pagecache, etc). Also file data modifications go via their own
-	 * mappings. So If we try to mount readonly then copy the filesystem
-	 * from bdev, we could get stale data, so invalidate it to give a best
-	 * effort at coherency.
-	 */
-	if (remount_ro && sb->s_bdev)
-		invalidate_bdev(sb->s_bdev);
+		DQUOT_ON_REMOUNT(sb);
 	return 0;
 }
 
-static void do_emergency_remount(struct work_struct *work)
+static void do_emergency_remount(unsigned long foo)
 {
 	struct super_block *sb;
 
 	spin_lock(&sb_lock);
 	list_for_each_entry(sb, &super_blocks, s_list) {
+		if (list_empty(&sb->s_instances))
+			continue;
 		sb->s_count++;
 		spin_unlock(&sb_lock);
-		down_write(&sb->s_umount);
+		down_read(&sb->s_umount);
 		if (sb->s_root && sb->s_bdev && !(sb->s_flags & MS_RDONLY)) {
 			/*
+			 * ->remount_fs needs lock_kernel().
+			 *
 			 * What lock protects sb->s_flags??
 			 */
+			lock_kernel();
 			do_remount_sb(sb, MS_RDONLY, NULL, 1);
+			unlock_kernel();
 		}
-		up_write(&sb->s_umount);
-		put_super(sb);
+		drop_super(sb);
 		spin_lock(&sb_lock);
 	}
 	spin_unlock(&sb_lock);
-	kfree(work);
 	printk("Emergency Remount complete\n");
 }
 
 void emergency_remount(void)
 {
-	struct work_struct *work;
-
-	work = kmalloc(sizeof(*work), GFP_ATOMIC);
-	if (work) {
-		INIT_WORK(work, do_emergency_remount);
-		schedule_work(work);
-	}
+	pdflush_operation(do_emergency_remount, 0);
 }
 
 /*
@@ -636,7 +693,6 @@ void emergency_remount(void)
 
 static DEFINE_IDA(unnamed_dev_ida);
 static DEFINE_SPINLOCK(unnamed_dev_lock);/* protects the above */
-static int unnamed_dev_start = 0; /* don't bother trying below it */
 
 int set_anon_super(struct super_block *s, void *data)
 {
@@ -647,9 +703,7 @@ int set_anon_super(struct super_block *s, void *data)
 	if (ida_pre_get(&unnamed_dev_ida, GFP_ATOMIC) == 0)
 		return -ENOMEM;
 	spin_lock(&unnamed_dev_lock);
-	error = ida_get_new_above(&unnamed_dev_ida, unnamed_dev_start, &dev);
-	if (!error)
-		unnamed_dev_start = dev + 1;
+	error = ida_get_new(&unnamed_dev_ida, &dev);
 	spin_unlock(&unnamed_dev_lock);
 	if (error == -EAGAIN)
 		/* We raced and lost with another CPU. */
@@ -660,13 +714,10 @@ int set_anon_super(struct super_block *s, void *data)
 	if ((dev & MAX_ID_MASK) == (1 << MINORBITS)) {
 		spin_lock(&unnamed_dev_lock);
 		ida_remove(&unnamed_dev_ida, dev);
-		if (unnamed_dev_start > dev)
-			unnamed_dev_start = dev;
 		spin_unlock(&unnamed_dev_lock);
 		return -EMFILE;
 	}
 	s->s_dev = MKDEV(0, dev & MINORMASK);
-	s->s_bdi = &noop_backing_dev_info;
 	return 0;
 }
 
@@ -679,8 +730,6 @@ void kill_anon_super(struct super_block *sb)
 	generic_shutdown_super(sb);
 	spin_lock(&unnamed_dev_lock);
 	ida_remove(&unnamed_dev_ida, slot);
-	if (slot < unnamed_dev_start)
-		unnamed_dev_start = slot;
 	spin_unlock(&unnamed_dev_lock);
 }
 
@@ -695,55 +744,16 @@ void kill_litter_super(struct super_block *sb)
 
 EXPORT_SYMBOL(kill_litter_super);
 
-static int ns_test_super(struct super_block *sb, void *data)
-{
-	return sb->s_fs_info == data;
-}
-
-static int ns_set_super(struct super_block *sb, void *data)
-{
-	sb->s_fs_info = data;
-	return set_anon_super(sb, NULL);
-}
-
-int get_sb_ns(struct file_system_type *fs_type, int flags, void *data,
-	int (*fill_super)(struct super_block *, void *, int),
-	struct vfsmount *mnt)
-{
-	struct super_block *sb;
-
-	sb = sget(fs_type, ns_test_super, ns_set_super, data);
-	if (IS_ERR(sb))
-		return PTR_ERR(sb);
-
-	if (!sb->s_root) {
-		int err;
-		sb->s_flags = flags;
-		err = fill_super(sb, data, flags & MS_SILENT ? 1 : 0);
-		if (err) {
-			deactivate_locked_super(sb);
-			return err;
-		}
-
-		sb->s_flags |= MS_ACTIVE;
-	}
-
-	simple_set_mnt(mnt, sb);
-	return 0;
-}
-
-EXPORT_SYMBOL(get_sb_ns);
-
 #ifdef CONFIG_BLOCK
 static int set_bdev_super(struct super_block *s, void *data)
 {
 	s->s_bdev = data;
 	s->s_dev = s->s_bdev->bd_dev;
-
-	/*
-	 * We set the bdi here to the queue backing, file systems can
-	 * overwrite this in ->fill_super()
-	 */
+	
+	 /*
+	  * We set the bdi here to the queue backing, file systems can
+	  * overwrite this in ->fill_super()
+	  */
 	s->s_bdi = &bdev_get_queue(s->s_bdev)->backing_dev_info;
 	return 0;
 }
@@ -788,7 +798,8 @@ int get_sb_bdev(struct file_system_type *fs_type,
 
 	if (s->s_root) {
 		if ((flags ^ s->s_flags) & MS_RDONLY) {
-			deactivate_locked_super(s);
+			up_write(&s->s_umount);
+			deactivate_super(s);
 			error = -EBUSY;
 			goto error_bdev;
 		}
@@ -803,7 +814,8 @@ int get_sb_bdev(struct file_system_type *fs_type,
 		sb_set_blocksize(s, block_size(bdev));
 		error = fill_super(s, data, flags & MS_SILENT ? 1 : 0);
 		if (error) {
-			deactivate_locked_super(s);
+			up_write(&s->s_umount);
+			deactivate_super(s);
 			goto error;
 		}
 
@@ -811,8 +823,7 @@ int get_sb_bdev(struct file_system_type *fs_type,
 		bdev->bd_super = s;
 	}
 
-	simple_set_mnt(mnt, s);
-	return 0;
+	return simple_set_mnt(mnt, s);
 
 error_s:
 	error = PTR_ERR(s);
@@ -853,12 +864,12 @@ int get_sb_nodev(struct file_system_type *fs_type,
 
 	error = fill_super(s, data, flags & MS_SILENT ? 1 : 0);
 	if (error) {
-		deactivate_locked_super(s);
+		up_write(&s->s_umount);
+		deactivate_super(s);
 		return error;
 	}
 	s->s_flags |= MS_ACTIVE;
-	simple_set_mnt(mnt, s);
-	return 0;
+	return simple_set_mnt(mnt, s);
 }
 
 EXPORT_SYMBOL(get_sb_nodev);
@@ -883,15 +894,14 @@ int get_sb_single(struct file_system_type *fs_type,
 		s->s_flags = flags;
 		error = fill_super(s, data, flags & MS_SILENT ? 1 : 0);
 		if (error) {
-			deactivate_locked_super(s);
+			up_write(&s->s_umount);
+			deactivate_super(s);
 			return error;
 		}
 		s->s_flags |= MS_ACTIVE;
-	} else {
-		do_remount_sb(s, flags, data, 0);
 	}
-	simple_set_mnt(mnt, s);
-	return 0;
+	do_remount_sb(s, flags, data, 0);
+	return simple_set_mnt(mnt, s);
 }
 
 EXPORT_SYMBOL(get_sb_single);
@@ -911,9 +921,6 @@ vfs_kern_mount(struct file_system_type *type, int flags, const char *name, void 
 	if (!mnt)
 		goto out;
 
-	if (flags & MS_KERNMOUNT)
-		mnt->mnt_flags = MNT_INTERNAL;
-
 	if (data && !(type->fs_flags & FS_BINARY_MOUNTDATA)) {
 		secdata = alloc_secdata();
 		if (!secdata)
@@ -928,21 +935,10 @@ vfs_kern_mount(struct file_system_type *type, int flags, const char *name, void 
 	if (error < 0)
 		goto out_free_secdata;
 	BUG_ON(!mnt->mnt_sb);
-	WARN_ON(!mnt->mnt_sb->s_bdi);
 
-	error = security_sb_kern_mount(mnt->mnt_sb, flags, secdata);
-	if (error)
-		goto out_sb;
-
-	/*
-	 * filesystems should never set s_maxbytes larger than MAX_LFS_FILESIZE
-	 * but s_maxbytes was an unsigned long long for many releases. Throw
-	 * this warning for a little while to try and catch filesystems that
-	 * violate this rule. This warning should be either removed or
-	 * converted to a BUG() in 2.6.34.
-	 */
-	WARN((mnt->mnt_sb->s_maxbytes < 0), "%s set sb->s_maxbytes to "
-		"negative value (%lld)\n", type->name, mnt->mnt_sb->s_maxbytes);
+ 	error = security_sb_kern_mount(mnt->mnt_sb, flags, secdata);
+ 	if (error)
+ 		goto out_sb;
 
 	mnt->mnt_mountpoint = mnt->mnt_root;
 	mnt->mnt_parent = mnt;
@@ -951,7 +947,8 @@ vfs_kern_mount(struct file_system_type *type, int flags, const char *name, void 
 	return mnt;
 out_sb:
 	dput(mnt->mnt_root);
-	deactivate_locked_super(mnt->mnt_sb);
+	up_write(&mnt->mnt_sb->s_umount);
+	deactivate_super(mnt->mnt_sb);
 out_free_secdata:
 	free_secdata(secdata);
 out_mnt:

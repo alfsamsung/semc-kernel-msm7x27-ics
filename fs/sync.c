@@ -20,6 +20,10 @@
 #define VALID_FLAGS (SYNC_FILE_RANGE_WAIT_BEFORE|SYNC_FILE_RANGE_WRITE| \
 			SYNC_FILE_RANGE_WAIT_AFTER)
 
+static int fsync_disabled;
+module_param(fsync_disabled, int, 0600);
+MODULE_PARM_DESC(delay, "Change fsync() to work as a no-op: this is DANGEROUS");
+
 /*
  * Do the filesystem syncing work. For simple filesystems
  * writeback_inodes_sb(sb) just dirties buffers with inodes so we have to
@@ -37,13 +41,14 @@ static int __sync_filesystem(struct super_block *sb, int wait)
 		return 0;
 
 	if (sb->s_qcop && sb->s_qcop->quota_sync)
-		sb->s_qcop->quota_sync(sb, -1, wait);
+		sb->s_qcop->quota_sync(sb, -1);
 
 	if (wait)
-		sync_inodes_sb(sb);
-	else
-		writeback_inodes_sb(sb);
-
+		sync_inodes_sb(sb, wait);
+	else {
+		sync_quota_sb(sb, -1);
+                sync_inodes_sb(sb, wait);
+	}
 	if (sb->s_op->sync_fs)
 		sb->s_op->sync_fs(sb, wait);
 	return __sync_blockdev(sb->s_bdev, wait);
@@ -99,10 +104,13 @@ static void sync_filesystems(int wait)
 	mutex_lock(&mutex);		/* Could be down_interruptible */
 	spin_lock(&sb_lock);
 	list_for_each_entry(sb, &super_blocks, s_list)
-		sb->s_need_sync = 1;
+		if (!list_empty(&sb->s_instances))
+			sb->s_need_sync = 1;
 
 restart:
 	list_for_each_entry(sb, &super_blocks, s_list) {
+		if (list_empty(&sb->s_instances))
+			continue;
 		if (!sb->s_need_sync)
 			continue;
 		sb->s_need_sync = 0;
@@ -123,41 +131,37 @@ restart:
 	mutex_unlock(&mutex);
 }
 
-/*
- * sync everything.  Start out by waking pdflush, because that writes back
- * all queues in parallel.
- */
 SYSCALL_DEFINE0(sync)
 {
-	wakeup_flusher_threads(0);
 	sync_filesystems(0);
 	sync_filesystems(1);
 	if (unlikely(laptop_mode))
 		laptop_sync_completion();
+
 	return 0;
 }
 
 static void do_sync_work(struct work_struct *work)
-{
-	/*
-	 * Sync twice to reduce the possibility we skipped some inodes / pages
-	 * because they were temporarily locked
-	 */
+ {
+       /*
+        * Sync twice to reduce the possibility we skipped some inodes / pages
+        * because they were temporarily locked
+        */
 	sync_filesystems(0);
 	sync_filesystems(0);
 	printk("Emergency Sync complete\n");
 	kfree(work);
 }
-
+ 
 void emergency_sync(void)
 {
-	struct work_struct *work;
+        struct work_struct *work;
 
-	work = kmalloc(sizeof(*work), GFP_ATOMIC);
-	if (work) {
-		INIT_WORK(work, do_sync_work);
-		schedule_work(work);
-	}
+        work = kmalloc(sizeof(*work), GFP_ATOMIC);
+        if (work) {
+                INIT_WORK(work, do_sync_work);
+                schedule_work(work);
+        }
 }
 
 /*
@@ -170,14 +174,19 @@ int file_fsync(struct file *filp, struct dentry *dentry, int datasync)
 	struct inode * inode = dentry->d_inode;
 	struct super_block * sb;
 	int ret, err;
+	
+	if (unlikely(fsync_disabled))
+	return 0;
 
 	/* sync the inode to buffers */
 	ret = write_inode_now(inode, 0);
 
 	/* sync the superblock to buffers */
 	sb = inode->i_sb;
+	lock_super(sb);
 	if (sb->s_dirt && sb->s_op->write_super)
 		sb->s_op->write_super(sb);
+	unlock_super(sb);
 
 	/* .. finally sync the buffers to disk */
 	err = sync_blockdev(sb->s_bdev);
@@ -185,15 +194,13 @@ int file_fsync(struct file *filp, struct dentry *dentry, int datasync)
 		ret = err;
 	return ret;
 }
-EXPORT_SYMBOL(file_fsync);
-
 /**
  * vfs_fsync_range - helper to sync a range of data & metadata to disk
- * @file:		file to sync
- * @dentry:		dentry of @file
- * @start:		offset in bytes of the beginning of data range to sync
- * @end:		offset in bytes of the end of data range (inclusive)
- * @datasync:		perform only datasync
+ * @file:               file to sync
+ * @dentry:             dentry of @file
+ * @start:              offset in bytes of the beginning of data range to sync
+ * @end:                offset in bytes of the end of data range (inclusive)
+ * @datasync:           perform only datasync
  *
  * Write back data in range @start..@end and metadata for @file to disk.  If
  * @datasync is set only metadata needed to access modified file data is
@@ -204,52 +211,52 @@ EXPORT_SYMBOL(file_fsync);
  * implements the export_operations API.
  */
 int vfs_fsync_range(struct file *file, struct dentry *dentry, loff_t start,
-		    loff_t end, int datasync)
+                    loff_t end, int datasync)
 {
-	const struct file_operations *fop;
-	struct address_space *mapping;
-	int err, ret;
+        const struct file_operations *fop;
+        struct address_space *mapping;
+        int err, ret;
+ 
+         /*
+         * Get mapping and operations from the file in case we have
+         * as file, or get the default values for them in case we
+         * don't have a struct file available.  Damn nfsd..
+         */
+        if (file) {
+                mapping = file->f_mapping;
+                fop = file->f_op;
+        } else {
+                mapping = dentry->d_inode->i_mapping;
+                fop = dentry->d_inode->i_fop;
+        }
 
-	/*
-	 * Get mapping and operations from the file in case we have
-	 * as file, or get the default values for them in case we
-	 * don't have a struct file available.  Damn nfsd..
-	 */
-	if (file) {
-		mapping = file->f_mapping;
-		fop = file->f_op;
-	} else {
-		mapping = dentry->d_inode->i_mapping;
-		fop = dentry->d_inode->i_fop;
-	}
+        if (!fop || !fop->fsync) {
+                ret = -EINVAL;
+                goto out;
+        }
 
-	if (!fop || !fop->fsync) {
-		ret = -EINVAL;
-		goto out;
-	}
+        ret = filemap_write_and_wait_range(mapping, start, end);
 
-	ret = filemap_write_and_wait_range(mapping, start, end);
-
-	/*
-	 * We need to protect against concurrent writers, which could cause
-	 * livelocks in fsync_buffers_list().
-	 */
-	mutex_lock(&mapping->host->i_mutex);
-	err = fop->fsync(file, dentry, datasync);
-	if (!ret)
-		ret = err;
-	mutex_unlock(&mapping->host->i_mutex);
-
+       /*
+        * We need to protect against concurrent writers, which could cause
+        * livelocks in fsync_buffers_list().
+        */
+        mutex_lock(&mapping->host->i_mutex);
+        err = fop->fsync(file, dentry, datasync);
+        if (!ret)
+                ret = err;
+        mutex_unlock(&mapping->host->i_mutex);
+ 
 out:
-	return ret;
+        return ret;
 }
 EXPORT_SYMBOL(vfs_fsync_range);
 
 /**
  * vfs_fsync - perform a fsync or fdatasync on a file
- * @file:		file to sync
- * @dentry:		dentry of @file
- * @datasync:		only perform a fdatasync operation
+ * @file:               file to sync
+ * @dentry:             dentry of @file
+ * @datasync:           only perform a fdatasync operation
  *
  * Write back data and metadata for @file to disk.  If @datasync is
  * set only metadata needed to access modified file data is written.
@@ -260,7 +267,7 @@ EXPORT_SYMBOL(vfs_fsync_range);
  */
 int vfs_fsync(struct file *file, struct dentry *dentry, int datasync)
 {
-	return vfs_fsync_range(file, dentry, 0, LLONG_MAX, datasync);
+        return vfs_fsync_range(file, dentry, 0, LLONG_MAX, datasync);
 }
 EXPORT_SYMBOL(vfs_fsync);
 
@@ -268,6 +275,9 @@ static int do_fsync(unsigned int fd, int datasync)
 {
 	struct file *file;
 	int ret = -EBADF;
+	
+	if (unlikely(fsync_disabled))
+	return 0;
 
 	file = fget(fd);
 	if (file) {
@@ -286,22 +296,20 @@ SYSCALL_DEFINE1(fdatasync, unsigned int, fd)
 {
 	return do_fsync(fd, 1);
 }
-
 /**
  * generic_write_sync - perform syncing after a write if file / inode is sync
- * @file:	file to which the write happened
- * @pos:	offset where the write started
- * @count:	length of the write
+ * @file:       file to which the write happened
+ * @pos:        offset where the write started
+ * @count:      length of the write
  *
  * This is just a simple wrapper about our general syncing function.
  */
 int generic_write_sync(struct file *file, loff_t pos, loff_t count)
 {
-	if (!(file->f_flags & O_DSYNC) && !IS_SYNC(file->f_mapping->host))
-		return 0;
-	return vfs_fsync_range(file, file->f_path.dentry, pos,
-			       pos + count - 1,
-			       (file->f_flags & __O_SYNC) ? 0 : 1);
+        if (!(file->f_flags & O_SYNC) && !IS_SYNC(file->f_mapping->host))
+                return 0;
+        return vfs_fsync_range(file, file->f_path.dentry, pos,
+                               pos + count - 1, 1);
 }
 EXPORT_SYMBOL(generic_write_sync);
 
@@ -357,10 +365,12 @@ SYSCALL_DEFINE(sync_file_range)(int fd, loff_t offset, loff_t nbytes,
 {
 	int ret;
 	struct file *file;
-	struct address_space *mapping;
 	loff_t endbyte;			/* inclusive */
 	int fput_needed;
 	umode_t i_mode;
+	
+	if (unlikely(fsync_disabled))
+	return 0;
 
 	ret = -EINVAL;
 	if (flags & ~VALID_FLAGS)
@@ -408,28 +418,7 @@ SYSCALL_DEFINE(sync_file_range)(int fd, loff_t offset, loff_t nbytes,
 			!S_ISLNK(i_mode))
 		goto out_put;
 
-	mapping = file->f_mapping;
-	if (!mapping) {
-		ret = -EINVAL;
-		goto out_put;
-	}
-
-	ret = 0;
-	if (flags & SYNC_FILE_RANGE_WAIT_BEFORE) {
-		ret = filemap_fdatawait_range(mapping, offset, endbyte);
-		if (ret < 0)
-			goto out_put;
-	}
-
-	if (flags & SYNC_FILE_RANGE_WRITE) {
-		ret = filemap_fdatawrite_range(mapping, offset, endbyte);
-		if (ret < 0)
-			goto out_put;
-	}
-
-	if (flags & SYNC_FILE_RANGE_WAIT_AFTER)
-		ret = filemap_fdatawait_range(mapping, offset, endbyte);
-
+	ret = do_sync_mapping_range(file->f_mapping, offset, endbyte, flags);
 out_put:
 	fput_light(file, fput_needed);
 out:
@@ -461,3 +450,38 @@ asmlinkage long SyS_sync_file_range2(long fd, long flags,
 }
 SYSCALL_ALIAS(sys_sync_file_range2, SyS_sync_file_range2);
 #endif
+
+/*
+ * `endbyte' is inclusive
+ */
+int do_sync_mapping_range(struct address_space *mapping, loff_t offset,
+			  loff_t endbyte, unsigned int flags)
+{
+	int ret;
+
+	if (!mapping) {
+		ret = -EINVAL;
+		goto out;
+	}
+
+	ret = 0;
+	if (flags & SYNC_FILE_RANGE_WAIT_BEFORE) {
+		ret = filemap_fdatawait_range(mapping, offset, endbyte);
+		if (ret < 0)
+			goto out;
+	}
+
+	if (flags & SYNC_FILE_RANGE_WRITE) {
+		ret = __filemap_fdatawrite_range(mapping, offset, endbyte,
+						WB_SYNC_ALL);
+		if (ret < 0)
+			goto out;
+	}
+
+	if (flags & SYNC_FILE_RANGE_WAIT_AFTER) {
+		ret = filemap_fdatawait_range(mapping, offset, endbyte);
+	}
+out:
+	return ret;
+}
+EXPORT_SYMBOL_GPL(do_sync_mapping_range);

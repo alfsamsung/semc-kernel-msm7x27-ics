@@ -25,6 +25,8 @@ static inline int sb_is_blkdev_sb(struct super_block *sb)
 	return sb == blockdev_superblock;
 }
 
+extern int __sync_blockdev(struct block_device *bdev, int wait);
+
 #else
 static inline void bdev_cache_init(void)
 {
@@ -33,6 +35,11 @@ static inline void bdev_cache_init(void)
 static inline int sb_is_blkdev_sb(struct super_block *sb)
 {
 	return 0;
+}
+
+static inline int __sync_blockdev(struct block_device *bdev, int wait)
+{
+       return 0;
 }
 #endif
 
@@ -66,3 +73,5 @@ extern void __init mnt_init(void);
  * fs_struct.c
  */
 extern void chroot_fs_refs(struct path *, struct path *);
+
+
