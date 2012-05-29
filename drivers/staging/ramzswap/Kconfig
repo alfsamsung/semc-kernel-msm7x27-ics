@@ -1,13 +1,16 @@
 config RAMZSWAP
 	tristate "Compressed in-memory swap device (ramzswap)"
 	depends on SWAP
-	select LZO_COMPRESS
-	select LZO_DECOMPRESS
+	select SNAPPY_COMPRESS
+	select SNAPPY_DECOMPRESS
 	default n
 	help
 	  Creates virtual block devices which can (only) be used as swap
 	  disks. Pages swapped to these disks are compressed and stored in
 	  memory itself.
+
+	  Snappy compresses a bit worse (around ~2%) but much (~2x) faster
+	  at least on x86-64.
 
 	  See ramzswap.txt for more information.
 	  Project home: http://compcache.googlecode.com/
