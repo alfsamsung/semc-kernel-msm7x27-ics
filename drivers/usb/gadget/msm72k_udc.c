@@ -1264,7 +1264,7 @@ static irqreturn_t usb_interrupt(int irq, void *data)
 			/* marking us offline will cause ept queue attempts
 			** to fail
 			*/
-			atomic_set(&ui->online, 0);
+			atomic_set(&ui->configured, 0);
 			/* Defer sending offline uevent to userspace */
 			atomic_set(&ui->offline_pending, 1);
 
@@ -1658,7 +1658,7 @@ static void usb_do_work(struct work_struct *w)
 				 * accordingly.
 				 */
 				switch_set_state(&ui->sdev,
-						atomic_read(&ui->online)));
+						atomic_read(&ui->configured));
 
 				if (maxpower < 0)
 					break;
