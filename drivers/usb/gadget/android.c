@@ -288,8 +288,13 @@ static int __init android_bind(struct usb_composite_dev *cdev)
 	if (!usb_gadget_set_selfpowered(gadget))
 		android_config_driver.bmAttributes |= USB_CONFIG_ATT_SELFPOWER;
 
-	if (gadget->ops->wakeup)
+	/* Supporting remote wakeup for mass storage only function
+	 * does n't make sense, since there are no notifications that
+	 * can be sent from mass storage during suspend */
+	if ((gadget->ops->wakeup) && (dev->functions != ANDROID_MSC))
 		android_config_driver.bmAttributes |= USB_CONFIG_ATT_WAKEUP;
+	else
+		android_config_driver.bmAttributes &= ~USB_CONFIG_ATT_WAKEUP;
 
 	if (dev->pdata->self_powered && !usb_gadget_set_selfpowered(gadget)) {
 		android_config_driver.bmAttributes |= USB_CONFIG_ATT_SELFPOWER;
