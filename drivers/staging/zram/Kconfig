@@ -65,6 +65,6 @@ endchoice
 config ZRAM_DEFAULT_DISKSIZE
 	int "Default size of zram in bytes"
 	depends on ZRAM
-	default 100663296
+	default 65536000
 	help
-	  Set default zram disk size (default ~ 96MB)
+	  Set default zram disk size (default ~ 64MB)
