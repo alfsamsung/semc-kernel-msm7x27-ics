@@ -276,8 +276,6 @@ struct dquot {
 	struct mem_dqblk dq_dqb;	/* Diskquota usage */
 };
 
-#define NODQUOT (struct dquot *)NULL
-
 #define QUOTA_OK          0
 #define NO_QUOTA          1
 
@@ -308,6 +306,15 @@ struct dquot_operations {
 	int (*release_dquot) (struct dquot *);		/* Quota is going to be deleted from disk */
 	int (*mark_dirty) (struct dquot *);		/* Dquot is marked dirty */
 	int (*write_info) (struct super_block *, int);	/* Write of quota "superblock" */
+	/* reserve quota for delayed block allocation */
+	int (*reserve_space) (struct inode *, qsize_t, int);
+	/* claim reserved quota for delayed alloc */
+	int (*claim_space) (struct inode *, qsize_t);
+	/* release rsved quota for delayed alloc */
+	void (*release_rsv) (struct inode *, qsize_t);
+	/* get reserved quota for delayed alloc, value returned is managed by
+	* quota code only */
+	qsize_t *(*get_reserved_space) (struct inode *);
 };
 
 /* Operations handling requests from userspace */

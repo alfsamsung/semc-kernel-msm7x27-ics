@@ -248,59 +248,59 @@ int fsync_bdev(struct block_device *bdev)
  */
 struct super_block *freeze_bdev(struct block_device *bdev)
 {
-       struct super_block *sb;
-       int error = 0;
+	struct super_block *sb;
+	int error = 0;
 
-       mutex_lock(&bdev->bd_fsfreeze_mutex);
-       if (++bdev->bd_fsfreeze_count > 1) {
-               /*
-                * We don't even need to grab a reference - the first call
-                * to freeze_bdev grab an active reference and only the last
-                * thaw_bdev drops it.
-                */
-               sb = get_super(bdev);
-	       drop_super(sb);
-               mutex_unlock(&bdev->bd_fsfreeze_mutex);
-               return sb;
-      }
-       sb = get_active_super(bdev);
-       if (!sb)
-               goto out;
-       if (sb->s_flags & MS_RDONLY) {
-               deactivate_locked_super(sb);
-               mutex_unlock(&bdev->bd_fsfreeze_mutex);
-               return sb;
-       }
+	mutex_lock(&bdev->bd_fsfreeze_mutex);
+	if (++bdev->bd_fsfreeze_count > 1) {
+		/*
+		 * We don't even need to grab a reference - the first call
+		 * to freeze_bdev grab an active reference and only the last
+		 * thaw_bdev drops it.
+		 */
+		sb = get_super(bdev);
+		drop_super(sb);
+		mutex_unlock(&bdev->bd_fsfreeze_mutex);
+		return sb;
+	}
+	sb = get_active_super(bdev);
+	if (!sb)
+		goto out;
+	if (sb->s_flags & MS_RDONLY) {
+		deactivate_locked_super(sb);
+		mutex_unlock(&bdev->bd_fsfreeze_mutex);
+		return sb;
+	}
 
-       sb->s_frozen = SB_FREEZE_WRITE;
-       smp_wmb();
+	sb->s_frozen = SB_FREEZE_WRITE;
+	smp_wmb();
 
-       sync_filesystem(sb);
+	sync_filesystem(sb);
 
-       sb->s_frozen = SB_FREEZE_TRANS;
-       smp_wmb();
+	sb->s_frozen = SB_FREEZE_TRANS;
+	smp_wmb();
 
-       sync_blockdev(sb->s_bdev);
+	sync_blockdev(sb->s_bdev);
 
-       if (sb->s_op->freeze_fs) {
-               error = sb->s_op->freeze_fs(sb);
-               if (error) {
-                       printk(KERN_ERR
-                               "VFS:Filesystem freeze failed\n");
-                       sb->s_frozen = SB_UNFROZEN;
-                       deactivate_locked_super(sb);
-                       bdev->bd_fsfreeze_count--;
-                       mutex_unlock(&bdev->bd_fsfreeze_mutex);
-                       return ERR_PTR(error);
-               }
-       }
-       up_write(&sb->s_umount);
-       
+	if (sb->s_op->freeze_fs) {
+		error = sb->s_op->freeze_fs(sb);
+		if (error) {
+			printk(KERN_ERR
+				"VFS:Filesystem freeze failed\n");
+			sb->s_frozen = SB_UNFROZEN;
+			deactivate_locked_super(sb);
+			bdev->bd_fsfreeze_count--;
+			mutex_unlock(&bdev->bd_fsfreeze_mutex);
+			return ERR_PTR(error);
+		}
+	}
+	up_write(&sb->s_umount);
+
 out:
-       sync_blockdev(bdev);
-       mutex_unlock(&bdev->bd_fsfreeze_mutex);
+	sync_blockdev(bdev);
+	mutex_unlock(&bdev->bd_fsfreeze_mutex);
 
-       return sb;      /* thaw_bdev releases s->s_umount */
+	return sb;      /* thaw_bdev releases s->s_umount */
 }
 EXPORT_SYMBOL(freeze_bdev);
 
@@ -313,46 +313,46 @@ EXPORT_SYMBOL(freeze_bdev);
  */
 int thaw_bdev(struct block_device *bdev, struct super_block *sb)
 {
-       int error = -EINVAL;
+	int error = -EINVAL;
 
-       mutex_lock(&bdev->bd_fsfreeze_mutex);
-       if (!bdev->bd_fsfreeze_count)
-               goto out_unlock;
+	mutex_lock(&bdev->bd_fsfreeze_mutex);
+	if (!bdev->bd_fsfreeze_count)
+		goto out_unlock;
 
-       error = 0;
-       if (--bdev->bd_fsfreeze_count > 0)
-               goto out_unlock;
+	error = 0;
+	if (--bdev->bd_fsfreeze_count > 0)
+		goto out_unlock;
 
-       if (!sb)
-               goto out_unlock;
+	if (!sb)
+		goto out_unlock;
 
-       BUG_ON(sb->s_bdev != bdev);
-       down_write(&sb->s_umount);
-       if (sb->s_flags & MS_RDONLY)
-               goto out_deactivate;
+	BUG_ON(sb->s_bdev != bdev);
+	down_write(&sb->s_umount);
+	if (sb->s_flags & MS_RDONLY)
+		goto out_deactivate;
 
-       if (sb->s_op->unfreeze_fs) {
-               error = sb->s_op->unfreeze_fs(sb);
-               if (error) {
-                       printk(KERN_ERR
-                               "VFS:Filesystem thaw failed\n");
-                       sb->s_frozen = SB_FREEZE_TRANS;
-                       bdev->bd_fsfreeze_count++;
-                       mutex_unlock(&bdev->bd_fsfreeze_mutex);
-                       return error;
-              }
-      }
-      
-       sb->s_frozen = SB_UNFROZEN;
-       smp_wmb();
-       wake_up(&sb->s_wait_unfrozen);
+	if (sb->s_op->unfreeze_fs) {
+		error = sb->s_op->unfreeze_fs(sb);
+		if (error) {
+			printk(KERN_ERR
+				"VFS:Filesystem thaw failed\n");
+			sb->s_frozen = SB_FREEZE_TRANS;
+			bdev->bd_fsfreeze_count++;
+			mutex_unlock(&bdev->bd_fsfreeze_mutex);
+			return error;
+		}
+	}
+
+	sb->s_frozen = SB_UNFROZEN;
+	smp_wmb();
+	wake_up(&sb->s_wait_unfrozen);
 
 out_deactivate:
-       if (sb)
-               deactivate_locked_super(sb);
+	if (sb)
+		deactivate_locked_super(sb);
 out_unlock:
-       mutex_unlock(&bdev->bd_fsfreeze_mutex);
-       return 0;
+	mutex_unlock(&bdev->bd_fsfreeze_mutex);
+	return 0;
 }
 EXPORT_SYMBOL(thaw_bdev);
 
@@ -425,28 +425,10 @@ static loff_t block_llseek(struct file *file, loff_t offset, int origin)
  *	NULL first argument is nfsd_sync_dir() and that's not a directory.
  */
  
-int blkdev_fsync(struct file *filp, struct dentry *dentry, int datasync)
+int block_fsync(struct file *filp, struct dentry *dentry, int datasync)
 {
-	struct inode *bd_inode = filp->f_mapping->host;
-	struct block_device *bdev = I_BDEV(bd_inode);
-	int error;
-
-	/*
-        * There is no need to serialise calls to blkdev_issue_flush with
-        * i_mutex and doing so causes performance issues with concurrent
-        * O_SYNC writers to a block device.
-        */
-	mutex_unlock(&bd_inode->i_mutex);
-	
-	error = blkdev_issue_flush(bdev, NULL);
-	if (error == -EOPNOTSUPP)
-		error = 0;
-	
-	mutex_lock(&bd_inode->i_mutex);
-	
-	return error;
+         return sync_blockdev(I_BDEV(filp->f_mapping->host));
 }
-EXPORT_SYMBOL(blkdev_fsync);
 
 /*
  * pseudo-fs
@@ -462,6 +444,7 @@ static struct inode *bdev_alloc_inode(struct super_block *sb)
 		return NULL;
 	return &ei->vfs_inode;
 }
+EXPORT_SYMBOL(block_fsync);
 
 static void bdev_destroy_inode(struct inode *inode)
 {
@@ -1495,7 +1478,7 @@ const struct file_operations def_blk_fops = {
   	.aio_read	= generic_file_aio_read,
   	.aio_write	= blkdev_aio_write,
 	.mmap		= generic_file_mmap,
-	.fsync		= blkdev_fsync,
+	.fsync		= block_fsync,
 	.unlocked_ioctl	= block_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= compat_blkdev_ioctl,

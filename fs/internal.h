@@ -74,4 +74,7 @@ extern void __init mnt_init(void);
  */
 extern void chroot_fs_refs(struct path *, struct path *);
 
-
+/*
+ * file_table.c
+ */
+extern void mark_files_ro(struct super_block *);
