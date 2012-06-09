@@ -41,7 +41,7 @@ struct zobj_header {
 /*-- Configurable parameters */
 
 /* Default zram disk size: 25% of total RAM */
-static const unsigned default_disksize_perc_ram = 25;
+static const unsigned default_disksize_perc_ram = CONFIG_ZRAM_DEFAULT_PERCENTAGE;
 
 /*
  * Pages that compress to size greater than this are stored
@@ -61,7 +61,10 @@ static const size_t max_zpage_size = PAGE_SIZE / 4 * 3;
 #define SECTOR_SIZE		(1 << SECTOR_SHIFT)
 #define SECTORS_PER_PAGE_SHIFT	(PAGE_SHIFT - SECTOR_SHIFT)
 #define SECTORS_PER_PAGE	(1 << SECTORS_PER_PAGE_SHIFT)
-//#define ZRAM_LOGICAL_BLOCK_SIZE        4096
+#define ZRAM_LOGICAL_BLOCK_SHIFT 12
+#define ZRAM_LOGICAL_BLOCK_SIZE	(1 << ZRAM_LOGICAL_BLOCK_SHIFT)
+#define ZRAM_SECTOR_PER_LOGICAL_BLOCK	\
+	(1 << (ZRAM_LOGICAL_BLOCK_SHIFT - SECTOR_SHIFT))
 
 /* Flags for zram pages (table[page_no].flags) */
 enum zram_pageflags {
@@ -92,7 +95,6 @@ struct zram_stats {
 	u64 failed_writes;	/* can happen when memory is too low */
 	u64 invalid_io;		/* non-page-aligned I/O requests */
 	u64 notify_free;	/* no. of swap slot free notifications */
-	u64 discard;		/* no. of block discard callbacks */
 	u32 pages_zero;		/* no. of zero filled pages */
 	u32 pages_stored;	/* no. of pages currently stored */
 	u32 good_compress;	/* % of pages with compression ratio<=50% */
@@ -106,7 +108,7 @@ struct zram {
 	struct table *table;
 	spinlock_t stat64_lock;	/* protect 64-bit stats */
 	struct rw_semaphore lock; /* protect compression buffers and table
-				    * against concurrent read and writes */
+				   * against concurrent read and writes */
 	struct request_queue *queue;
 	struct gendisk *disk;
 	int init_done;
@@ -130,4 +132,4 @@ extern struct attribute_group zram_disk_attr_group;
 extern int zram_init_device(struct zram *zram);
 extern void __zram_reset_device(struct zram *zram);
 
-#endif 
+#endif
