@@ -54,6 +54,7 @@ deps_config := \
 	fs/fuse/Kconfig \
 	fs/autofs4/Kconfig \
 	fs/autofs/Kconfig \
+	fs/quota/Kconfig \
 	fs/notify/inotify/Kconfig \
 	fs/notify/dnotify/Kconfig \
 	fs/notify/Kconfig \

@@ -18,9 +18,10 @@
 #include <linux/string.h>
 #include <linux/backing-dev.h>
 #include <linux/ramfs.h>
-#include <linux/quotaops.h>
 #include <linux/pagevec.h>
 #include <linux/mman.h>
+#include <linux/sched.h>
+#include <linux/slab.h>
 
 #include <asm/uaccess.h>
 #include "internal.h"
@@ -60,8 +61,7 @@ const struct inode_operations ramfs_file_inode_operations = {
  */
 int ramfs_nommu_expand_for_mapping(struct inode *inode, size_t newsize)
 {
-	struct pagevec lru_pvec;
-	unsigned long npages, xpages, loop, limit;
+	unsigned long npages, xpages, loop;
 	struct page *pages;
 	unsigned order;
 	void *data;
@@ -70,14 +70,11 @@ int ramfs_nommu_expand_for_mapping(struct inode *inode, size_t newsize)
 	/* make various checks */
 	order = get_order(newsize);
 	if (unlikely(order >= MAX_ORDER))
-		goto too_big;
+		return -EFBIG;
 
-	limit = current->signal->rlim[RLIMIT_FSIZE].rlim_cur;
-	if (limit != RLIM_INFINITY && newsize > limit)
-		goto fsize_exceeded;
-
-	if (newsize > inode->i_sb->s_maxbytes)
-		goto too_big;
+	ret = inode_newsize_ok(inode, newsize);
+	if (ret)
+		return ret;
 
 	i_size_write(inode, newsize);
 
@@ -103,16 +100,13 @@ int ramfs_nommu_expand_for_mapping(struct inode *inode, size_t newsize)
 	memset(data, 0, newsize);
 
 	/* attach all the pages to the inode's address space */
-	pagevec_init(&lru_pvec, 0);
 	for (loop = 0; loop < npages; loop++) {
 		struct page *page = pages + loop;
 
-		ret = add_to_page_cache(page, inode->i_mapping, loop, GFP_KERNEL);
+		ret = add_to_page_cache_lru(page, inode->i_mapping, loop,
+					GFP_KERNEL);
 		if (ret < 0)
 			goto add_error;
-
-		if (!pagevec_add(&lru_pvec, page))
-			__pagevec_lru_add_file(&lru_pvec);
 
 		/* prevent the page from being discarded on memory pressure */
 		SetPageDirty(page);
@@ -120,44 +114,12 @@ int ramfs_nommu_expand_for_mapping(struct inode *inode, size_t newsize)
 		unlock_page(page);
 	}
 
-	pagevec_lru_add_file(&lru_pvec);
 	return 0;
 
- fsize_exceeded:
-	send_sig(SIGXFSZ, current, 0);
- too_big:
-	return -EFBIG;
-
- add_error:
-	pagevec_lru_add_file(&lru_pvec);
-	page_cache_release(pages + loop);
-	for (loop++; loop < npages; loop++)
-		__free_page(pages + loop);
+add_error:
+	while (loop < npages)
+		__free_page(pages + loop++);
 	return ret;
-}
-
-/*****************************************************************************/
-/*
- * check that file shrinkage doesn't leave any VMAs dangling in midair
- */
-static int ramfs_nommu_check_mappings(struct inode *inode,
-				      size_t newsize, size_t size)
-{
-	struct vm_area_struct *vma;
-	struct prio_tree_iter iter;
-
-	/* search for VMAs that fall within the dead zone */
-	vma_prio_tree_foreach(vma, &iter, &inode->i_mapping->i_mmap,
-			      newsize >> PAGE_SHIFT,
-			      (size + PAGE_SIZE - 1) >> PAGE_SHIFT
-			      ) {
-		/* found one - only interested if it's shared out of the page
-		 * cache */
-		if (vma->vm_flags & VM_SHARED)
-			return -ETXTBSY; /* not quite true, but near enough */
-	}
-
-	return 0;
 }
 
 /*****************************************************************************/
@@ -179,12 +141,12 @@ static int ramfs_nommu_resize(struct inode *inode, loff_t newsize, loff_t size)
 
 	/* check that a decrease in size doesn't cut off any shared mappings */
 	if (newsize < size) {
-		ret = ramfs_nommu_check_mappings(inode, newsize, size);
+		ret = nommu_shrink_inode_mappings(inode, size, newsize);
 		if (ret < 0)
 			return ret;
 	}
 
-	ret = vmtruncate(inode, newsize);
+	ret = simple_setsize(inode, newsize);
 
 	return ret;
 }
@@ -205,14 +167,10 @@ static int ramfs_nommu_setattr(struct dentry *dentry, struct iattr *ia)
 	if (ret)
 		return ret;
 
-	/* by providing our own setattr() method, we skip this quotaism */
-	if ((old_ia_valid & ATTR_UID && ia->ia_uid != inode->i_uid) ||
-	    (old_ia_valid & ATTR_GID && ia->ia_gid != inode->i_gid))
-		ret = DQUOT_TRANSFER(inode, ia) ? -EDQUOT : 0;
-
 	/* pick out size-changing events */
 	if (ia->ia_valid & ATTR_SIZE) {
-		loff_t size = i_size_read(inode);
+		loff_t size = inode->i_size;
+
 		if (ia->ia_size != size) {
 			ret = ramfs_nommu_resize(inode, ia->ia_size, size);
 			if (ret < 0 || ia->ia_valid == ATTR_SIZE)
@@ -225,7 +183,7 @@ static int ramfs_nommu_setattr(struct dentry *dentry, struct iattr *ia)
 		}
 	}
 
-	ret = inode_setattr(inode, ia);
+	generic_setattr(inode, ia);
  out:
 	ia->ia_valid = old_ia_valid;
 	return ret;
