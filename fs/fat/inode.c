@@ -441,16 +441,20 @@ static void fat_clear_inode(struct inode *inode)
 
 static void fat_write_super(struct super_block *sb)
 {
+	lock_super(sb);
 	sb->s_dirt = 0;
 
 	if (!(sb->s_flags & MS_RDONLY))
 		fat_clusters_flush(sb);
+	unlock_super(sb);
 }
 
 static void fat_put_super(struct super_block *sb)
 {
 	struct msdos_sb_info *sbi = MSDOS_SB(sb);
 
+	lock_kernel();
+	
 	if (sbi->nls_disk) {
 		unload_nls(sbi->nls_disk);
 		sbi->nls_disk = NULL;
@@ -467,6 +471,8 @@ static void fat_put_super(struct super_block *sb)
 
 	sb->s_fs_info = NULL;
 	kfree(sbi);
+	
+	 unlock_kernel();
 }
 
 static struct kmem_cache *fat_inode_cachep;

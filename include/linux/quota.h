@@ -198,6 +198,7 @@ struct mem_dqblk {
 	qsize_t dqb_bhardlimit;	/* absolute limit on disk blks alloc */
 	qsize_t dqb_bsoftlimit;	/* preferred limit on disk blks */
 	qsize_t dqb_curspace;	/* current used space */
+	qsize_t dqb_rsvspace;   /* current reserved space for delalloc*/
 	qsize_t dqb_ihardlimit;	/* absolute limit on allocated inodes */
 	qsize_t dqb_isoftlimit;	/* preferred inode limit */
 	qsize_t dqb_curinodes;	/* current # allocated inodes */

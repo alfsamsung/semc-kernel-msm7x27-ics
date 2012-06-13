@@ -169,17 +169,9 @@ EXPORT_SYMBOL(putname);
 
 
 /**
- * generic_permission  -  check for access rights on a Posix-like filesystem
- * @inode:	inode to check access rights for
- * @mask:	right to check for (%MAY_READ, %MAY_WRITE, %MAY_EXEC)
- * @check_acl:	optional callback to check for Posix ACLs
- *
- * Used to check for read/write/execute permissions on a file.
- * We use "fsuid" for this, letting us set arbitrary permissions
- * for filesystem access without changing the "normal" uids which
- * are used for other things..
+ * This does basic POSIX ACL permission checking
  */
-int generic_permission(struct inode *inode, int mask,
+static int acl_permission_check(struct inode *inode, int mask,
 		int (*check_acl)(struct inode *inode, int mask))
 {
 	umode_t			mode = inode->i_mode;
@@ -191,9 +183,7 @@ int generic_permission(struct inode *inode, int mask,
 	else {
 		if (IS_POSIXACL(inode) && (mode & S_IRWXG) && check_acl) {
 			int error = check_acl(inode, mask);
-			if (error == -EACCES)
-				goto check_capabilities;
-			else if (error != -EAGAIN)
+			if (error != -EAGAIN)
 				return error;
 		}
 
@@ -206,8 +196,32 @@ int generic_permission(struct inode *inode, int mask,
 	 */
 	if ((mask & ~mode) == 0)
 		return 0;
+	return -EACCES;
+}
 
- check_capabilities:
+/**
+ * generic_permission  -  check for access rights on a Posix-like filesystem
+ * @inode:     inode to check access rights for
+ * @mask:      right to check for (%MAY_READ, %MAY_WRITE, %MAY_EXEC)
+ * @check_acl: optional callback to check for Posix ACLs
+ *
+ * Used to check for read/write/execute permissions on a file.
+ * We use "fsuid" for this, letting us set arbitrary permissions
+ * for filesystem access without changing the "normal" uids which
+ * are used for other things..
+ */
+int generic_permission(struct inode *inode, int mask,
+               int (*check_acl)(struct inode *inode, int mask))
+{
+	int ret;
+
+	/*
+	  * Do the basic POSIX ACL permission checks.
+	  */
+	ret = acl_permission_check(inode, mask, check_acl);
+	if (ret != -EACCES)
+		return ret;
+
 	/*
 	 * Read/write DACs are always overridable.
 	 * Executable DACs are overridable if at least one exec bit is set.
@@ -260,7 +274,7 @@ int inode_permission(struct inode *inode, int mask)
 	if (inode->i_op->permission)
 		retval = inode->i_op->permission(inode, mask);
 	else
-		retval = generic_permission(inode, mask, NULL);
+		retval = generic_permission(inode, mask, inode->i_op->check_acl);
 
 	if (retval)
 		return retval;
@@ -430,17 +444,17 @@ static struct dentry * cached_lookup(struct dentry * parent, struct qstr * name,
  */
 static int exec_permission_lite(struct inode *inode)
 {
-	umode_t	mode = inode->i_mode;
+	int ret;
 
-	if (inode->i_op->permission)
-		return -EAGAIN;
+	if (inode->i_op->permission) {
+		ret = inode->i_op->permission(inode, MAY_EXEC);
+                if (!ret)
+                        goto ok;
+                return ret;
+        }
 
-	if (current_fsuid() == inode->i_uid)
-		mode >>= 6;
-	else if (in_group_p(inode->i_gid))
-		mode >>= 3;
-
-	if (mode & MAY_EXEC)
+	ret = acl_permission_check(inode, MAY_EXEC, inode->i_op->check_acl);
+	if (!ret)
 		goto ok;
 
 	if ((inode->i_mode & S_IXUGO) && capable(CAP_DAC_OVERRIDE))
@@ -452,7 +466,7 @@ static int exec_permission_lite(struct inode *inode)
 	if (S_ISDIR(inode->i_mode) && capable(CAP_DAC_READ_SEARCH))
 		goto ok;
 
-	return -EACCES;
+	return ret;
 ok:
 	return security_inode_permission(inode, MAY_EXEC);
 }

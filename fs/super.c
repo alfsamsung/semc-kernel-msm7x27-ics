@@ -314,8 +314,7 @@ void generic_shutdown_super(struct super_block *sb)
 		
 		/* bad name - it should be evict_inodes() */
 		invalidate_inodes(sb);
-		lock_kernel();
-
+		
 		if (sop->write_super && sb->s_dirt)
 			sop->write_super(sb);
 		if (sop->put_super)
@@ -328,7 +327,6 @@ void generic_shutdown_super(struct super_block *sb)
 			   sb->s_id);
 		}
 
-		unlock_kernel();
 		put_fs_excl();
 	}
 	spin_lock(&sb_lock);
@@ -431,10 +429,8 @@ restart:
 			sb->s_count++;
 			spin_unlock(&sb_lock);
 			down_read(&sb->s_umount);
-			lock_super(sb);
 			if (sb->s_root && sb->s_dirt)
 				  sb->s_op->write_super(sb);
-			unlock_super(sb);
 			up_read(&sb->s_umount);
 			
 			spin_lock(&sb_lock);

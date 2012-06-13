@@ -835,6 +835,11 @@ extern void truncate_pagecache(struct inode *inode, loff_t old, loff_t new);
 extern int vmtruncate(struct inode *inode, loff_t offset);
 extern int vmtruncate_range(struct inode *inode, loff_t offset, loff_t end);
 
+int truncate_inode_page(struct address_space *mapping, struct page *page);
+int generic_error_remove_page(struct address_space *mapping, struct page *page);
+
+int invalidate_inode_page(struct page *page);
+
 #ifdef CONFIG_MMU
 extern int handle_mm_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 			unsigned long address, int write_access);
