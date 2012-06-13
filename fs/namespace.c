@@ -1546,8 +1546,11 @@ static int do_remount(struct path *path, int flags, int mnt_flags,
 	down_write(&sb->s_umount);
 	if (flags & MS_BIND)
 		err = change_mount_flags(path->mnt, flags);
-	else
+	else {
+		lock_kernel();
 		err = do_remount_sb(sb, flags, data, 0);
+		unlock_kernel();
+	}
 	if (!err)
 		path->mnt->mnt_flags = mnt_flags;
 	up_write(&sb->s_umount);

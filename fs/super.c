@@ -309,7 +309,7 @@ void generic_shutdown_super(struct super_block *sb)
 	if (sb->s_root) {
 		shrink_dcache_for_umount(sb);
 		sync_filesystem(sb);
-		lock_super(sb);
+		get_fs_excl();
 		sb->s_flags &= ~MS_ACTIVE;
 		
 		/* bad name - it should be evict_inodes() */
@@ -329,7 +329,7 @@ void generic_shutdown_super(struct super_block *sb)
 		}
 
 		unlock_kernel();
-		unlock_super(sb);
+		put_fs_excl();
 	}
 	spin_lock(&sb_lock);
 	/* should be initialized for __put_super_and_need_restart() */
@@ -405,17 +405,15 @@ void drop_super(struct super_block *sb)
 }
 
 EXPORT_SYMBOL(drop_super);
+
 /*
-static inline void write_super(struct super_block *sb)
-{
-	lock_super(sb);
-	if (sb->s_root && sb->s_dirt)
-		if (sb->s_op->write_super)
-			sb->s_op->write_super(sb);
-	unlock_super(sb);
-}
-*/
-/*
+ * sync_supers - helper for periodic superblock writeback
+ *
+ * Call the write_super method if present on all dirty superblocks in
+ * the system.  This is for the periodic writeback used by most older
+ * filesystems.  For data integrity superblock writeback use
+ * sync_filesystems() instead.
+ * 
  * Note: check the dirty flag before waiting, so we don't
  * hold up the sync while mounting a device. (The newly
  * mounted device won't need syncing.)
@@ -433,8 +431,10 @@ restart:
 			sb->s_count++;
 			spin_unlock(&sb_lock);
 			down_read(&sb->s_umount);
+			lock_super(sb);
 			if (sb->s_root && sb->s_dirt)
 				  sb->s_op->write_super(sb);
+			unlock_super(sb);
 			up_read(&sb->s_umount);
 			
 			spin_lock(&sb_lock);
@@ -607,7 +607,9 @@ int do_remount_sb(struct super_block *sb, int flags, void *data, int force)
 			  return -EBUSY;
 	}
 	if (sb->s_op->remount_fs) {
+		  lock_super(sb);
 		  retval = sb->s_op->remount_fs(sb, &flags, data);
+		  unlock_super(sb);
 		  if (retval)
 			  return retval;
 	  }
