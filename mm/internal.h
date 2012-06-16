@@ -72,7 +72,6 @@ static inline void munlock_vma_pages_all(struct vm_area_struct *vma)
 	munlock_vma_pages_range(vma, vma->vm_start, vma->vm_end);
 }
 
-#ifdef CONFIG_UNEVICTABLE_LRU
 /*
  * unevictable_migrate_page() called only from migrate_page_copy() to
  * migrate unevictable flag to new page.
@@ -84,13 +83,7 @@ static inline void unevictable_migrate_page(struct page *new, struct page *old)
 	if (TestClearPageUnevictable(old))
 		SetPageUnevictable(new);
 }
-#else
-static inline void unevictable_migrate_page(struct page *new, struct page *old)
-{
-}
-#endif
 
-#ifdef CONFIG_UNEVICTABLE_LRU
 /*
  * Called only in fault path via page_evictable() for a new page
  * to determine if it's being mapped into a LOCKED vma.
@@ -165,18 +158,6 @@ static inline void free_page_mlock(struct page *page)
 		local_irq_restore(flags);
 	}
 }
-
-#else /* CONFIG_UNEVICTABLE_LRU */
-static inline int is_mlocked_vma(struct vm_area_struct *v, struct page *p)
-{
-	return 0;
-}
-static inline void clear_page_mlock(struct page *page) { }
-static inline void mlock_vma_page(struct page *page) { }
-static inline void mlock_migrate_page(struct page *new, struct page *old) { }
-static inline void free_page_mlock(struct page *page) { }
-
-#endif /* CONFIG_UNEVICTABLE_LRU */
 
 /*
  * Return the mem_map entry representing the 'offset' subpage within

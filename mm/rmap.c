@@ -1210,7 +1210,6 @@ int try_to_unmap(struct page *page, enum ttu_flags flags)
 	return ret;
 }
 
-#ifdef CONFIG_UNEVICTABLE_LRU
 /**
  * try_to_munlock - try to munlock a page
  * @page: the page to be munlocked
@@ -1237,4 +1236,3 @@ int try_to_munlock(struct page *page)
 	else
 		return try_to_unmap_file(page, TTU_MUNLOCK);
 }
-#endif
