@@ -60,10 +60,10 @@ struct bus_type {
 	int (*probe)(struct device *dev);
 	int (*remove)(struct device *dev);
 	void (*shutdown)(struct device *dev);
-
+	
 	int (*suspend)(struct device *dev, pm_message_t state);
 	int (*resume)(struct device *dev);
-
+	
 	const struct dev_pm_ops *pm;
 
 	struct bus_type_private *p;
@@ -224,6 +224,14 @@ extern void class_unregister(struct class *class);
 	static struct lock_class_key __key;	\
 	__class_register(class, &__key);	\
 })
+
+struct class_compat;
+struct class_compat *class_compat_register(const char *name);
+void class_compat_unregister(struct class_compat *cls);
+int class_compat_create_link(struct class_compat *cls, struct device *dev,
+			      struct device *device_link);
+void class_compat_remove_link(struct class_compat *cls, struct device *dev,
+			      struct device *device_link);
 
 extern void class_dev_iter_init(struct class_dev_iter *iter,
 				struct class *class,

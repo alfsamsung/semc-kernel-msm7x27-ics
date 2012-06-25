@@ -214,20 +214,21 @@ static int create_image(int platform_mode)
 	if (error)
 		return error;
 
-	device_pm_lock();
-	local_irq_disable();
-	/* At this point, device_suspend() has been called, but *not*
-	 * device_power_down(). We *must* call device_power_down() now.
+	/* At this point, dpm_suspend_start() has been called, but *not*
+	 * dpm_suspend_noirq(). We *must* call dpm_suspend_noirq() now.
 	 * Otherwise, drivers for some devices (e.g. interrupt controllers)
 	 * become desynchronized with the actual state of the hardware
 	 * at resume time, and evil weirdness ensues.
 	 */
-	error = device_power_down(PMSG_FREEZE);
+	error = dpm_suspend_noirq(PMSG_FREEZE);
 	if (error) {
 		printk(KERN_ERR "PM: Some devices failed to power down, "
 			"aborting hibernation\n");
-		goto Enable_irqs;
+		return error;
 	}
+	
+	local_irq_disable();
+	
 	sysdev_suspend(PMSG_FREEZE);
 	if (error) {
 		printk(KERN_ERR "PM: Some devices failed to power down, "
@@ -250,15 +251,15 @@ static int create_image(int platform_mode)
 		platform_leave(platform_mode);
  Power_up:
 	sysdev_resume();
-	/* NOTE:  device_power_up() is just a resume() for devices
+	/* NOTE:  dpm_resume_noirq() is just a resume() for devices
 	 * that suspended with irqs off ... no overall powerup.
 	 */
  Power_up_devices:
-	device_power_up(in_suspend ?
-		(error ? PMSG_RECOVER : PMSG_THAW) : PMSG_RESTORE);
- Enable_irqs:
 	local_irq_enable();
-	device_pm_unlock();
+	
+	dpm_resume_noirq(in_suspend ?
+		(error ? PMSG_RECOVER : PMSG_THAW) : PMSG_RESTORE);
+	
 	return error;
 }
 
@@ -285,7 +286,7 @@ int hibernation_snapshot(int platform_mode)
 		goto Close;
 
 	suspend_console();
-	error = device_suspend(PMSG_FREEZE);
+	error = dpm_suspend_start(PMSG_FREEZE);
 	if (error)
 		goto Recover_platform;
 
@@ -312,7 +313,7 @@ int hibernation_snapshot(int platform_mode)
  Finish:
 	platform_finish(platform_mode);
  Resume_devices:
-	device_resume(in_suspend ?
+	dpm_resume_end(in_suspend ?
 		(error ? PMSG_RECOVER : PMSG_THAW) : PMSG_RESTORE);
 	resume_console();
  Close:
@@ -336,14 +337,15 @@ static int resume_target_kernel(void)
 {
 	int error;
 
-	device_pm_lock();
-	local_irq_disable();
-	error = device_power_down(PMSG_QUIESCE);
+	error = dpm_suspend_noirq(PMSG_QUIESCE);
 	if (error) {
 		printk(KERN_ERR "PM: Some devices failed to power down, "
 			"aborting resume\n");
-		goto Enable_irqs;
+		return error;
 	}
+	
+	local_irq_disable();
+	
 	sysdev_suspend(PMSG_QUIESCE);
 	/* We'll ignore saved state, but this gets preempt count (etc) right */
 	save_processor_state();
@@ -368,10 +370,11 @@ static int resume_target_kernel(void)
 	restore_processor_state();
 	touch_softlockup_watchdog();
 	sysdev_resume();
-	device_power_up(PMSG_RECOVER);
- Enable_irqs:
+
 	local_irq_enable();
-	device_pm_unlock();
+	
+	dpm_resume_noirq(PMSG_RECOVER);
+	
 	return error;
 }
 
@@ -390,7 +393,7 @@ int hibernation_restore(int platform_mode)
 
 	pm_prepare_console();
 	suspend_console();
-	error = device_suspend(PMSG_QUIESCE);
+	error = dpm_suspend_start(PMSG_QUIESCE);
 	if (error)
 		goto Finish;
 
@@ -402,7 +405,7 @@ int hibernation_restore(int platform_mode)
 		enable_nonboot_cpus();
 	}
 	platform_restore_cleanup(platform_mode);
-	device_resume(PMSG_RECOVER);
+	dpm_resume_end(PMSG_RECOVER);
  Finish:
 	resume_console();
 	pm_restore_console();
@@ -432,7 +435,7 @@ int hibernation_platform_enter(void)
 
 	entering_platform_hibernation = true;
 	suspend_console();
-	error = device_suspend(PMSG_HIBERNATE);
+	error = dpm_suspend_start(PMSG_HIBERNATE);
 	if (error) {
 		if (hibernation_ops->recover)
 			hibernation_ops->recover();
@@ -447,30 +450,32 @@ int hibernation_platform_enter(void)
 	if (error)
 		goto Finish;
 
-	device_pm_lock();
-	local_irq_disable();
-	error = device_power_down(PMSG_HIBERNATE);
+	error = dpm_suspend_noirq(PMSG_HIBERNATE);
 	if (!error) {
+		local_irq_disable();
 		sysdev_suspend(PMSG_HIBERNATE);
 		hibernation_ops->enter();
 		/* We should never get here */
 		while (1);
 	}
-	local_irq_enable();
-	device_pm_unlock();
-
+	
 	/*
 	 * We don't need to reenable the nonboot CPUs or resume consoles, since
 	 * the system is going to be halted anyway.
 	 */
  Finish:
 	hibernation_ops->finish();
+	
+	dpm_suspend_noirq(PMSG_RESTORE);
+	
  Resume_devices:
 	entering_platform_hibernation = false;
-	device_resume(PMSG_RESTORE);
+	dpm_resume_end(PMSG_RESTORE);
 	resume_console();
+
  Close:
 	hibernation_ops->end();
+	
 	return error;
 }
 

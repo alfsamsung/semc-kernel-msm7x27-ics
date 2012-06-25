@@ -55,7 +55,7 @@ static inline void pm_runtime_put_noidle(struct device *dev)
 
 static inline bool pm_runtime_suspended(struct device *dev)
 {
-	return dev->power.runtime_status == RPM_SUSPENDED;
+       return dev->power.runtime_status == RPM_SUSPENDED;
 }
 
 #else /* !CONFIG_PM_RUNTIME */
@@ -86,7 +86,6 @@ static inline bool pm_runtime_suspended(struct device *dev) { return false; }
 static inline int pm_generic_runtime_idle(struct device *dev) { return 0; }
 static inline int pm_generic_runtime_suspend(struct device *dev) { return 0; }
 static inline int pm_generic_runtime_resume(struct device *dev) { return 0; }
-
 #endif /* !CONFIG_PM_RUNTIME */
 
 static inline int pm_runtime_get(struct device *dev)
@@ -125,3 +124,4 @@ static inline void pm_runtime_disable(struct device *dev)
 }
 
 #endif
+ 

@@ -22,6 +22,7 @@
 #include <linux/freezer.h>
 #include <linux/vmstat.h>
 #include <linux/syscalls.h>
+#include <linux/workqueue.h>
 
 #include "power.h"
 
@@ -269,16 +270,16 @@ void __attribute__ ((weak)) arch_suspend_enable_irqs(void)
  */
 static int suspend_enter(suspend_state_t state)
 {
-	int error = 0;
+	int error;
 
-	device_pm_lock();
+	error = dpm_suspend_noirq(PMSG_SUSPEND);
+        if (error) {
+                printk(KERN_ERR "PM: Some devices failed to power down\n");
+                return error;
+	}
+	
 	arch_suspend_disable_irqs();
 	BUG_ON(!irqs_disabled());
-
-	if ((error = device_power_down(PMSG_SUSPEND))) {
-		printk(KERN_ERR "PM: Some devices failed to power down\n");
-		goto Done;
-	}
 
 	error = sysdev_suspend(PMSG_SUSPEND);
 	if (!error) {
@@ -287,11 +288,11 @@ static int suspend_enter(suspend_state_t state)
 		sysdev_resume();
 	}
 
-	device_power_up(PMSG_RESUME);
- Done:
 	arch_suspend_enable_irqs();
 	BUG_ON(irqs_disabled());
-	device_pm_unlock();
+	
+	dpm_resume_noirq(PMSG_RESUME);
+	
 	return error;
 }
 
@@ -314,7 +315,7 @@ int suspend_devices_and_enter(suspend_state_t state)
 	}
 	suspend_console();
 	suspend_test_start();
-	error = device_suspend(PMSG_SUSPEND);
+	error = dpm_suspend_start(PMSG_SUSPEND);
 	if (error) {
 		printk(KERN_ERR "PM: Some devices failed to suspend\n");
 		goto Recover_platform;
@@ -342,7 +343,7 @@ int suspend_devices_and_enter(suspend_state_t state)
 		suspend_ops->finish();
  Resume_devices:
 	suspend_test_start();
-	device_resume(PMSG_RESUME);
+	dpm_resume_end(PMSG_RESUME);
 	suspend_test_finish("resume devices");
 	resume_console();
  Close:
@@ -585,9 +586,24 @@ static struct attribute_group attr_group = {
 	.attrs = g,
 };
 
+#ifdef CONFIG_PM_RUNTIME
+struct workqueue_struct *pm_wq;
+
+static int __init pm_start_workqueue(void)
+{
+       pm_wq = create_freezeable_workqueue("pm");
+
+       return pm_wq ? 0 : -ENOMEM;
+}
+#else
+static inline int pm_start_workqueue(void) { return 0; }
+#endif
 
 static int __init pm_init(void)
 {
+	int error = pm_start_workqueue();
+	if (error)
+		return error;
 	power_kobj = kobject_create_and_add("power", NULL);
 	if (!power_kobj)
 		return -ENOMEM;

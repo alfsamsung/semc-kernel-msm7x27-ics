@@ -1447,25 +1447,24 @@ int kernel_kexec(void)
 			goto Restore_console;
 		}
 		suspend_console();
-		error = device_suspend(PMSG_FREEZE);
+		error = dpm_suspend_start(PMSG_FREEZE);
 		if (error)
 			goto Resume_console;
 		error = disable_nonboot_cpus();
 		if (error)
 			goto Resume_devices;
-		device_pm_lock();
-		local_irq_disable();
-		/* At this point, device_suspend() has been called,
-		 * but *not* device_power_down(). We *must*
-		 * device_power_down() now.  Otherwise, drivers for
+		/* At this point, dpm_suspend_start() has been called,
+		 * but *not* dpm_suspend_noirq(). We *must* call
+		 * dpm_suspend_noirq() now.  Otherwise, drivers for
 		 * some devices (e.g. interrupt controllers) become
 		 * desynchronized with the actual state of the
 		 * hardware at resume time, and evil weirdness ensues.
 		 */
-		error = device_power_down(PMSG_FREEZE);
+		error = dpm_suspend_noirq(PMSG_FREEZE);
 		if (error)
-			goto Enable_irqs;
+			goto Unlock_pm;
 
+		local_irq_disable();
 		/* Suspend system devices */
 		error = sysdev_suspend(PMSG_FREEZE);
 		if (error)
@@ -1484,13 +1483,12 @@ int kernel_kexec(void)
 	if (kexec_image->preserve_context) {
 		sysdev_resume();
  Power_up_devices:
-		device_power_up(PMSG_RESTORE);
- Enable_irqs:
 		local_irq_enable();
-		device_pm_unlock();
+		dpm_resume_noirq(PMSG_RESTORE);
+ Unlock_pm:
 		enable_nonboot_cpus();
  Resume_devices:
-		device_resume(PMSG_RESTORE);
+		dpm_resume_end(PMSG_RESTORE);
  Resume_console:
 		resume_console();
 		thaw_processes();
