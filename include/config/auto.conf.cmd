@@ -192,19 +192,23 @@ deps_config := \
 	drivers/media/dvb/ttpci/Kconfig \
 	drivers/media/dvb/Kconfig \
 	drivers/media/radio/Kconfig \
+	drivers/media/video/msm/Kconfig \
 	drivers/media/video/pwc/Kconfig \
 	drivers/media/video/zc0301/Kconfig \
 	drivers/media/video/sn9c102/Kconfig \
 	drivers/media/video/et61x251/Kconfig \
 	drivers/media/video/usbvideo/Kconfig \
 	drivers/media/video/usbvision/Kconfig \
+	drivers/media/video/cx231xx/Kconfig \
 	drivers/media/video/em28xx/Kconfig \
+	drivers/media/video/hdpvr/Kconfig \
 	drivers/media/video/pvrusb2/Kconfig \
+	drivers/media/video/gspca/gl860/Kconfig \
 	drivers/media/video/gspca/stv06xx/Kconfig \
 	drivers/media/video/gspca/m5602/Kconfig \
 	drivers/media/video/gspca/Kconfig \
 	drivers/media/video/uvc/Kconfig \
-	drivers/media/video/msm/Kconfig \
+	drivers/media/video/saa7164/Kconfig \
 	drivers/media/video/cx18/Kconfig \
 	drivers/media/video/ivtv/Kconfig \
 	drivers/media/video/au0828/Kconfig \

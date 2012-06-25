@@ -227,7 +227,8 @@ static DECLARE_WAIT_QUEUE_HEAD(g_data_ready_wait_queue);
 
 static int mt9t013_i2c_sensor_init(struct mt9t013_init *init);
 static int mt9t013_i2c_sensor_setting(unsigned long arg);
-static int mt9t013_i2c_exposure_gain(uint16_t line, uint16_t gain);
+static int mt9t013_i2c_exposure_gain(uint32_t mode, uint16_t line,
+					uint16_t gain);
 static int mt9t013_i2c_move_focus(uint16_t position);
 static int mt9t013_i2c_set_default_focus(uint8_t step);
 static int mt9t013_i2c_power_up(void);
@@ -455,22 +456,22 @@ static void mt9t013_sensor_init(void)
 
 	/*pull hi reset*/
 	printk(KERN_INFO "mt9t013: mt9t013_register_init\n");
-	ret = gpio_request(cam->sinfo->sensor_reset, "mt9t013");
+	ret = gpio_request(cam->sensor_reset, "mt9t013");
 	if (!ret) {
-		gpio_direction_output(cam->sinfo->sensor_reset, 1);
+		gpio_direction_output(cam->sensor_reset, 1);
 		printk(KERN_INFO "mt9t013: camera sensor_reset set as 1\n");
 	} else
 		printk(KERN_ERR "mt9t013 error: request gpio %d failed: "
-				"%d\n", cam->sinfo->sensor_reset, ret);
+				"%d\n", cam->sensor_reset, ret);
 	mdelay(2);
 
 	/* pull down power down */
-	ret = gpio_request(cam->sinfo->sensor_pwd, "mt9t013");
+	ret = gpio_request(cam->sensor_pwd, "mt9t013");
 	if (!ret || ret == -EBUSY)
-		gpio_direction_output(cam->sinfo->sensor_pwd, 0);
+		gpio_direction_output(cam->sensor_pwd, 0);
 	else printk(KERN_ERR "mt913t013 error: request gpio %d failed: "
-			"%d\n", cam->sinfo->sensor_pwd, ret);
-	gpio_free(cam->sinfo->sensor_pwd);
+			"%d\n", cam->sensor_pwd, ret);
+	gpio_free(cam->sensor_pwd);
 
 	/* enable clk */
 	msm_camio_clk_enable(CAMIO_VFE_MDC_CLK);
@@ -491,10 +492,10 @@ static void mt9t013_sensor_init(void)
 	mdelay(2);
 
 	/* reset sensor sequency */
-	gpio_direction_output(cam->sinfo->sensor_reset, 0);
+	gpio_direction_output(cam->sensor_reset, 0);
 	mdelay(2);
-	gpio_direction_output(cam->sinfo->sensor_reset, 1);
-	gpio_free(cam->sinfo->sensor_reset);
+	gpio_direction_output(cam->sensor_reset, 1);
+	gpio_free(cam->sensor_reset);
 	mdelay(2);
 
 	printk(KERN_INFO "mt9t013: camera sensor init sequence done\n");
@@ -765,7 +766,7 @@ static long mt9t013_ioctl(struct file *filp, unsigned int cmd, unsigned long arg
 			rc = -EFAULT;
 			break;
 		}
-		rc = mt9t013_i2c_exposure_gain(exp.line, exp.gain); 
+		rc = mt9t013_i2c_exposure_gain(exp.mode, exp.line, exp.gain); 
 	}
 		break;
 
@@ -817,12 +818,12 @@ static int mt9t013_lens_power(int on)
 {
 	int rc;
 	printk(KERN_INFO "mt9t013: lens power %d\n", on);
-	rc = gpio_request(cam->sinfo->vcm_pwd, "mt9t013");
+	rc = gpio_request(cam->vcm_pwd, "mt9t013");
 	if (!rc)
-		gpio_direction_output(cam->sinfo->vcm_pwd, !on);
+		gpio_direction_output(cam->vcm_pwd, !on);
 	else printk(KERN_ERR "mt9t013 error: request gpio %d failed:"
-		" %d\n", cam->sinfo->vcm_pwd, rc);
-	gpio_free(cam->sinfo->vcm_pwd);
+		" %d\n", cam->vcm_pwd, rc);
+	gpio_free(cam->vcm_pwd);
 	return rc;
 }
 
@@ -1104,7 +1105,8 @@ static int mt9t013_i2c_sensor_setting(unsigned long arg)
 	return 0;
 }
 
-static int mt9t013_i2c_exposure_gain(uint16_t line, uint16_t gain)
+static int mt9t013_i2c_exposure_gain(uint32_t mode, uint16_t line,
+					uint16_t gain)
 {
 	static const uint16_t max_legal_gain  = 0x01FF;
 	
@@ -1116,6 +1118,10 @@ static int mt9t013_i2c_exposure_gain(uint16_t line, uint16_t gain)
 	I2C_WRITE(REG_GLOBAL_GAIN, gain);
 	I2C_WRITE(REG_COARSE_INTEGRATION_TIME, line);
 	/*I2C_WRITE(REG_GROUPED_PARAMETER_HOLD, GROUPED_PARAMETER_UPDATE);*/
+	if (mode == 1) {
+		/* RESET REGISTER RESTART */
+		I2C_WRITE(MT9T013_REG_RESET_REGISTER, 0x10cc|0x0002);
+	}
 	return 0;
 }
 

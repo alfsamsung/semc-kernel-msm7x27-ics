@@ -1,57 +1,18 @@
 /* Copyright (c) 2009, Code Aurora Forum. All rights reserved.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in the
- *       documentation and/or other materials provided with the distribution.
- *     * Neither the name of Code Aurora Forum nor
- *       the names of its contributors may be used to endorse or promote
- *       products derived from this software without specific prior written
- *       permission.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
  *
- * Alternatively, provided that this notice is retained in full, this software
- * may be relicensed by the recipient under the terms of the GNU General Public
- * License version 2 ("GPL") and only version 2, in which case the provisions of
- * the GPL apply INSTEAD OF those given above.  If the recipient relicenses the
- * software under the GPL, then the identification text in the MODULE_LICENSE
- * macro must be changed to reflect "GPLv2" instead of "Dual BSD/GPL".  Once a
- * recipient changes the license terms to the GPL, subsequent recipients shall
- * not relicense under alternate licensing terms, including the BSD or dual
- * BSD/GPL terms.  In addition, the following license statement immediately
- * below and between the words START and END shall also then apply when this
- * software is relicensed under the GPL:
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  *
- * START
- *
- * This program is free software; you can redistribute it and/or modify it under
- * the terms of the GNU General Public License version 2 and only version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- * FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
- * details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * END
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  *
  */
 /*
@@ -72,8 +33,9 @@
 #include <linux/mutex.h>
 #include <linux/timer.h>
 #include <mach/board.h>
+#include <linux/pm_runtime.h>
 
-MODULE_LICENSE("Dual BSD/GPL");
+MODULE_LICENSE("GPL v2");
 MODULE_VERSION("0.2");
 MODULE_ALIAS("platform:i2c_qup");
 
@@ -151,6 +113,7 @@ enum {
 	I2C_STATUS_WR_BUFFER_FULL  = 1U << 0,
 	I2C_STATUS_BUS_ACTIVE      = 1U << 8,
 	I2C_STATUS_ERROR_MASK      = 0x38000FC,
+	QUP_I2C_NACK_FLAG          = 1U << 3,
 	QUP_IN_NOT_EMPTY           = 1U << 5,
 	QUP_STATUS_ERROR_FLAGS     = 0x7C,
 };
@@ -218,18 +181,17 @@ qup_i2c_interrupt(int irq, void *devid)
 		return IRQ_HANDLED;
 
 	if (status & I2C_STATUS_ERROR_MASK) {
-		dev_err(dev->dev, "QUP: Got i2c error :0x%x, irq:%d\n",
+		dev_err(dev->dev, "QUP: I2C status flags :0x%x, irq:%d\n",
 			status, irq);
 		err = -status;
 		/* Clear Error interrupt if it's a level triggered interrupt*/
 		if (dev->num_irqs == 1)
-			writel((status & I2C_STATUS_ERROR_MASK),
-				dev->base + QUP_I2C_STATUS);
+			writel(QUP_RESET_STATE, dev->base+QUP_STATE);
 		goto intr_done;
 	}
 
 	if (status1 & 0x7F) {
-		dev_err(dev->dev, "QUP: Got QUP error :0x%x\n", status1);
+		dev_err(dev->dev, "QUP: QUP status flags :0x%x\n", status1);
 		err = -status1;
 		/* Clear Error interrupt if it's a level triggered interrupt*/
 		if (dev->num_irqs == 1)
@@ -553,18 +515,25 @@ qup_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[], int num)
 		return -EIO;
 	}
 
-	if (dev->clk_state == 0)
+	if (dev->clk_state == 0) {
+		if (dev->clk_ctl == 0) {
+			if (dev->pdata->src_clk_rate > 0)
+				clk_set_rate(dev->clk,
+						dev->pdata->src_clk_rate);
+			else
+				dev->pdata->src_clk_rate = 19200000;
+		}
 		qup_i2c_pwr_mgmt(dev, 1);
+	}
 	/* Initialize QUP registers during first transfer */
 	if (dev->clk_ctl == 0) {
 		int fs_div;
 		int hs_div;
-		int i2c_clk;
 		uint32_t fifo_reg;
 		writel(0x2 << 4, dev->gsbi);
 
-		i2c_clk = 19200000; /* input clock */
-		fs_div = ((i2c_clk / dev->pdata->clk_freq) / 2) - 3;
+		fs_div = ((dev->pdata->src_clk_rate
+				/ dev->pdata->clk_freq) / 2) - 3;
 		hs_div = 3;
 		dev->clk_ctl = ((hs_div & 0x7) << 8) | (fs_div & 0xff);
 		fifo_reg = readl(dev->base + QUP_IO_MODE);
@@ -596,7 +565,7 @@ qup_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[], int num)
 		enable_irq(dev->out_irq);
 	}
 	enable_irq(dev->err_irq);
-	writel(QUP_RESET_STATE, dev->base + QUP_STATE);
+	writel(1, dev->base + QUP_SW_RESET);
 	ret = qup_i2c_poll_state(dev, QUP_RESET_STATE);
 	if (ret) {
 		dev_err(dev->dev, "QUP Busy:Trying to recover\n");
@@ -604,7 +573,6 @@ qup_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[], int num)
 	}
 
 	/* Initialize QUP registers */
-	writel(1, dev->base + QUP_SW_RESET);
 	writel(0, dev->base + QUP_CONFIG);
 	writel(QUP_OPERATIONAL_RESET, dev->base + QUP_OPERATIONAL);
 	writel(QUP_STATUS_ERROR_FLAGS, dev->base + QUP_ERROR_FLAGS_EN);
@@ -716,14 +684,17 @@ qup_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[], int num)
 			if (!timeout) {
 				dev_err(dev->dev, "Transaction timed out\n");
 				writel(1, dev->base + QUP_SW_RESET);
-				msleep(10);
 				ret = -ETIMEDOUT;
 				goto out_err;
 			}
 			if (dev->err) {
-				dev_err(dev->dev,
-					"Error during data xfer (%d)\n",
-					dev->err);
+				if (dev->err & QUP_I2C_NACK_FLAG)
+					dev_err(dev->dev,
+					"I2C slave addr:0x%x not connected\n",
+					dev->msg->addr);
+				else
+					dev_err(dev->dev,
+					"QUP data xfer error %d\n", dev->err);
 				ret = dev->err;
 				goto out_err;
 			}
@@ -931,19 +902,6 @@ qup_i2c_probe(struct platform_device *pdev)
 	dev->pdata = pdata;
 	dev->clk_ctl = 0;
 
-	i2c_set_adapdata(&dev->adapter, dev);
-	dev->adapter.algo = &qup_i2c_algo;
-	strlcpy(dev->adapter.name,
-		"QUP I2C adapter",
-		sizeof(dev->adapter.name));
-
-	dev->adapter.nr = pdev->id;
-	ret = i2c_add_numbered_adapter(&dev->adapter);
-	if (ret) {
-		dev_err(&pdev->dev, "i2c_add_adapter failed\n");
-		goto err_i2c_add_adapter_failed;
-	}
-
 	/*
 	 * We use num_irqs to also indicate if we got 3 interrupts or just 1.
 	 * If we have just 1, we use err_irq as the general purpose irq
@@ -990,17 +948,35 @@ qup_i2c_probe(struct platform_device *pdev)
 		disable_irq(dev->in_irq);
 		disable_irq(dev->out_irq);
 	}
+	i2c_set_adapdata(&dev->adapter, dev);
+	dev->adapter.algo = &qup_i2c_algo;
+	strlcpy(dev->adapter.name,
+		"QUP I2C adapter",
+		sizeof(dev->adapter.name));
+	dev->adapter.nr = pdev->id;
 	pdata->msm_i2c_config_gpio(dev->adapter.nr, 1);
 
 	dev->suspended = 0;
 	mutex_init(&dev->mlock);
 	dev->clk_state = 0;
 	setup_timer(&dev->pwr_timer, qup_i2c_pwr_timer, (unsigned long) dev);
-	return 0;
+
+	pm_runtime_set_active(&pdev->dev);
+	pm_runtime_enable(&pdev->dev);
+
+	ret = i2c_add_numbered_adapter(&dev->adapter);
+	if (ret) {
+		dev_err(&pdev->dev, "i2c_add_adapter failed\n");
+		if (dev->num_irqs == 3) {
+			free_irq(dev->out_irq, dev);
+			free_irq(dev->in_irq, dev);
+		}
+		free_irq(dev->err_irq, dev);
+	} else
+		return 0;
+
 
 err_request_irq_failed:
-	i2c_del_adapter(&dev->adapter);
-err_i2c_add_adapter_failed:
 	iounmap(dev->gsbi);
 err_gsbi_failed:
 	iounmap(dev->base);
@@ -1043,6 +1019,9 @@ qup_i2c_remove(struct platform_device *pdev)
 		clk_put(dev->pclk);
 	iounmap(dev->gsbi);
 	iounmap(dev->base);
+
+	pm_runtime_disable(&pdev->dev);
+
 	kfree(dev);
 	gsbi_mem = platform_get_resource_byname(pdev, IORESOURCE_MEM,
 						"gsbi_qup_i2c_addr");
@@ -1079,6 +1058,24 @@ static int qup_i2c_resume(struct platform_device *pdev)
 #define qup_i2c_resume NULL
 #endif /* CONFIG_PM */
 
+static int i2c_qup_runtime_suspend(struct device *dev)
+{
+	dev_dbg(dev, "pm_runtime: suspending...\n");
+	return 0;
+}
+
+static int i2c_qup_runtime_resume(struct device *dev)
+{
+	dev_dbg(dev, "pm_runtime: resuming...\n");
+	return 0;
+}
+
+static const struct dev_pm_ops i2c_qup_dev_pm_ops = {
+	.runtime_suspend = i2c_qup_runtime_suspend,
+	.runtime_resume = i2c_qup_runtime_resume,
+};
+
+
 static struct platform_driver qup_i2c_driver = {
 	.probe		= qup_i2c_probe,
 	.remove		= __devexit_p(qup_i2c_remove),
@@ -1087,6 +1084,7 @@ static struct platform_driver qup_i2c_driver = {
 	.driver		= {
 		.name	= "qup_i2c",
 		.owner	= THIS_MODULE,
+		.pm = &i2c_qup_dev_pm_ops,
 	},
 };
 
@@ -1096,7 +1094,7 @@ qup_i2c_init_driver(void)
 {
 	return platform_driver_register(&qup_i2c_driver);
 }
-subsys_initcall(qup_i2c_init_driver);
+arch_initcall(qup_i2c_init_driver);
 
 static void __exit qup_i2c_exit_driver(void)
 {

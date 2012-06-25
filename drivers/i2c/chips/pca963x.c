@@ -392,7 +392,6 @@ static int pca963x_remove(struct i2c_client *client)
 	led_classdev_unregister(&pca963x->leds[0]);
 	led_classdev_unregister(&pca963x->leds[1]);
 	led_classdev_unregister(&pca963x->leds[2]);
-	i2c_detach_client(client);
 
 	kfree(pca963x);
 	return 0;

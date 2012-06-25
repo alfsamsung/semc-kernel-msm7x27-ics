@@ -1013,20 +1013,20 @@ static ssize_t als_zone_show(struct device *dev,
 }
 
 static struct device_attribute attributes[] = {
-	__ATTR(br::intensity, 0222, NULL, attr_brightness_store),
-	__ATTR(br::mapping, 0200, NULL, attr_br_mapping),
-	__ATTR(br::rate::up, 0200, NULL, attr_br_up_rate),
-	__ATTR(br::rate::down, 0200, NULL, attr_br_down_rate),
-	__ATTR(br::limit, 0200, NULL, attr_br_limit),
-	__ATTR(br::fsc, 0200, NULL, attr_fsc),
-	__ATTR(br::suspend, 0222, NULL, attr_suspend),
-	__ATTR(curve::borders, 0200, NULL, attr_curve_borders),
-	__ATTR(curve::targets, 0200, NULL, attr_curve_targets),
-	__ATTR(als::r1, 0200, NULL, attr_als_r1),
-	__ATTR(als::r2, 0200, NULL, attr_als_r2),
-	__ATTR(als::avg-t, 0200, NULL, attr_avg_time),
-	__ATTR(mode, 0200, NULL, attr_driver_mode),
-	__ATTR(als::value, 0444, als_zone_show, NULL),
+	__ATTR(br::intensity, 0666, NULL, attr_brightness_store),
+	__ATTR(br::mapping, 0666, NULL, attr_br_mapping),
+	__ATTR(br::rate::up, 0666, NULL, attr_br_up_rate),
+	__ATTR(br::rate::down, 0666, NULL, attr_br_down_rate),
+	__ATTR(br::limit, 0666, NULL, attr_br_limit),
+	__ATTR(br::fsc, 0666, NULL, attr_fsc),
+	__ATTR(br::suspend, 0666, NULL, attr_suspend),
+	__ATTR(curve::borders, 0666, NULL, attr_curve_borders),
+	__ATTR(curve::targets, 0666, NULL, attr_curve_targets),
+	__ATTR(als::r1, 0666, NULL, attr_als_r1),
+	__ATTR(als::r2, 0666, NULL, attr_als_r2),
+	__ATTR(als::avg-t, 0666, NULL, attr_avg_time),
+	__ATTR(mode, 0666, NULL, attr_driver_mode),
+	__ATTR(als::value, 0666, als_zone_show, NULL),
 };
 
 static int create_sysfs_interfaces(struct device *dev)
@@ -1150,7 +1150,7 @@ static int __devinit lm3530_probe(struct i2c_client *client,
 	lm3530_config(client, LM3530_CFG_ALS_INPUT, als_input);
 	lm3530_mode_set(client, LM3530_MODE_I2C);
 	data->als_zone = lm3530_als_get(client);
-	data->brightness = 102;
+	data->brightness = 90;
 	lm3530_update_brightness(client);
 
 #if defined(CONFIG_HAS_EARLYSUSPEND) && defined(CONFIG_LEDS_LM3530_EARLY_SUSPEND)
