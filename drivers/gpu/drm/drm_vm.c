@@ -92,7 +92,7 @@ static int drm_do_vm_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 {
 	struct drm_file *priv = vma->vm_file->private_data;
 	struct drm_device *dev = priv->minor->dev;
-	struct drm_map *map = NULL;
+	struct drm_local_map *map = NULL;
 	struct drm_map_list *r_list;
 	struct drm_hash_item *hash;
 
@@ -116,9 +116,9 @@ static int drm_do_vm_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 		 * Using vm_pgoff as a selector forces us to use this unusual
 		 * addressing scheme.
 		 */
-		unsigned long offset = (unsigned long)vmf->virtual_address -
-								vma->vm_start;
-		unsigned long baddr = map->offset + offset;
+		resource_size_t offset = (unsigned long)vmf->virtual_address -
+			vma->vm_start;
+		resource_size_t baddr = map->offset + offset;
 		struct drm_agp_mem *agpmem;
 		struct page *page;
 
@@ -150,8 +150,10 @@ static int drm_do_vm_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 		vmf->page = page;
 
 		DRM_DEBUG
-		    ("baddr = 0x%lx page = 0x%p, offset = 0x%lx, count=%d\n",
-		     baddr, __va(agpmem->memory->memory[offset]), offset,
+		    ("baddr = 0x%llx page = 0x%p, offset = 0x%llx, count=%d\n",
+		      (unsigned long long)baddr,
+		      __va(agpmem->memory->memory[offset]),
+		      (unsigned long long)offset,
 		     page_count(page));
 		return 0;
 	}
@@ -177,7 +179,7 @@ static int drm_do_vm_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
  */
 static int drm_do_vm_shm_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 {
-	struct drm_map *map = (struct drm_map *) vma->vm_private_data;
+	struct drm_local_map *map = vma->vm_private_data;
 	unsigned long offset;
 	unsigned long i;
 	struct page *page;
@@ -210,7 +212,7 @@ static void drm_vm_shm_close(struct vm_area_struct *vma)
 	struct drm_file *priv = vma->vm_file->private_data;
 	struct drm_device *dev = priv->minor->dev;
 	struct drm_vma_entry *pt, *temp;
-	struct drm_map *map;
+	struct drm_local_map *map;
 	struct drm_map_list *r_list;
 	int found_maps = 0;
 
@@ -323,7 +325,7 @@ static int drm_do_vm_dma_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
  */
 static int drm_do_vm_sg_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 {
-	struct drm_map *map = (struct drm_map *) vma->vm_private_data;
+	struct drm_local_map *map = vma->vm_private_data;
 	struct drm_file *priv = vma->vm_file->private_data;
 	struct drm_device *dev = priv->minor->dev;
 	struct drm_sg_mem *entry = dev->sg;
@@ -519,14 +521,14 @@ static int drm_mmap_dma(struct file *filp, struct vm_area_struct *vma)
 	return 0;
 }
 
-unsigned long drm_core_get_map_ofs(struct drm_map * map)
+resource_size_t drm_core_get_map_ofs(struct drm_local_map * map)
 {
 	return map->offset;
 }
 
 EXPORT_SYMBOL(drm_core_get_map_ofs);
 
-unsigned long drm_core_get_reg_ofs(struct drm_device *dev)
+resource_size_t drm_core_get_reg_ofs(struct drm_device *dev)
 {
 #ifdef __alpha__
 	return dev->hose->dense_mem_base - dev->hose->mem_space->start;
@@ -554,8 +556,8 @@ int drm_mmap_locked(struct file *filp, struct vm_area_struct *vma)
 {
 	struct drm_file *priv = filp->private_data;
 	struct drm_device *dev = priv->minor->dev;
-	struct drm_map *map = NULL;
-	unsigned long offset = 0;
+	struct drm_local_map *map = NULL;
+	resource_size_t offset = 0;
 	struct drm_hash_item *hash;
 
 	if (!priv->authenticated)
@@ -625,13 +627,13 @@ int drm_mmap_locked(struct file *filp, struct vm_area_struct *vma)
 		vma->vm_page_prot = drm_io_prot(map->type, vma);
 #if !defined(__arm__)
 		if (io_remap_pfn_range(vma, vma->vm_start,
-				       (map->offset + offset) >> PAGE_SHIFT,
+				       (unsigned long long) (map->offset + offset) >> PAGE_SHIFT,
 				       vma->vm_end - vma->vm_start,
 				       vma->vm_page_prot))
 			return -EAGAIN;
 #else
 		if (remap_pfn_range(vma, vma->vm_start,
-					(map->offset + offset) >> PAGE_SHIFT,
+					(unsigned long long) (map->offset + offset) >> PAGE_SHIFT,
 					vma->vm_end - vma->vm_start,
 					vma->vm_page_prot))
 			return -EAGAIN;

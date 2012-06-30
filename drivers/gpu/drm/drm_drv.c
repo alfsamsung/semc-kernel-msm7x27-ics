@@ -506,7 +506,7 @@ long drm_ioctl(struct file *filp,
 
 EXPORT_SYMBOL(drm_ioctl);
 
-drm_local_map_t *drm_getsarea(struct drm_device *dev)
+struct drm_local_map *drm_getsarea(struct drm_device *dev)
 {
 	struct drm_map_list *entry;
 

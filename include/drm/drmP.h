@@ -460,19 +460,19 @@ struct drm_local_map {
 	int mtrr;     /**< MTRR slot used */
 };
 
+typedef struct drm_local_map drm_local_map_t;
+
 /**
  * Mappings list
  */
 struct drm_map_list {
 	struct list_head head;		/**< list head */
 	struct drm_hash_item hash;
-	struct drm_map *map;			/**< mapping */
+	struct drm_local_map *map;      /**< mapping */
 	uint64_t user_token;
 	struct drm_master *master;
 	struct drm_mm_node *file_offset_node;	/**< fake offset */
 };
-
-typedef struct drm_map drm_local_map_t;
 
 /**
  * Context handle list
@@ -498,7 +498,7 @@ struct drm_ati_pcigart_info {
 	dma_addr_t bus_addr;
 	dma_addr_t table_mask;
 	struct drm_dma_handle *table_handle;
-	drm_local_map_t mapping;
+	struct drm_local_map mapping;
 	int table_size;
 };
 
@@ -685,8 +685,8 @@ struct drm_driver {
 					struct drm_file *file_priv);
 	void (*reclaim_buffers_idlelocked) (struct drm_device *dev,
 					    struct drm_file *file_priv);
-	unsigned long (*get_map_ofs) (struct drm_map * map);
-	unsigned long (*get_reg_ofs) (struct drm_device *dev);
+	resource_size_t (*get_map_ofs) (struct drm_local_map * map);
+	resource_size_t (*get_reg_ofs) (struct drm_device *dev);
 	void (*set_version) (struct drm_device *dev,
 			     struct drm_set_version *sv);
 
@@ -705,6 +705,7 @@ struct drm_driver {
 	 */
 	int (*gem_init_object) (struct drm_gem_object *obj);
 	void (*gem_free_object) (struct drm_gem_object *obj);
+	void (*gem_free_object_unlocked) (struct drm_gem_object *obj);
 
 	/* Driver private ops for this object */
 	struct vm_operations_struct *gem_vm_ops;
@@ -897,7 +898,7 @@ struct drm_device {
 	sigset_t sigmask;
 
 	struct drm_driver *driver;
-	drm_local_map_t *agp_buffer_map;
+	struct drm_local_map *agp_buffer_map;
 	unsigned int agp_buffer_token;
 	struct drm_minor *control;		/**< Control node for card */
 	struct drm_minor *primary;		/**< render type primary screen head */
@@ -1019,8 +1020,8 @@ extern int drm_mmap(struct file *filp, struct vm_area_struct *vma);
 extern int drm_mmap_locked(struct file *filp, struct vm_area_struct *vma);
 extern void drm_vm_open_locked(struct vm_area_struct *vma);
 extern void drm_vm_close_locked(struct vm_area_struct *vma);
-extern unsigned long drm_core_get_map_ofs(struct drm_map * map);
-extern unsigned long drm_core_get_reg_ofs(struct drm_device *dev);
+extern resource_size_t drm_core_get_map_ofs(struct drm_local_map * map);
+extern resource_size_t drm_core_get_reg_ofs(struct drm_device *dev);
 extern unsigned int drm_poll(struct file *filp, struct poll_table_struct *wait);
 
 				/* Memory management support (drm_memory.h) */
@@ -1123,13 +1124,13 @@ extern int drm_i_have_hw_lock(struct drm_device *dev, struct drm_file *file_priv
 				/* Buffer management support (drm_bufs.h) */
 extern int drm_addbufs_agp(struct drm_device *dev, struct drm_buf_desc * request);
 extern int drm_addbufs_pci(struct drm_device *dev, struct drm_buf_desc * request);
-extern int drm_addmap(struct drm_device *dev, unsigned int offset,
+extern int drm_addmap(struct drm_device *dev, resource_size_t offset,
 		      unsigned int size, enum drm_map_type type,
-		      enum drm_map_flags flags, drm_local_map_t ** map_ptr);
+		      enum drm_map_flags flags, struct drm_local_map **map_ptr);
 extern int drm_addmap_ioctl(struct drm_device *dev, void *data,
 			    struct drm_file *file_priv);
-extern int drm_rmmap(struct drm_device *dev, drm_local_map_t *map);
-extern int drm_rmmap_locked(struct drm_device *dev, drm_local_map_t *map);
+extern int drm_rmmap(struct drm_device *dev, struct drm_local_map *map);
+extern int drm_rmmap_locked(struct drm_device *dev, struct drm_local_map *map);
 extern int drm_rmmap_ioctl(struct drm_device *dev, void *data,
 			   struct drm_file *file_priv);
 extern int drm_addbufs(struct drm_device *dev, void *data,
@@ -1231,7 +1232,7 @@ extern struct proc_dir_entry *drm_proc_root;
 
 extern struct idr drm_minors_idr;
 
-extern drm_local_map_t *drm_getsarea(struct drm_device *dev);
+extern struct drm_local_map *drm_getsarea(struct drm_device *dev);
 
 				/* Proc support (drm_proc.h) */
 extern int drm_proc_init(struct drm_minor *minor, int minor_id,
@@ -1298,6 +1299,7 @@ int drm_gem_init(struct drm_device *dev);
 void drm_gem_destroy(struct drm_device *dev);
 void drm_gem_object_release(struct drm_gem_object *obj);
 void drm_gem_object_free(struct kref *kref);
+void drm_gem_object_free_unlocked(struct kref *kref);
 struct drm_gem_object *drm_gem_object_alloc(struct drm_device *dev,
 					    size_t size);
 void drm_gem_object_handle_free(struct kref *kref);
@@ -1314,10 +1316,15 @@ drm_gem_object_reference(struct drm_gem_object *obj)
 static inline void
 drm_gem_object_unreference(struct drm_gem_object *obj)
 {
-	if (obj == NULL)
-		return;
+	if (obj != NULL)
+		kref_put(&obj->refcount, drm_gem_object_free);
+}
 
-	kref_put(&obj->refcount, drm_gem_object_free);
+static inline void
+drm_gem_object_unreference_unlocked(struct drm_gem_object *obj)
+{
+	if (obj != NULL)
+		kref_put(&obj->refcount, drm_gem_object_free_unlocked);
 }
 
 int drm_gem_handle_create(struct drm_file *file_priv,
@@ -1345,6 +1352,20 @@ drm_gem_object_handle_unreference(struct drm_gem_object *obj)
 	kref_put(&obj->handlecount, drm_gem_object_handle_free);
 	drm_gem_object_unreference(obj);
 }
+static inline void
+drm_gem_object_handle_unreference_unlocked(struct drm_gem_object *obj)
+{
+	if (obj == NULL)
+		return;
+
+	/*
+	* Must bump handle count first as this may be the last
+	* ref, in which case the object would disappear before we
+	* checked for a name
+	*/
+	kref_put(&obj->handlecount, drm_gem_object_handle_free);
+	drm_gem_object_unreference_unlocked(obj);
+}
 
 struct drm_gem_object *drm_gem_object_lookup(struct drm_device *dev,
 					     struct drm_file *filp,
@@ -1358,12 +1379,12 @@ int drm_gem_open_ioctl(struct drm_device *dev, void *data,
 void drm_gem_open(struct drm_device *dev, struct drm_file *file_private);
 void drm_gem_release(struct drm_device *dev, struct drm_file *file_private);
 
-extern void drm_core_ioremap(struct drm_map *map, struct drm_device *dev);
-extern void drm_core_ioremap_wc(struct drm_map *map, struct drm_device *dev);
-extern void drm_core_ioremapfree(struct drm_map *map, struct drm_device *dev);
+extern void drm_core_ioremap(struct drm_local_map *map, struct drm_device *dev);
+extern void drm_core_ioremap_wc(struct drm_local_map *map, struct drm_device *dev);
+extern void drm_core_ioremapfree(struct drm_local_map *map, struct drm_device *dev);
 
-static __inline__ struct drm_map *drm_core_findmap(struct drm_device *dev,
-						   unsigned int token)
+static __inline__ struct drm_local_map *drm_core_findmap(struct drm_device *dev,
+							  unsigned int token)
 {
 	struct drm_map_list *_entry;
 	list_for_each_entry(_entry, &dev->maplist, head)
@@ -1396,7 +1417,7 @@ static __inline__ int drm_device_is_pcie(struct drm_device *dev)
 		return pci_find_capability(dev->pdev, PCI_CAP_ID_EXP);
 }
 
-static __inline__ void drm_core_dropmap(struct drm_map *map)
+static __inline__ void drm_core_dropmap(struct drm_local_map *map)
 {
 }
 

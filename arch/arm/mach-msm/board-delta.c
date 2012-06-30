@@ -113,7 +113,7 @@
 #include  <linux/semc/semc_gpio_extr.h>
 #endif
 #define MSM_PMEM_MDP_SIZE	0xBEC000	//0xb21000(small)	//0xC74000-org
-#define MSM_PMEM_ADSP_SIZE	0x7EA000	//0x900000-org
+#define MSM_PMEM_ADSP_SIZE	0x7BA000 	//0x7EA000	//0x900000-org
 #ifdef CONFIG_CAPTURE_KERNEL
 #include "smd_private.h"
 #endif
@@ -141,7 +141,7 @@
 #define MSM_FB_SIZE		0xB6000
 #endif
 
-#define MSM_GPU_PHYS_BASE    SZ_2M
+#define MSM_GPU_PHYS_BASE    SZ_4M
 
 #define PMEM_KERNEL_EBI1_SIZE	0x1C000
 
@@ -1039,30 +1039,61 @@ static void __init bt_power_init(void)
 #define bt_power_init(x) do {} while (0)
 #endif
 #ifdef CONFIG_ARCH_MSM7X27
-static struct resource kgsl_resources[] = {
+static struct resource kgsl_3d0_resources[] = {
 	{
-		.name = "kgsl_reg_memory",
+		.name = KGSL_3D0_REG_MEMORY,
 		.start = 0xA0000000,
 		.end = 0xA001ffff,
 		.flags = IORESOURCE_MEM,
 	},
 	{
-		.name = "kgsl_yamato_irq",
+		.name = KGSL_3D0_IRQ,
 		.start = INT_GRAPHICS,
 		.end = INT_GRAPHICS,
 		.flags = IORESOURCE_IRQ,
 	},
 };
 
-static struct kgsl_platform_data kgsl_pdata;
+static struct kgsl_device_platform_data kgsl_3d0_pdata = {
+	.pwr_data = {
+	.pwrlevel = {
+			{
+			.gpu_freq = 200000000, 		//245760000, 
+			.bus_freq = 200000000, 		//192000000,
+		},
+		{
+			.gpu_freq = 192000000, 
+			.bus_freq = 153000000,
+		},
+		{
+			.gpu_freq = 160000000,
+			.bus_freq = 0,
+		},
+	},
+	.init_level = 0,
+	.num_levels = 3,
+	.set_grp_async = NULL,
+	.idle_timeout = HZ/20, 	//HZ/5,
+	},
+	.clk = {
+	.name = {
+	.clk = "grp_clk",
+	.pclk = "grp_pclk",
+	},
+     },
+	.imem_clk_name = {
+	.clk = "imem_clk",
+	.pclk = NULL,
+	},
+};
 
-static struct platform_device msm_device_kgsl = {
-	.name = "kgsl",
-	.id = -1,
-	.num_resources = ARRAY_SIZE(kgsl_resources),
-	.resource = kgsl_resources,
+static struct platform_device msm_kgsl_3d0 = {
+	.name = "kgsl-3d0",
+	.id = 0,
+	.num_resources = ARRAY_SIZE(kgsl_3d0_resources),
+	.resource = kgsl_3d0_resources,
 	.dev = {
-		.platform_data = &kgsl_pdata,
+		.platform_data = &kgsl_3d0_pdata,
 	},
 };
 #endif
@@ -1891,27 +1922,29 @@ static void __init msm_mddi_toshiba_hvga_display_device_init(void)
 
 static void hitachi_hvga_lcd_power_on(void)
 {
-	gpio_set_value(GPIO_MSM_MDDI_XRES, 0);
 	semc_delta_lcd_regulators_on();
-	mdelay(1); /* spec: > 310 us */
+	mdelay(2); /* spec: > 310 us */
+	gpio_set_value(GPIO_MSM_MDDI_XRES, 0);
+	mdelay(2);
 	gpio_set_value(GPIO_MSM_MDDI_XRES, 1);
-	mdelay(11); /* spec: > 10 ms */
+	mdelay(14); /* spec: > 10 ms */
 }
 
 static void hitachi_hvga_lcd_power_off(void)
 {
 	gpio_set_value(GPIO_MSM_MDDI_XRES, 0);
-	mdelay(121); /* spec > 120 ms */
+	mdelay(130); /* spec > 120 ms */
 	vreg_disable(vreg_vlcd);
+	mdelay(20);
 	vreg_disable(vreg_vlcd_io);
 }
 
 static void hitachi_hvga_lcd_exit_deep_standby(void)
 {
 	gpio_set_value(GPIO_MSM_MDDI_XRES, 0);
-	mdelay(1); /* spec: > 200 us */
+	mdelay(4); /* spec: > 200 us */
 	gpio_set_value(GPIO_MSM_MDDI_XRES, 1);
-	mdelay(11); /* spec: > 10 ms */
+	mdelay(21); /* spec: > 10 ms */
 }
 
 static struct panel_data_ext hitachi_hvga_panel_ext = {
@@ -1947,14 +1980,15 @@ static void __init msm_mddi_hitachi_hvga_display_device_init(void)
 	panel_data->panel_info.clk_max = 160000000;
 	panel_data->panel_info.fb_num = 2;
 
-	panel_data->panel_info.mddi.vdopkt = 0x0023;
+	panel_data->panel_info.mddi.vdopkt = 0x23; //MDDI_DEFAULT_PRIM_PIX_ATTR;
 
 #ifdef CONFIG_MSM7X27_VSYNC_ENABLE
 	panel_data->panel_info.lcd.vsync_enable = TRUE;
 #else
 	panel_data->panel_info.lcd.vsync_enable = FALSE;
 #endif
-	panel_data->panel_info.lcd.refx100 = 8500;
+	//lcd.refx100 = (mddi_hitachi_rows_per_second * 100) / mddi_hitachi_rows_per_refresh;
+	panel_data->panel_info.lcd.refx100 = 8500; //6510;  //org8500;
 	panel_data->panel_info.lcd.v_back_porch = 1;
 	panel_data->panel_info.lcd.v_front_porch = 16;
 	panel_data->panel_info.lcd.v_pulse_width = 0;
@@ -2055,7 +2089,7 @@ static struct platform_device *devices[] __initdata = {
 #ifdef CONFIG_DLT002_CAMERA
 	&msm_camera_sensor_dlt002,
 #endif
-	&msm_device_kgsl,
+	&msm_kgsl_3d0,
 #if defined(CONFIG_LEDS_MSM_PMIC_FLASHLED)
 	&flash_led_device,
 #endif
@@ -2158,7 +2192,7 @@ static void __init msm7x2x_init_irq(void)
 
 static struct msm_acpu_clock_platform_data msm7x27_clock_data = {
 	.acpu_switch_time_us = 50,
-	.max_speed_delta_khz = 400000,	//256000 alf
+	.max_speed_delta_khz = 4000000,	//256000 alf ny 400000
 	.vdd_switch_time_us = 62,
 	.max_axi_khz = 200000,
 //	.max_axi_khz = 128000,
@@ -2556,32 +2590,35 @@ static void __init msm7x2x_init(void)
 		msm7x27_clock_data.max_axi_khz = 200000;
 
 	msm_acpu_clock_init(&msm7x27_clock_data);
-	kgsl_pdata.high_axi_3d = clk_get_max_axi_khz();
+	/*'OLD' kgsl_pdata.high_axi_3d = clk_get_max_axi_khz();*/
+	//kgsl_3d0_pdata.pwr_data.pwrlevel[0].bus_freq = clk_get_max_axi_khz() * 1000;
 	
+	/* This value has been set to 160000 for power savings. */
+	/* OEMs may modify the value at their discretion for performance */
+	/* The appropriate maximum replacement for 160000 is: */
+	/* msm7x2x_clock_data.max_axi_khz */
+	//kgsl_3d0_pdata.pwr_data.pwrlevel[0].gpu_freq = 0;
+	//kgsl_3d0_pdata.pwr_data.pwrlevel[0].bus_freq = 160000000;
+	//kgsl_3d0_pdata.pwr_data.init_level = 0;
+	//kgsl_3d0_pdata.pwr_data.num_levels = 1;
 	/* 7x27 doesn't allow graphics clocks to be run asynchronously to */
-        /* the AXI bus */
-        kgsl_pdata.max_grp2d_freq = 0;
-        kgsl_pdata.min_grp2d_freq = 0;
-        kgsl_pdata.set_grp2d_async = NULL;
-        kgsl_pdata.max_grp3d_freq = 0;
-        kgsl_pdata.min_grp3d_freq = 0;
-        kgsl_pdata.set_grp3d_async = NULL;
-	kgsl_pdata.imem_clk_name = "imem_clk";
-	kgsl_pdata.grp3d_clk_name = "grp_clk";
-	kgsl_pdata.grp3d_pclk_name = "grp_pclk";
-	kgsl_pdata.grp2d0_clk_name = NULL;
-	kgsl_pdata.idle_timeout_3d = HZ/5;
-	kgsl_pdata.idle_timeout_2d = 0;
+	/* the AXI bus */
+	//kgsl_3d0_pdata.pwr_data.set_grp_async = NULL;
+	//kgsl_3d0_pdata.pwr_data.idle_timeout = HZ/5; 
+	// //kgsl_3d0_pdata.pwr_data.nap_allowed = true;
+	//kgsl_3d0_pdata.clk.name.clk = "grp_clk";
+	//kgsl_3d0_pdata.clk.name.pclk = "grp_pclk";
+	//kgsl_3d0_pdata.imem_clk_name.clk = "imem_clk";
 	
-#ifdef CONFIG_KGSL_PER_PROCESS_PAGE_TABLE
-	kgsl_pdata.pt_va_size = SZ_32M;
+//#ifdef CONFIG_KGSL_PER_PROCESS_PAGE_TABLE
+	//kgsl_pdata.pt_va_size = SZ_32M;
 	/* Maximum of 32 concurrent processes */
-	kgsl_pdata.pt_max_count = 32;
-#else
-	kgsl_pdata.pt_va_size = SZ_128M;
+	//kgsl_pdata.pt_max_count = 32;
+//#else
+	//kgsl_pdata.pt_va_size = SZ_128M;
 	/* We only ever have one pagetable for everybody */
-	kgsl_pdata.pt_max_count = 1;
-#endif	
+	//kgsl_pdata.pt_max_count = 1;
+//#endif	
 	msm_device_hsusb_peripheral.dev.platform_data = &msm_hsusb_pdata;
 #ifdef CONFIG_USB_MSM_OTG_72K
         msm_device_otg.dev.platform_data = &msm_otg_pdata;

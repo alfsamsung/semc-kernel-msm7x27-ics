@@ -1250,11 +1250,7 @@ static int msm_hs_startup(struct uart_port *uport)
 	msm_uport->imr_reg |= UARTDM_ISR_CURRENT_CTS_BMSK;
 
 	msm_hs_write(uport, UARTDM_TFWR_ADDR, 0);  /* TXLEV on empty TX fifo */
-
-	ret = set_irq_wake(uport->irq, 1);
-	if (unlikely(ret))
-		return ret;
-
+	
 	ret = request_irq(uport->irq, msm_hs_isr, IRQF_TRIGGER_HIGH,
 			  "msm_hs_uart", msm_uport);
 	if (unlikely(ret))
@@ -1546,8 +1542,6 @@ static void msm_hs_shutdown(struct uart_port *uport)
 			 UART_XMIT_SIZE, DMA_TO_DEVICE);
 
 	spin_unlock_irqrestore(&uport->lock, flags);
-
-	set_irq_wake(uport->irq, 0);
 
 	/* Free the interrupt */
 	free_irq(uport->irq, msm_uport);
