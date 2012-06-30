@@ -205,7 +205,6 @@ static void hitachi_lcd_driver_init(struct platform_device *pdev)
 {
 	struct msm_fb_panel_data *panel;
 
-	if (pdev) {
 		panel = (struct msm_fb_panel_data *)pdev->dev.platform_data;
 
 		DBG(KERN_INFO, LEVEL_TRACE, DBG_STR"%s [%d]\n", __func__,
@@ -270,7 +269,6 @@ static void hitachi_lcd_driver_init(struct platform_device *pdev)
 		/* Replace display internal random data with black pixels */
 		mddi_video_stream_black_display(0, 0, panel->panel_info.xres,
 				panel->panel_info.yres, MDDI_HOST_PRIM);
-	}
 }
 
 static void hitachi_lcd_window_adjust(uint16 x1, uint16 x2,
@@ -313,97 +311,94 @@ static void hitachi_lcd_window_adjust(uint16 x1, uint16 x2,
 	mutex_unlock(&mddi_mutex);
 }
 
-#ifdef CONFIG_FB_MSM_MDDI_SEMC_LCD_POWER_OFF_SLEEP_MODE
+static void hitachi_panel_on(void)
+{
+	/* Turn display ON */
+	DBG(KERN_INFO, LEVEL_TRACE, DBG_STR"%s \n", __func__);
+	write_reg_16(0x29, 0x00000000, 0, 0, 0, 1);
+}
+
+static void hitachi_panel_off(void)
+{
+	/* Turn display OFF */
+	write_reg_16(0x28, 0, 0, 0, 0, 1);
+}
+
 static void hitachi_lcd_enter_sleep(void)
 {
-	DBG(KERN_INFO, LEVEL_TRACE, DBG_STR"%s [%d]\n", __func__, lcd_state);
+	DBG(KERN_INFO, LEVEL_TRACE, DBG_STR"%s \n", __func__);
 
 	/* Display off */
-	write_reg_16(0x28, 0, 0, 0, 0, 1);
-	mddi_wait(2*MDDI_FRAME_TIME); /* >2 frames(2x80Hz) */
+	//write_reg_16(0x28, 0, 0, 0, 0, 1);
+	//mddi_wait(2*MDDI_FRAME_TIME); /* >2 frames(2x80Hz) */
 	/* Sleep in */
 	write_reg_16(0x10, 0, 0, 0, 0, 1);
 	mddi_wait(120); /* >120 ms */
 }
-#endif
 
 static void hitachi_lcd_exit_sleep(void)
 {
-	DBG(KERN_INFO, LEVEL_TRACE, DBG_STR"%s [%d]\n", __func__, lcd_state);
+	DBG(KERN_INFO, LEVEL_TRACE, DBG_STR"%s \n", __func__);
 
 	/* Sleep out */
 	write_reg_16(0x11, 0x00000000, 0, 0, 0, 1);
 	mddi_wait(120); /* >120 ms */
 	/* RAMWR to avoid 1st cut IC bug */
 	write_reg_16(0x2C, 0x00000000, 0, 0, 0, 1);
-
+	mddi_wait(120); //ALFS test
+	
 	/* Display on */
-	write_reg_16(0x29, 0x00000000, 0, 0, 0, 1);
+	//write_reg_16(0x29, 0x00000000, 0, 0, 0, 1);
 }
 
-#ifndef CONFIG_FB_MSM_MDDI_SEMC_LCD_POWER_OFF_SLEEP_MODE
 static void hitachi_lcd_enter_deepstandby(void)
 {
-	DBG(KERN_INFO, LEVEL_TRACE,
-		"%s [%d]\n", __func__, lcd_state);
+	DBG(KERN_INFO, LEVEL_TRACE, "%s \n", __func__);
 	/* Display off */
-	write_reg_16(0x28, 0x00000000, 0, 0, 0, 1);
-	mddi_wait(2*MDDI_FRAME_TIME); /* >2 frames(2x80Hz) */
+	//write_reg_16(0x28, 0x00000000, 0, 0, 0, 1);
+	//mddi_wait(2*MDDI_FRAME_TIME); /* >2 frames(2x80Hz) */
 	/* enter deep standby mode */
 	write_reg_16(0xDF, 0x00000001, 0, 0, 0, 1);
+	mddi_wait(20); //2
+	DBG(KERN_INFO, LEVEL_TRACE, "%s %s exit. \n", DBG_STR, __func__);
 }
 
-static void hitachi_toggle_reset(struct platform_device *pdev)
+static void hitachi_lcd_exit_deep_standby(struct platform_device *pdev)
 {
-	struct msm_fb_panel_data *panel;
+	struct msm_fb_panel_data *panel =
+		(struct msm_fb_panel_data *)pdev->dev.platform_data;
+	DBG(KERN_INFO, LEVEL_TRACE, "%s \n", __func__);
 
-	DBG(KERN_INFO, LEVEL_TRACE, DBG_STR"%s [%d]\n", __func__, lcd_state);
-
-	if (pdev) {
-		panel = (struct msm_fb_panel_data *)pdev->dev.platform_data;
-
-		if (panel && panel->panel_ext->exit_deep_standby)
+	if (panel) {
+		if (panel->panel_ext->exit_deep_standby)
 			panel->panel_ext->exit_deep_standby();
 	}
 }
 
-static void hitachi_lcd_exit_deepstandby(struct platform_device *pdev)
-{
-	DBG(KERN_INFO, LEVEL_TRACE,
-		"%s [%d]\n", __func__, lcd_state);
-
-	if (pdev) {
-		/* Reset toggle */
-		hitachi_toggle_reset(pdev);
-		/* Re-Initialize */
-		hitachi_lcd_driver_init(pdev);
-	}
-}
-#endif
-
 static void hitachi_power_on(struct platform_device *pdev)
 {
-	struct msm_fb_panel_data *panel;
+	struct msm_fb_panel_data *panel =
+		(struct msm_fb_panel_data *)pdev->dev.platform_data;
 
-	DBG(KERN_INFO, LEVEL_TRACE, DBG_STR"%s [%d]\n", __func__, lcd_state);
+	DBG(KERN_INFO, LEVEL_TRACE, DBG_STR"%s \n", __func__);
 
-	if (pdev) {
-		panel = (struct msm_fb_panel_data *)pdev->dev.platform_data;
-		if (panel && panel->panel_ext->power_on)
+	if (panel) {
+		if (panel->panel_ext->power_on)
 			panel->panel_ext->power_on();
 	}
 }
 
 static void hitachi_power_off(struct platform_device *pdev)
 {
-	struct msm_fb_panel_data *panel;
+	struct msm_fb_panel_data *panel =
+		(struct msm_fb_panel_data *)pdev->dev.platform_data;
 
-	DBG(KERN_INFO, LEVEL_TRACE, DBG_STR"%s [%d]\n", __func__, lcd_state);
+	DBG(KERN_INFO, LEVEL_TRACE, DBG_STR"%s \n", __func__);
 
-	if (pdev) {
-		panel = (struct msm_fb_panel_data *)pdev->dev.platform_data;
-		if (panel && panel->panel_ext->power_off)
+	if (panel) {
+		if (panel->panel_ext->power_off) {
 			panel->panel_ext->power_off();
+		}
 	}
 }
 
@@ -412,7 +407,7 @@ static int mddi_hitachi_lcd_on(struct platform_device *pdev)
 	DBG(KERN_INFO, LEVEL_TRACE, DBG_STR"%s [%d]\n", __func__, lcd_state);
 
 	mutex_lock(&mddi_mutex);
-	if (power_ctrl) {
+	
 		switch (lcd_state) {
 		case LCD_STATE_OFF:
 			hitachi_power_on(pdev);
@@ -420,20 +415,19 @@ static int mddi_hitachi_lcd_on(struct platform_device *pdev)
 			break;
 
 		case LCD_STATE_POWER_ON:
-			hitachi_lcd_driver_init(pdev);
 			hitachi_lcd_exit_sleep();
+			hitachi_lcd_driver_init(pdev);
+			hitachi_panel_on();
 			hitachi_lcd_dbc_on();
 			lcd_state = LCD_STATE_ON;
 			break;
 
 		case LCD_STATE_SLEEP:
-#ifdef CONFIG_FB_MSM_MDDI_SEMC_LCD_POWER_OFF_SLEEP_MODE
-			hitachi_power_on(pdev);
-			hitachi_lcd_driver_init(pdev);
-#else
-			hitachi_lcd_exit_deepstandby(pdev);
-#endif
+			hitachi_lcd_exit_deep_standby(pdev);			
 			hitachi_lcd_exit_sleep();
+			hitachi_lcd_driver_init(pdev);
+			//hitachi_power_on(pdev);
+			hitachi_panel_on();			
 			hitachi_lcd_dbc_on();
 			lcd_state = LCD_STATE_ON;
 			break;
@@ -443,13 +437,14 @@ static int mddi_hitachi_lcd_on(struct platform_device *pdev)
 
 		default:
 			break;
-		}
 	}
 #ifdef ESD_RECOVERY_SUPPORT
 	if (lcd_state == LCD_STATE_ON)
 		esd_recovery_resume();
 #endif
 	mutex_unlock(&mddi_mutex);
+	DBG(KERN_INFO, LEVEL_TRACE, "%s %s exit. lcd_state: %d\n",
+			DBG_STR, __func__, lcd_state);
 	return 0;
 }
 
@@ -459,7 +454,7 @@ static int mddi_hitachi_lcd_off(struct platform_device *pdev)
 	DBG(KERN_INFO, LEVEL_TRACE, DBG_STR"%s [%d]\n", __func__, lcd_state);
 
 	mutex_lock(&mddi_mutex);
-	if (power_ctrl) {
+		
 		switch (lcd_state) {
 		case LCD_STATE_POWER_ON:
 			hitachi_power_off(pdev);
@@ -468,12 +463,10 @@ static int mddi_hitachi_lcd_off(struct platform_device *pdev)
 
 		case LCD_STATE_ON:
 			hitachi_lcd_dbc_off();
-#ifdef CONFIG_FB_MSM_MDDI_SEMC_LCD_POWER_OFF_SLEEP_MODE
+			hitachi_panel_off();
 			hitachi_lcd_enter_sleep();
-			hitachi_power_off(pdev);
-#else
 			hitachi_lcd_enter_deepstandby();
-#endif
+			//hitachi_power_off(pdev);
 			lcd_state = LCD_STATE_SLEEP;
 			break;
 
@@ -488,7 +481,7 @@ static int mddi_hitachi_lcd_off(struct platform_device *pdev)
 		default:
 			break;
 		}
-	}
+	
 	mutex_unlock(&mddi_mutex);
 #ifdef ESD_RECOVERY_SUPPORT
 	cancel_delayed_work(&lcd_data.esd_check);
@@ -569,9 +562,11 @@ static void esd_recovery_func(struct work_struct *work)
 				/*
 				*  Recovery process: TBD
 				*/
+				hitachi_exit_deep_standby(lcd_data.pdev);
+				hitachi_lcd_exit_sleep();
 				hitachi_lcd_driver_init(lcd_data.pdev);
+				hitachi_panel_on();
 				hitachi_lcd_dbc_on();
-
 				printk(KERN_INFO DBG_STR
 					"%s (ver:0x%x) ESD recovery finished\n",
 					__func__, MDDI_DRIVER_VERSION);
@@ -734,6 +729,7 @@ static ssize_t store_power_ctrl(struct device *pdev,
 {
 	ssize_t ret;
 	struct platform_device *pf_dev = NULL;
+	struct msm_fb_data_type *mfd;
 
 	pf_dev = container_of(pdev, struct platform_device, dev);
 	if (!pf_dev) {
@@ -754,31 +750,39 @@ static ssize_t store_power_ctrl(struct device *pdev,
 	}
 
 	if (ret) {
-		power_ctrl = POWER_ON;
 		hitachi_power_on(pf_dev);
-		hitachi_lcd_driver_init(pf_dev);
-#ifndef CONFIG_FB_MSM_MDDI_SEMC_LCD_POWER_OFF_SLEEP_MODE
-		hitachi_lcd_exit_deepstandby(pf_dev);
-#endif
+		mfd = (struct msm_fb_data_type *)
+			pf_dev->dev.platform_data;
+		if (mfd == NULL) {
+			DBG(KERN_INFO, LEVEL_DEBUG, "%s %s mfd == null\n",
+				DBG_STR, __func__);
+		}
+		if ((mfd->mddi_early_suspend.resume) == NULL) {
+			DBG(KERN_INFO, LEVEL_DEBUG,
+			"%s %s mfd->mddi_early_suspend.resume ==  null\n",
+			DBG_STR, __func__);
+		} else {
+			DBG(KERN_INFO, LEVEL_DEBUG,
+			"%s %s mfd->mddi_early_suspend.resume-> !=  null\n",
+			DBG_STR, __func__);
+			mfd->mddi_early_suspend.resume(
+						&(mfd->mddi_early_suspend));
+		}
+		/* Perform power-on sequence */
+		lcd_state = LCD_STATE_POWER_ON;
 		hitachi_lcd_exit_sleep();
+		hitachi_lcd_driver_init(pf_dev);
+		hitachi_panel_on();
 		hitachi_lcd_dbc_on();
 		lcd_state = LCD_STATE_ON;
-#ifdef ESD_RECOVERY_SUPPORT
-		esd_recovery_resume();
-#endif
+		power_ctrl = POWER_ON;
 	} else {
-		power_ctrl = POWER_OFF;
 		hitachi_lcd_dbc_off();
-#ifdef CONFIG_FB_MSM_MDDI_SEMC_LCD_POWER_OFF_SLEEP_MODE
+		hitachi_panel_off();
 		hitachi_lcd_enter_sleep();
-#else
 		hitachi_lcd_enter_deepstandby();
-#endif
-		hitachi_power_off(pf_dev);
 		lcd_state = LCD_STATE_SLEEP;
-#ifdef ESD_RECOVERY_SUPPORT
-		cancel_delayed_work(&lcd_data.esd_check);
-#endif
+		power_ctrl = POWER_OFF;
 	}
 
 	DBG(KERN_INFO, LEVEL_PARAM, DBG_STR"%s power_ctrl set to %d\n",
