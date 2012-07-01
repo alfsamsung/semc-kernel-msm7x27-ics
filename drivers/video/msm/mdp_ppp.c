@@ -33,7 +33,6 @@
 #include <asm/system.h>
 #include <asm/mach-types.h>
 #include <linux/semaphore.h>
-#include <linux/msm_kgsl.h>
 
 #include "mdp.h"
 #include "msm_fb.h"
@@ -554,20 +553,25 @@ static void get_len(struct mdp_img *img, struct mdp_rect *rect, uint32_t bpp,
 static void flush_imgs(struct mdp_blit_req *req, int src_bpp, int dst_bpp,
 			struct file *p_src_file, struct file *p_dst_file)
 {
-	uint32_t src0_len, src1_len;
+	uint32_t src0_len, src1_len, dst0_len, dst1_len;
 
-	if (!(req->flags & MDP_BLIT_NON_CACHED)) {
-		/* flush src images to memory before dma to mdp */
-		get_len(&req->src, &req->src_rect, src_bpp,
-		&src0_len, &src1_len);
-	
-		flush_pmem_file(p_src_file,
-		  req->src.offset, src0_len);
+	/* flush src images to memory before dma to mdp */
+	get_len(&req->src, &req->src_rect, src_bpp,
+	&src0_len, &src1_len);
+
+	flush_pmem_file(p_src_file,
+	req->src.offset, src0_len);
 
 	if (IS_PSEUDOPLNR(req->src.format))
-			flush_pmem_file(p_src_file,
-				req->src.offset + src0_len, src1_len);
-	}
+		flush_pmem_file(p_src_file,
+			req->src.offset + src0_len, src1_len);
+
+	get_len(&req->dst, &req->dst_rect, dst_bpp, &dst0_len, &dst1_len);
+	flush_pmem_file(p_dst_file, req->dst.offset, dst0_len);
+
+	if (IS_PSEUDOPLNR(req->dst.format))
+		flush_pmem_file(p_dst_file,
+			req->dst.offset + dst0_len, dst1_len);
 }
 #else
 static void flush_imgs(struct mdp_blit_req *req, int src_bpp, int dst_bpp,
@@ -1228,15 +1232,6 @@ static int mdp_ppp_verify_req(struct mdp_blit_req *req)
 	return 0;
 }
 
-int get_gem_img(struct mdp_img *img, unsigned long *start, unsigned long *len)
-{
-       /* Set len to zero to appropriately error out if
-          kgsl_gem_obj_addr fails */
-
-       *len = 0;
-       return kgsl_gem_obj_addr(img->memory_id, (int) img->priv, start, len);
-}
-
 int get_img(struct mdp_img *img, struct fb_info *info, unsigned long *start,
 	    unsigned long *len, struct file **pp_file)
 {
@@ -1289,19 +1284,13 @@ int mdp_ppp_blit(struct fb_info *info, struct mdp_blit_req *req)
 		req->dst.format =  mfd->fb_imgType;
 	if (req->src.format == MDP_FB_FORMAT)
 		req->src.format = mfd->fb_imgType;
-	if (req->flags & MDP_BLIT_SRC_GEM)
-		get_gem_img(&req->src, &src_start, &src_len);
-	else
-		get_img(&req->src, info, &src_start, &src_len, &p_src_file);
+	get_img(&req->src, info, &src_start, &src_len, &p_src_file);
 	if (src_len == 0) {
 		printk(KERN_ERR "mdp_ppp: could not retrieve image from "
 		       "memory\n");
 		return -1;
 	}
-	if (req->flags & MDP_BLIT_DST_GEM)
-		get_gem_img(&req->dst, &dst_start, &dst_len);
-	else
-		get_img(&req->dst, info, &dst_start, &dst_len, &p_dst_file);
+	get_img(&req->dst, info, &dst_start, &dst_len, &p_dst_file);
 	if (dst_len == 0) {
 		put_img(p_src_file);
 		printk(KERN_ERR "mdp_ppp: could not retrieve image from "
@@ -1443,7 +1432,7 @@ int mdp_ppp_blit(struct fb_info *info, struct mdp_blit_req *req)
 	/* MDP cmd block enable */
 	mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_ON, FALSE);
 
-#ifndef CONFIG_FB_MSM_MDP22
+#ifdef CONFIG_FB_MSM_MDP31
 	mdp_start_ppp(mfd, &iBuf, req, p_src_file, p_dst_file);
 #else
 	/* bg tile fetching HW workaround */
