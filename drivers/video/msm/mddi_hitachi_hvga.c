@@ -269,6 +269,7 @@ static void hitachi_lcd_driver_init(struct platform_device *pdev)
 		/* Replace display internal random data with black pixels */
 		mddi_video_stream_black_display(0, 0, panel->panel_info.xres,
 				panel->panel_info.yres, MDDI_HOST_PRIM);
+		mddi_wait(100); //ALFS test
 }
 
 static void hitachi_lcd_window_adjust(uint16 x1, uint16 x2,
@@ -345,7 +346,7 @@ static void hitachi_lcd_exit_sleep(void)
 	mddi_wait(120); /* >120 ms */
 	/* RAMWR to avoid 1st cut IC bug */
 	write_reg_16(0x2C, 0x00000000, 0, 0, 0, 1);
-	mddi_wait(120); //ALFS test
+	mddi_wait(200); //ALFS test
 	
 	/* Display on */
 	//write_reg_16(0x29, 0x00000000, 0, 0, 0, 1);

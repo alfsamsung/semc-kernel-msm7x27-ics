@@ -1923,11 +1923,11 @@ static void __init msm_mddi_toshiba_hvga_display_device_init(void)
 static void hitachi_hvga_lcd_power_on(void)
 {
 	semc_delta_lcd_regulators_on();
-	mdelay(2); /* spec: > 310 us */
+	mdelay(11); /* spec: > 310 us */
 	gpio_set_value(GPIO_MSM_MDDI_XRES, 0);
 	mdelay(2);
 	gpio_set_value(GPIO_MSM_MDDI_XRES, 1);
-	mdelay(14); /* spec: > 10 ms */
+	mdelay(21); /* spec: > 10 ms */
 }
 
 static void hitachi_hvga_lcd_power_off(void)
@@ -1980,7 +1980,7 @@ static void __init msm_mddi_hitachi_hvga_display_device_init(void)
 	panel_data->panel_info.clk_max = 160000000;
 	panel_data->panel_info.fb_num = 2;
 
-	panel_data->panel_info.mddi.vdopkt = 0x23; //MDDI_DEFAULT_PRIM_PIX_ATTR;
+	panel_data->panel_info.mddi.vdopkt = MDDI_DEFAULT_PRIM_PIX_ATTR;
 
 #ifdef CONFIG_MSM7X27_VSYNC_ENABLE
 	panel_data->panel_info.lcd.vsync_enable = TRUE;
