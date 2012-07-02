@@ -283,6 +283,7 @@ static int mdp_do_histogram(struct fb_info *info, struct mdp_histogram *hist)
 	mdp_hist.g = (hist->g) ? mdp_hist_g : 0;
 	mdp_hist.b = (hist->b) ? mdp_hist_b : 0;
 
+	mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_ON, FALSE);
 #ifdef CONFIG_FB_MSM_MDP40
 	MDP_OUTP(MDP_BASE + 0x95004, hist->frame_cnt);
 	MDP_OUTP(MDP_BASE + 0x95000, 1);
@@ -290,6 +291,8 @@ static int mdp_do_histogram(struct fb_info *info, struct mdp_histogram *hist)
 	MDP_OUTP(MDP_BASE + 0x94004, hist->frame_cnt);
 	MDP_OUTP(MDP_BASE + 0x94000, 1);
 #endif
+	mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_OFF, FALSE);
+	
 	wait_for_completion_killable(&mdp_hist_comp);
 
 	if (hist->r) {
