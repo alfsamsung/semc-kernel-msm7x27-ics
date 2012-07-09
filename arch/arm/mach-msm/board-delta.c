@@ -1057,13 +1057,15 @@ static struct resource kgsl_3d0_resources[] = {
 static struct kgsl_device_platform_data kgsl_3d0_pdata = {
 	.pwr_data = {
 	.pwrlevel = {
-			{
-			.gpu_freq = 200000000, 		//245760000, 
+		{
+			.gpu_freq = 200000000, 		//245760000,
 			.bus_freq = 200000000, 		//192000000,
+			//.io_fraction = 0,
 		},
 		{
 			.gpu_freq = 192000000, 
 			.bus_freq = 153000000,
+			//.io_fraction = 33,
 		},
 		{
 			.gpu_freq = 160000000,
@@ -1935,7 +1937,6 @@ static void hitachi_hvga_lcd_power_off(void)
 	gpio_set_value(GPIO_MSM_MDDI_XRES, 0);
 	mdelay(130); /* spec > 120 ms */
 	vreg_disable(vreg_vlcd);
-	mdelay(20);
 	vreg_disable(vreg_vlcd_io);
 }
 
@@ -1976,10 +1977,10 @@ static void __init msm_mddi_hitachi_hvga_display_device_init(void)
 	panel_data->panel_info.wait_cycle = 0;
 	panel_data->panel_info.bpp = 16;
 	panel_data->panel_info.clk_rate = 153600000;
-	panel_data->panel_info.clk_min =  150000000;
+	panel_data->panel_info.clk_min = 150000000;
 	panel_data->panel_info.clk_max = 160000000;
 	panel_data->panel_info.fb_num = 2;
-
+	
 	panel_data->panel_info.mddi.vdopkt = MDDI_DEFAULT_PRIM_PIX_ATTR;
 
 #ifdef CONFIG_MSM7X27_VSYNC_ENABLE
@@ -1987,11 +1988,13 @@ static void __init msm_mddi_hitachi_hvga_display_device_init(void)
 #else
 	panel_data->panel_info.lcd.vsync_enable = FALSE;
 #endif
+	//ALFS NOTE hitachi needs vsync on to prevent screen displacement/cut bugs
+	
 	//lcd.refx100 = (mddi_hitachi_rows_per_second * 100) / mddi_hitachi_rows_per_refresh;
-	panel_data->panel_info.lcd.refx100 = 8500; //6510;  //org8500;
-	panel_data->panel_info.lcd.v_back_porch = 1;
-	panel_data->panel_info.lcd.v_front_porch = 16;
-	panel_data->panel_info.lcd.v_pulse_width = 0;
+	panel_data->panel_info.lcd.refx100 = 6510;  	//org8500;
+	panel_data->panel_info.lcd.v_back_porch = 1;      // ALFS TODO test  6; 
+	panel_data->panel_info.lcd.v_front_porch = 16; 			     6
+	panel_data->panel_info.lcd.v_pulse_width = 0; 			     4
 	panel_data->panel_info.lcd.hw_vsync_mode = FALSE;
 	panel_data->panel_info.lcd.vsync_notifier_period = (1 * HZ); //0 alf
 

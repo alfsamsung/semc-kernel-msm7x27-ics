@@ -289,6 +289,7 @@ static void hitachi_lcd_window_adjust(uint16 x1, uint16 x2,
 		DBG(KERN_INFO, LEVEL_TRACE, "%s (page) [%d, %d]\n",
 				   __func__, y1, y2);
 		hitachi_lcd_window_address_set(LCD_REG_PAGE_ADDRESS, y1, y2);
+		mddi_wait(200); //ALFS test
 	} else {
 		/* cut 3 and up */
 		if (lcd_data.last_window.x1 != x1 ||
@@ -307,6 +308,7 @@ static void hitachi_lcd_window_adjust(uint16 x1, uint16 x2,
 								y1, y2);
 		}
 		write_reg_16(0x3C, 0, 0, 0, 0, 1);
+		mddi_wait(200); //ALFS test
 	}
 
 	mutex_unlock(&mddi_mutex);
@@ -317,6 +319,7 @@ static void hitachi_panel_on(void)
 	/* Turn display ON */
 	DBG(KERN_INFO, LEVEL_TRACE, DBG_STR"%s \n", __func__);
 	write_reg_16(0x29, 0x00000000, 0, 0, 0, 1);
+	mddi_wait(200); //ALFS test
 }
 
 static void hitachi_panel_off(void)
