@@ -1993,8 +1993,8 @@ static void __init msm_mddi_hitachi_hvga_display_device_init(void)
 	//lcd.refx100 = (mddi_hitachi_rows_per_second * 100) / mddi_hitachi_rows_per_refresh;
 	panel_data->panel_info.lcd.refx100 = 6510;  	//org8500;
 	panel_data->panel_info.lcd.v_back_porch = 1;      // ALFS TODO test  6; 
-	panel_data->panel_info.lcd.v_front_porch = 16; 			     6
-	panel_data->panel_info.lcd.v_pulse_width = 0; 			     4
+	panel_data->panel_info.lcd.v_front_porch = 16; 	  //		     6
+	panel_data->panel_info.lcd.v_pulse_width = 0; 	  //		     4
 	panel_data->panel_info.lcd.hw_vsync_mode = FALSE;
 	panel_data->panel_info.lcd.vsync_notifier_period = (1 * HZ); //0 alf
 
