@@ -33,7 +33,8 @@ obj-$(CONFIG_ES209RA_WLAN_POWER)	+= es209ra_wlan_power.o
 obj-$(CONFIG_SEMC_POWER)	+= semc/power/
 obj-y				+= eeprom/
 obj-$(CONFIG_MSM_720P_CORE)	+= video_core/720p/
-obj-$(CONFIG_TSIF) += msm_tsif.o
+obj-$(CONFIG_TSIF) 		+= msm_tsif.o
+obj-$(CONFIG_APANIC)		+= apanic.o
 msm_tsif-objs := tsif.o
 
 obj-$(CONFIG_TSIF_CHRDEV) += tsif_chrdev.o
