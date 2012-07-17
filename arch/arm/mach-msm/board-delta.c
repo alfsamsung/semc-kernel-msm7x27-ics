@@ -1058,7 +1058,7 @@ static struct kgsl_device_platform_data kgsl_3d0_pdata = {
 	.pwr_data = {
 	.pwrlevel = {
 		{
-			.gpu_freq = 200000000, 		//245760000,
+			.gpu_freq = 245760000, 		//200000000,
 			.bus_freq = 200000000, 		//192000000,
 			//.io_fraction = 0,
 		},
@@ -1087,7 +1087,7 @@ static struct kgsl_device_platform_data kgsl_3d0_pdata = {
 	.clk = "imem_clk",
 	.pclk = NULL,
 	},
-};
+};	
 
 static struct platform_device msm_kgsl_3d0 = {
 	.name = "kgsl-3d0",
@@ -2177,6 +2177,7 @@ static struct mddi_platform_data mddi_pdata = {
 
 static struct msm_panel_common_pdata mdp_pdata = {
 	.gpio = 97,
+	.mdp_rev = MDP_REV_30,
 };
 
 static void __init msm_fb_add_devices(void)
@@ -2542,7 +2543,7 @@ msm_i2c_gpio_config(int iface, int config_type)
 }
 
 static struct msm_i2c_platform_data msm_i2c_pdata = {
-	.clk_freq = 400000,
+	.clk_freq = 100000,
 	.rmutex = 0,
 	.pri_clk = 60,
 	.pri_dat = 61,
@@ -2579,9 +2580,7 @@ static struct msm_serial_hs_platform_data bt_uart_platform_data_delta = {
 
 static void __init msm7x2x_init(void)
 {
-	if (socinfo_init() < 0)
-		BUG();
-
+	
 	/* Toggle WLAN ENABLE */
 	wlan_init_seq();
 
@@ -2607,7 +2606,7 @@ static void __init msm7x2x_init(void)
 	/* 7x27 doesn't allow graphics clocks to be run asynchronously to */
 	/* the AXI bus */
 	//kgsl_3d0_pdata.pwr_data.set_grp_async = NULL;
-	//kgsl_3d0_pdata.pwr_data.idle_timeout = HZ/5; 
+	//kgsl_3d0_pdata.pwr_data.idle_timeout = HZ/5;
 	// //kgsl_3d0_pdata.pwr_data.nap_allowed = true;
 	//kgsl_3d0_pdata.clk.name.clk = "grp_clk";
 	//kgsl_3d0_pdata.clk.name.pclk = "grp_pclk";
@@ -2622,34 +2621,17 @@ static void __init msm7x2x_init(void)
 	/* We only ever have one pagetable for everybody */
 	//kgsl_pdata.pt_max_count = 1;
 //#endif	
-	msm_device_hsusb_peripheral.dev.platform_data = &msm_hsusb_pdata;
-#ifdef CONFIG_USB_MSM_OTG_72K
-        msm_device_otg.dev.platform_data = &msm_otg_pdata;
-        if (machine_is_msm7x25_surf() || machine_is_msm7x25_ffa()) {
-                msm_otg_pdata.pemp_level =
-                         PRE_EMPHASIS_WITH_20_PERCENT;
-                msm_otg_pdata.drv_ampl = HS_DRV_AMPLITUDE_5_PERCENT;
-                msm_otg_pdata.cdr_autoreset = CDR_AUTO_RESET_ENABLE;
-                msm_otg_pdata.phy_reset_sig_inverted = 1;
-        }
-        if (machine_is_msm7x27_surf() || machine_is_msm7x27_ffa()) {
-                msm_otg_pdata.pemp_level =
-                        PRE_EMPHASIS_WITH_10_PERCENT;
-                msm_otg_pdata.drv_ampl = HS_DRV_AMPLITUDE_5_PERCENT;
-                msm_otg_pdata.cdr_autoreset = CDR_AUTO_RESET_DISABLE;
-                msm_otg_pdata.phy_reset_sig_inverted = 1;
-        }
-#ifdef CONFIG_USB_GADGET
-        msm_gadget_pdata.swfi_latency =
-                msm7x27_pm_data
-                [MSM_PM_SLEEP_MODE_RAMP_DOWN_AND_WAIT_FOR_INTERRUPT].latency;
-        msm_device_gadget_peripheral.dev.platform_data = &msm_gadget_pdata;
-#endif
-#endif
-	
+        msm_device_hsusb_peripheral.dev.platform_data = &msm_hsusb_pdata;
+	msm_device_otg.dev.platform_data = &msm_otg_pdata;
+
+	msm_gadget_pdata.swfi_latency =
+		msm7x27_pm_data
+		[MSM_PM_SLEEP_MODE_RAMP_DOWN_AND_WAIT_FOR_INTERRUPT].latency;
+	msm_device_gadget_peripheral.dev.platform_data = &msm_gadget_pdata;
 	msm_device_hsusb_host.dev.platform_data = &msm_hsusb_pdata;
 	msm_device_uart_dm1.dev.platform_data = &bt_uart_platform_data_delta;
 	platform_add_devices(devices, ARRAY_SIZE(devices));
+	
 #if defined (CONFIG_DLT001_CAMERA) || defined (CONFIG_DLT002_CAMERA)
 	config_camera_off_gpios(); /* might not be necessary */
 #endif
@@ -2755,13 +2737,22 @@ static void __init msm7x2x_map_io(void)
 	msm_clock_init(msm_clocks_7x27, msm_num_clocks_7x27);
 
 	msm_msm7x2x_allocate_memory_regions();
+	
+	if (socinfo_init() < 0)
+		BUG();
 
 #ifdef CONFIG_CACHE_L2X0
 	/* 7x27 has 256KB L2 cache:
 	    64Kb/Way and 4-Way Associativity;
-		R/W latency: 3 cycles;
 		evmon/parity/share disabled. */
-	l2x0_init(MSM_L2CC_BASE, 0x00068012, 0xfe000000);
+	if ((SOCINFO_VERSION_MAJOR(socinfo_get_version()) > 1)
+			|| ((SOCINFO_VERSION_MAJOR(socinfo_get_version()) == 1)
+			&& (SOCINFO_VERSION_MINOR(socinfo_get_version()) >= 3)))
+			/* R/W latency: 4 cycles; */
+			l2x0_init(MSM_L2CC_BASE, 0x0006801B, 0xfe000000);
+		else
+			/* R/W latency: 3 cycles; */
+			l2x0_init(MSM_L2CC_BASE, 0x00068012, 0xfe000000);
 #endif
 }
 
