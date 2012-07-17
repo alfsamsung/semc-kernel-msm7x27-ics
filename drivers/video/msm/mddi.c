@@ -1,57 +1,18 @@
-/* Copyright (c) 2008-2009, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2008-2011, Code Aurora Forum. All rights reserved.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in the
- *       documentation and/or other materials provided with the distribution.
- *     * Neither the name of Code Aurora Forum nor
- *       the names of its contributors may be used to endorse or promote
- *       products derived from this software without specific prior written
- *       permission.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
  *
- * Alternatively, provided that this notice is retained in full, this software
- * may be relicensed by the recipient under the terms of the GNU General Public
- * License version 2 ("GPL") and only version 2, in which case the provisions of
- * the GPL apply INSTEAD OF those given above.  If the recipient relicenses the
- * software under the GPL, then the identification text in the MODULE_LICENSE
- * macro must be changed to reflect "GPLv2" instead of "Dual BSD/GPL".  Once a
- * recipient changes the license terms to the GPL, subsequent recipients shall
- * not relicense under alternate licensing terms, including the BSD or dual
- * BSD/GPL terms.  In addition, the following license statement immediately
- * below and between the words START and END shall also then apply when this
- * software is relicensed under the GPL:
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  *
- * START
- *
- * This program is free software; you can redistribute it and/or modify it under
- * the terms of the GNU General Public License version 2 and only version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- * FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
- * details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * END
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  *
  */
 
@@ -72,7 +33,7 @@
 #include <linux/uaccess.h>
 #include <linux/clk.h>
 #include <linux/platform_device.h>
-
+#include <linux/pm_runtime.h>
 #include "msm_fb.h"
 #include "mddihosti.h"
 #include "mddihost.h"
@@ -85,19 +46,53 @@ static int mddi_remove(struct platform_device *pdev);
 static int mddi_off(struct platform_device *pdev);
 static int mddi_on(struct platform_device *pdev);
 
+#ifdef CONFIG_PM
 static int mddi_suspend(struct platform_device *pdev, pm_message_t state);
 static int mddi_resume(struct platform_device *pdev);
+#endif
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
 static void mddi_early_suspend(struct early_suspend *h);
 static void mddi_early_resume(struct early_suspend *h);
 #endif
 
+static void pmdh_clk_disable(void);
+static void pmdh_clk_enable(void);
 static struct platform_device *pdev_list[MSM_FB_MAX_DEV_LIST];
 static int pdev_list_cnt;
 static struct clk *mddi_clk;
 static struct clk *mddi_pclk;
 static struct mddi_platform_data *mddi_pdata;
+
+DEFINE_MUTEX(mddi_timer_lock);
+
+static int mddi_runtime_suspend(struct device *dev)
+{
+	dev_dbg(dev, "pm_runtime: suspending...\n");
+	return 0;
+}
+
+static int mddi_runtime_resume(struct device *dev)
+{
+	dev_dbg(dev, "pm_runtime: resuming...\n");
+	return 0;
+}
+
+static int mddi_runtime_idle(struct device *dev)
+{
+	dev_dbg(dev, "pm_runtime: idling...\n");
+	return 0;
+}
+
+static struct dev_pm_ops mddi_dev_pm_ops = {
+	.runtime_suspend = mddi_runtime_suspend,
+	.runtime_resume = mddi_runtime_resume,
+	.runtime_idle = mddi_runtime_idle,
+};
+
+static int pmdh_clk_status;
+int irq_enabled;
+unsigned char mddi_timer_shutdown_flag;
 
 static struct platform_driver mddi_driver = {
 	.probe = mddi_probe,
@@ -108,25 +103,121 @@ static struct platform_driver mddi_driver = {
 	.resume = mddi_resume,
 #endif
 #endif
-	.suspend_late = NULL,
-	.resume_early = NULL,
 	.shutdown = NULL,
 	.driver = {
-		   .name = "mddi",
+		.name = "mddi",
+		.pm = &mddi_dev_pm_ops,
 		   },
 };
 
 extern int int_mddi_pri_flag;
+DEFINE_MUTEX(pmdh_clk_lock);
 
-static int mddi_off(struct platform_device *pdev)
+int pmdh_clk_func(int value)
 {
 	int ret = 0;
 
+	switch (value) {
+	case 0:
+		pmdh_clk_disable();
+		break;
+	case 1:
+		pmdh_clk_enable();
+		break;
+	case 2:
+	default:
+		mutex_lock(&pmdh_clk_lock);
+		ret = pmdh_clk_status;
+		mutex_unlock(&pmdh_clk_lock);
+		break;
+	}
+	return ret;
+}
+
+static void pmdh_clk_disable()
+{
+	mutex_lock(&pmdh_clk_lock);
+	if (pmdh_clk_status == 0) {
+		mutex_unlock(&pmdh_clk_lock);
+		return;
+	}
+
+	if (mddi_host_timer.function) {
+		mutex_lock(&mddi_timer_lock);
+		mddi_timer_shutdown_flag = 1;
+		mutex_unlock(&mddi_timer_lock);
+		del_timer_sync(&mddi_host_timer);
+		mutex_lock(&mddi_timer_lock);
+		mddi_timer_shutdown_flag = 0;
+		mutex_unlock(&mddi_timer_lock);
+	}
+	if (int_mddi_pri_flag && irq_enabled) {
+		disable_irq(INT_MDDI_PRI);
+		irq_enabled = 0;
+	}
+
+	if (mddi_clk) {
+		clk_disable(mddi_clk);
+		pmdh_clk_status = 0;
+	}
+	if (mddi_pclk)
+		clk_disable(mddi_pclk);
+	mutex_unlock(&pmdh_clk_lock);
+}
+
+static void pmdh_clk_enable()
+{
+	mutex_lock(&pmdh_clk_lock);
+	if (pmdh_clk_status == 1) {
+		mutex_unlock(&pmdh_clk_lock);
+		return;
+	}
+
+	if (mddi_clk) {
+		clk_enable(mddi_clk);
+		pmdh_clk_status = 1;
+	}
+	if (mddi_pclk)
+		clk_enable(mddi_pclk);
+
+	if (int_mddi_pri_flag && !irq_enabled) {
+		enable_irq(INT_MDDI_PRI);
+		irq_enabled = 1;
+	}
+
+	if (mddi_host_timer.function)
+		mddi_host_timer_service(0);
+
+	mutex_unlock(&pmdh_clk_lock);
+}
+
+static int mddi_off(struct platform_device *pdev)
+{
+	struct msm_fb_data_type *mfd;
+	boolean dma_pending, dma_update_flag;
+	int ret, i;
+
+	mfd = platform_get_drvdata(pdev);
+
+	for (i = 0; i < 6; i++) {
+		dma_update_flag = mfd->dma_update_flag;
+		dma_pending = mfd->dma->busy;
+		if (dma_update_flag && !dma_pending)
+			break;
+		msleep(5);
+	}
+
+	pmdh_clk_enable();
 	ret = panel_next_off(pdev);
+	pmdh_clk_disable();
 
 	if (mddi_pdata && mddi_pdata->mddi_power_save)
 		mddi_pdata->mddi_power_save(0);
 
+	if (mfd->ebi1_clk)
+		clk_disable(mfd->ebi1_clk);
+
+	pm_runtime_put(&pdev->dev);
 	return ret;
 }
 
@@ -137,9 +228,11 @@ static int mddi_on(struct platform_device *pdev)
 	struct msm_fb_data_type *mfd;
 
 	mfd = platform_get_drvdata(pdev);
-
+	pm_runtime_get(&pdev->dev);
 	if (mddi_pdata && mddi_pdata->mddi_power_save)
 		mddi_pdata->mddi_power_save(1);
+
+	pmdh_clk_enable();
 
 	clk_rate = mfd->fbi->var.pixclock;
 	clk_rate = min(clk_rate, mfd->panel_info.clk_max);
@@ -154,6 +247,9 @@ static int mddi_on(struct platform_device *pdev)
 	if (clk_set_min_rate(mddi_clk, clk_rate) < 0)
 		printk(KERN_ERR "%s: clk_set_min_rate failed\n",
 			__func__);
+
+	if (mfd->ebi1_clk)
+		clk_enable(mfd->ebi1_clk);
 
 	ret = panel_next_on(pdev);
 
@@ -231,20 +327,16 @@ static int mddi_probe(struct platform_device *pdev)
 	pdata->on = mddi_on;
 	pdata->off = mddi_off;
 	pdata->next = pdev;
-
+	pdata->clk_func = pmdh_clk_func;
 	/*
 	 * get/set panel specific fb info
 	 */
 	mfd->panel_info = pdata->panel_info;
 
-#ifdef MSMFB_FRAMEBUF_32
 	if (mfd->index == 0)
-		mfd->fb_imgType = MDP_RGBA_8888; /* primary */
+		mfd->fb_imgType = MSMFB_DEFAULT_TYPE;
 	else
-		mfd->fb_imgType = MDP_RGB_565;	/* secondary */
-#else
-	mfd->fb_imgType = MDP_RGB_565;
-#endif
+		mfd->fb_imgType = MDP_RGB_565;
 
 	clk_rate = mfd->panel_info.clk_max;
 	if (mddi_pdata &&
@@ -262,6 +354,12 @@ static int mddi_probe(struct platform_device *pdev)
 	 * set driver data
 	 */
 	platform_set_drvdata(mdp_dev, mfd);
+	rc = pm_runtime_set_active(&pdev->dev);
+	if (rc < 0)
+		printk(KERN_ERR "pm_runtime: fail to set active\n");
+
+	rc = 0;
+	pm_runtime_enable(&pdev->dev);
 
 	/*
 	 * register in mdp driver
@@ -288,7 +386,14 @@ mddi_probe_err:
 
 static int mddi_pad_ctrl;
 static int mddi_power_locked;
-static int mddi_is_in_suspend;
+
+int mddi_client_power(unsigned int client_id)
+{
+	int ret = 0;
+	if (mddi_pdata && mddi_pdata->mddi_client_power)
+		ret = mddi_pdata->mddi_client_power(client_id);
+	return ret;
+}
 
 void mddi_disable(int lock)
 {
@@ -299,9 +404,7 @@ void mddi_disable(int lock)
 
 	if (lock)
 		mddi_power_locked = 1;
-
-	if (mddi_host_timer.function)
-		del_timer_sync(&mddi_host_timer);
+	pmdh_clk_enable();
 
 	mddi_pad_ctrl = mddi_host_reg_in(PAD_CTL);
 	mddi_host_reg_out(PAD_CTL, 0x0);
@@ -309,22 +412,36 @@ void mddi_disable(int lock)
 	if (clk_set_min_rate(mddi_clk, 0) < 0)
 		printk(KERN_ERR "%s: clk_set_min_rate failed\n", __func__);
 
-	clk_disable(mddi_clk);
-	if (mddi_pclk)
-		clk_disable(mddi_pclk);
-	disable_irq(INT_MDDI_PRI);
+	pmdh_clk_disable();
 
 	if (mddi_pdata && mddi_pdata->mddi_power_save)
 		mddi_pdata->mddi_power_save(0);
 }
 
+#ifdef CONFIG_PM
+static int mddi_is_in_suspend;
+
 static int mddi_suspend(struct platform_device *pdev, pm_message_t state)
 {
+	mddi_host_type host_idx = MDDI_HOST_PRIM;
 	if (mddi_is_in_suspend)
 		return 0;
 
 	mddi_is_in_suspend = 1;
-	mddi_disable(0);
+
+	if (mddi_power_locked)
+		return 0;
+
+	pmdh_clk_enable();
+
+	mddi_pad_ctrl = mddi_host_reg_in(PAD_CTL);
+	mddi_host_reg_out(PAD_CTL, 0x0);
+
+	if (clk_set_min_rate(mddi_clk, 0) < 0)
+		printk(KERN_ERR "%s: clk_set_min_rate failed\n", __func__);
+
+	pmdh_clk_disable();
+
 	return 0;
 }
 
@@ -340,17 +457,14 @@ static int mddi_resume(struct platform_device *pdev)
 	if (mddi_power_locked)
 		return 0;
 
-	enable_irq(INT_MDDI_PRI);
-	clk_enable(mddi_clk);
-	if (mddi_pclk)
-		clk_enable(mddi_pclk);
+	pmdh_clk_enable();
+
 	mddi_host_reg_out(PAD_CTL, mddi_pad_ctrl);
 
-	if (mddi_host_timer.function)
-		mddi_host_timer_service(0);
 
 	return 0;
 }
+#endif
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
 static void mddi_early_suspend(struct early_suspend *h)
@@ -373,8 +487,16 @@ static void mddi_early_resume(struct early_suspend *h)
 
 static int mddi_remove(struct platform_device *pdev)
 {
-	if (mddi_host_timer.function)
+	pm_runtime_disable(&pdev->dev);
+	if (mddi_host_timer.function) {
+		mutex_lock(&mddi_timer_lock);
+		mddi_timer_shutdown_flag = 1;
+		mutex_unlock(&mddi_timer_lock);
 		del_timer_sync(&mddi_host_timer);
+		mutex_lock(&mddi_timer_lock);
+		mddi_timer_shutdown_flag = 0;
+		mutex_unlock(&mddi_timer_lock);
+	}
 
 	iounmap(msm_pmdh_base);
 
@@ -389,34 +511,35 @@ static int mddi_register_driver(void)
 static int __init mddi_driver_init(void)
 {
 	int ret;
+	pmdh_clk_status = 0;
 
 	mddi_clk = clk_get(NULL, "mddi_clk");
 	if (IS_ERR(mddi_clk)) {
-		printk(KERN_ERR "can't find mddi_clk \n");
+		printk(KERN_ERR "can't find mddi_clk\n");
 		return PTR_ERR(mddi_clk);
 	}
-	clk_enable(mddi_clk);
+	ret = clk_set_min_rate(mddi_clk, 49000000);
+	if (ret)
+		printk(KERN_ERR "Can't set mddi_clk min rate to 49000000\n");
 
+	printk(KERN_INFO "mddi_clk init rate is %lu\n",
+		clk_get_rate(mddi_clk));
 	mddi_pclk = clk_get(NULL, "mddi_pclk");
 	if (IS_ERR(mddi_pclk))
 		mddi_pclk = NULL;
-	else
-		clk_enable(mddi_pclk);
+	pmdh_clk_enable();
 
 	ret = mddi_register_driver();
 	if (ret) {
-		clk_disable(mddi_clk);
+		pmdh_clk_disable();
 		clk_put(mddi_clk);
-		if (mddi_pclk) {
-			clk_disable(mddi_pclk);
+		if (mddi_pclk)
 			clk_put(mddi_pclk);
-		}
 		printk(KERN_ERR "mddi_register_driver() failed!\n");
 		return ret;
 	}
 
-	if (mddi_resource_initialized == 1)
-		mddi_init();
+	mddi_init();
 
 	return ret;
 }

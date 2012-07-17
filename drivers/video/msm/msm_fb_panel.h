@@ -131,6 +131,7 @@ struct msm_fb_panel_data {
 	int (*on) (struct platform_device *pdev);
 	int (*off) (struct platform_device *pdev);
 	struct platform_device *next;
+	int (*clk_func) (int enable);
 };
 
 /*===========================================================================

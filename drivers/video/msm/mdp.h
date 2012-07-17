@@ -48,6 +48,15 @@
 
 #include <linux/autoconf.h>
 
+extern uint32 mdp_hw_revision;
+extern ulong mdp4_display_intf;
+extern int mdp_rev;
+
+#define MDP4_REVISION_V1		0
+#define MDP4_REVISION_V2		1
+#define MDP4_REVISION_V2_1	2
+#define MDP4_REVISION_NONE	0xffffffff
+
 #ifdef BIT
 #undef BIT
 #endif
@@ -116,14 +125,14 @@ typedef enum {
 } MDP_BLOCK_POWER_STATE;
 
 typedef enum {
-	MDP_MASTER_BLOCK,
 	MDP_CMD_BLOCK,
+	MDP_OVERLAY0_BLOCK,
+	MDP_MASTER_BLOCK,
 	MDP_PPP_BLOCK,
 	MDP_DMA2_BLOCK,
 	MDP_DMA3_BLOCK,
 	MDP_DMA_S_BLOCK,
 	MDP_DMA_E_BLOCK,
-	MDP_OVERLAY0_BLOCK,
 	MDP_OVERLAY1_BLOCK,
 	MDP_MAX_BLOCK
 } MDP_BLOCK_TYPE;
@@ -205,10 +214,12 @@ typedef struct mdp_ibuf_s {
 
 struct mdp_dma_data {
 	boolean busy;
+	boolean dmap_busy;
 	boolean waiting;
 	struct mutex ov_mutex;
 	struct semaphore mutex;
 	struct completion comp;
+	struct completion dmap_comp;
 };
 
 #define MDP_CMD_DEBUG_ACCESS_BASE   (MDP_BASE+0x10000)
@@ -217,17 +228,20 @@ struct mdp_dma_data {
 #define MDP_DMA3_TERM 0x2
 #define MDP_PPP_TERM 0x4
 #define MDP_DMA_S_TERM 0x8
+#define MDP_DMA_E_TERM 0x10
 #ifdef CONFIG_FB_MSM_MDP40
 #define MDP_DMA_E_TERM 0x10
 #define MDP_OVERLAY0_TERM 0x20
 #define MDP_OVERLAY1_TERM 0x40
 #endif
+#define MDP_HISTOGRAM_TERM 0x80
 
 #define ACTIVE_START_X_EN BIT(31)
 #define ACTIVE_START_Y_EN BIT(31)
 #define ACTIVE_HIGH 0
 #define ACTIVE_LOW 1
 #define MDP_DMA_S_DONE  BIT(2)
+#define MDP_DMA_E_DONE  BIT(3)
 #define LCDC_FRAME_START    BIT(15)
 #define LCDC_UNDERFLOW      BIT(16)
 
@@ -562,7 +576,9 @@ struct mdp_dma_data {
 /*
  * MDDI Register
  */
-#define MDDI_VDO_PACKET_DESC  0x5666
+#define MDDI_VDO_PACKET_DESC_16  0x5565
+#define MDDI_VDO_PACKET_DESC	 0x5666	/* 18 bits */
+#define MDDI_VDO_PACKET_DESC_24  0x5888
 
 #ifdef CONFIG_FB_MSM_MDP40
 #define MDP_INTR_ENABLE		(msm_mdp_base + 0x0050)
@@ -665,11 +681,23 @@ void mdp_enable_irq(uint32 term);
 void mdp_disable_irq(uint32 term);
 void mdp_disable_irq_nolock(uint32 term);
 int mdp_get_bytes_per_pixel(uint32_t format);
+int mdp_set_core_clk(uint16 perf_level);
+unsigned long mdp_get_core_clk(void);
+unsigned long mdp_perf_level2clk_rate(uint32 perf_level);
 
 #ifdef MDP_HW_VSYNC
 void mdp_hw_vsync_clk_enable(struct msm_fb_data_type *mfd);
 void mdp_hw_vsync_clk_disable(struct msm_fb_data_type *mfd);
 #endif
+void mdp_vsync_clk_disable(void);
+void mdp_vsync_clk_enable(void);
+
+#ifdef CONFIG_DEBUG_FS
+int mdp_debugfs_init(void);
+#endif
 
 void mdp_dma_s_update(struct msm_fb_data_type *mfd);
+int mdp_start_histogram(struct fb_info *info);
+int mdp_stop_histogram(struct fb_info *info);
+int mdp_histogram_ctrl(boolean en);
 #endif /* MDP_H */

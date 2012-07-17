@@ -39,6 +39,7 @@
 #include <linux/console.h>
 #include <linux/android_pmem.h>
 #include <linux/leds.h>
+#include <linux/pm_runtime.h>
 
 #define MSM_FB_C
 #include "msm_fb.h"
@@ -91,7 +92,7 @@ u32 msm_fb_debug_enabled;
 u32 msm_fb_msg_level = 7;
 
 /* Setting mddi_msg_level to 8 prints out ALL messages */
-u32 mddi_msg_level = 5;
+u32 mddi_msg_level = 6;		//org5
 
 extern int32 mdp_block_power_cnt[MDP_MAX_BLOCK];
 extern unsigned long mdp_timer_duration;
@@ -122,6 +123,15 @@ static int msm_fb_mmap(struct fb_info *info, struct vm_area_struct * vma);
 int msm_fb_debugfs_file_index;
 struct dentry *msm_fb_debugfs_root;
 struct dentry *msm_fb_debugfs_file[MSM_FB_MAX_DBGFS];
+
+DEFINE_MUTEX(msm_fb_notify_update_sem);
+void msmfb_no_update_notify_timer_cb(unsigned long data)
+{
+       struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)data;
+       if (!mfd)
+               pr_err("%s mfd NULL\n", __func__);
+       complete(&mfd->msmfb_no_update_notify);
+}
 
 struct dentry *msm_fb_get_debugfs_root(void)
 {
@@ -212,6 +222,7 @@ static int msm_fb_probe(struct platform_device *pdev)
 {
 	struct msm_fb_data_type *mfd;
 	int rc;
+	int err = 0;
 
 	MSM_FB_DEBUG("msm_fb_probe\n");
 
@@ -237,6 +248,10 @@ static int msm_fb_probe(struct platform_device *pdev)
 		return -EPERM;
 
 	mfd = (struct msm_fb_data_type *)platform_get_drvdata(pdev);
+	
+	err = pm_runtime_set_active(&pdev->dev);
+	if (err < 0)
+		printk(KERN_ERR "pm_runtime: fail to set active.\n");
 
 	if (!mfd)
 		return -ENODEV;
@@ -269,6 +284,8 @@ static int msm_fb_probe(struct platform_device *pdev)
 	}
 #endif
 
+	pm_runtime_enable(&pdev->dev);
+	
 	pdev_list[pdev_list_cnt++] = pdev;
 	return 0;
 }
@@ -280,6 +297,8 @@ static int msm_fb_remove(struct platform_device *pdev)
 	MSM_FB_DEBUG("msm_fb_remove\n");
 
 	mfd = (struct msm_fb_data_type *)platform_get_drvdata(pdev);
+	
+	pm_runtime_disable(&pdev->dev);
 
 	if (!mfd)
 		return -ENODEV;
@@ -304,6 +323,11 @@ static int msm_fb_remove(struct platform_device *pdev)
 
 	if (mfd->dma_hrtimer.function)
 		hrtimer_cancel(&mfd->dma_hrtimer);
+	
+	if (mfd->msmfb_no_update_notify_timer.function)
+		del_timer(&mfd->msmfb_no_update_notify_timer);
+	complete(&mfd->msmfb_no_update_notify);
+	complete(&mfd->msmfb_update_notify);
 
 	/* remove /dev/fb* */
 	unregister_framebuffer(mfd->fbi);
@@ -340,12 +364,12 @@ static int msm_fb_suspend(struct platform_device *pdev, pm_message_t state)
 		return 0;
 
 	acquire_console_sem();
-	fb_set_suspend(mfd->fbi, 1);
+	fb_set_suspend(mfd->fbi, FBINFO_STATE_SUSPENDED);
 
 	ret = msm_fb_suspend_sub(mfd);
 	if (ret != 0) {
 		printk(KERN_ERR "msm_fb: failed to suspend! %d\n", ret);
-		fb_set_suspend(mfd->fbi, 0);
+		fb_set_suspend(mfd->fbi, FBINFO_STATE_RUNNING);
 	} else {
 		pdev->dev.power.power_state = state;
 	}
@@ -363,6 +387,10 @@ static int msm_fb_suspend_sub(struct msm_fb_data_type *mfd)
 
 	if ((!mfd) || (mfd->key != MFD_KEY))
 		return 0;
+	
+	if (mfd->msmfb_no_update_notify_timer.function)
+		del_timer(&mfd->msmfb_no_update_notify_timer);
+	complete(&mfd->msmfb_no_update_notify);
 
 	/*
 	 * suspend this channel
@@ -426,7 +454,7 @@ static int msm_fb_resume(struct platform_device *pdev)
 	acquire_console_sem();
 	ret = msm_fb_resume_sub(mfd);
 	pdev->dev.power.power_state = PMSG_ON;
-	fb_set_suspend(mfd->fbi, 1);
+	fb_set_suspend(mfd->fbi, FBINFO_STATE_RUNNING);
 	release_console_sem();
 
 	return ret;
@@ -459,21 +487,44 @@ static int msm_fb_resume_sub(struct msm_fb_data_type *mfd)
 	}
 
 	return ret;
+}	
+
+static int msm_fb_runtime_suspend(struct device *dev)
+{
+       dev_dbg(dev, "pm_runtime: suspending...\n");
+       return 0;
 }
+
+static int msm_fb_runtime_resume(struct device *dev)
+{
+       dev_dbg(dev, "pm_runtime: resuming...\n");
+       return 0;
+}
+
+static int msm_fb_runtime_idle(struct device *dev)
+{
+       dev_dbg(dev, "pm_runtime: idling...\n");
+       return 0;
+}
+
+static struct dev_pm_ops msm_fb_dev_pm_ops = {
+       .runtime_suspend = msm_fb_runtime_suspend,
+       .runtime_resume = msm_fb_runtime_resume,
+       .runtime_idle = msm_fb_runtime_idle,
+};
 
 static struct platform_driver msm_fb_driver = {
 	.probe = msm_fb_probe,
 	.remove = msm_fb_remove,
 #ifndef CONFIG_HAS_EARLYSUSPEND
 	.suspend = msm_fb_suspend,
-	.suspend_late = NULL,
-	.resume_early = NULL,
 	.resume = msm_fb_resume,
 #endif
 	.shutdown = NULL,
 	.driver = {
 		   /* Driver name must match the device name added in platform.c. */
 		   .name = "msm_fb",
+		   .pm = &msm_fb_dev_pm_ops,
 		   },
 };
 
@@ -482,6 +533,10 @@ static void msmfb_early_suspend(struct early_suspend *h)
 {
 	struct msm_fb_data_type *mfd = container_of(h, struct msm_fb_data_type,
 						    early_suspend);
+	struct fb_info *fbi = mfd->fbi;
+
+	/* set the last frame on suspend as black frame */
+	memset(fbi->screen_base, 0x0, fbi->fix.smem_len);
 	msm_fb_suspend_sub(mfd);
 }
 
@@ -978,6 +1033,13 @@ static int msm_fb_register(struct msm_fb_data_type *mfd)
 	init_completion(&mfd->pan_comp);
 	init_completion(&mfd->refresher_comp);
 	init_MUTEX(&mfd->sem);
+	
+	init_timer(&mfd->msmfb_no_update_notify_timer);
+	mfd->msmfb_no_update_notify_timer.function =
+			msmfb_no_update_notify_timer_cb;
+	mfd->msmfb_no_update_notify_timer.data = (unsigned long)mfd;
+	init_completion(&mfd->msmfb_update_notify);
+	init_completion(&mfd->msmfb_no_update_notify);
 
 	fbram_offset = PAGE_ALIGN((int)fbram)-(int)fbram;
 	fbram += fbram_offset;
@@ -1196,6 +1258,13 @@ static int msm_fb_register(struct msm_fb_data_type *mfd)
 static int msm_fb_open(struct fb_info *info, int user)
 {
 	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)info->par;
+	int result;
+	
+	result = pm_runtime_get_sync(info->dev);
+	
+	if (result < 0) {
+		printk(KERN_ERR "pm_runtime: fail to wake up\n");
+	}
 
 	if (!mfd->ref_cnt) {
 		mdp_set_dma_pan_info(info, NULL, TRUE);
@@ -1213,6 +1282,7 @@ static int msm_fb_open(struct fb_info *info, int user)
 static int msm_fb_release(struct fb_info *info, int user)
 {
 	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)info->par;
+	int ret = 0;
 
 	if (!mfd->ref_cnt) {
 		MSM_FB_INFO("msm_fb_release: try to close unopened fb %d!\n",
@@ -1221,7 +1291,18 @@ static int msm_fb_release(struct fb_info *info, int user)
 	}
 
 	mfd->ref_cnt--;
-	return 0;
+	
+	if (!mfd->ref_cnt) {
+		  if ((ret =
+		      msm_fb_blank_sub(FB_BLANK_POWERDOWN, info,
+					mfd->op_enable)) != 0) {
+			  printk(KERN_ERR "msm_fb_release: can't turn off display!\n");
+			  return ret;
+                }
+	}
+	
+	pm_runtime_put(info->dev);
+	return ret;
 }
 
 DECLARE_MUTEX(msm_fb_pan_sem);
@@ -1282,6 +1363,15 @@ static int msm_fb_pan_display(struct fb_var_screeninfo *var,
 
 		dirtyPtr = &dirty;
 	}
+	complete(&mfd->msmfb_update_notify);
+	mutex_lock(&msm_fb_notify_update_sem);
+	if (mfd->msmfb_no_update_notify_timer.function)
+		del_timer(&mfd->msmfb_no_update_notify_timer);
+
+	mfd->msmfb_no_update_notify_timer.expires =
+				jiffies + ((1000 * HZ) / 1000);
+	add_timer(&mfd->msmfb_no_update_notify_timer);
+	mutex_unlock(&msm_fb_notify_update_sem);
 
 	down(&msm_fb_pan_sem);
 	mdp_set_dma_pan_info(info, dirtyPtr,
@@ -1622,7 +1712,7 @@ int mdp_blit(struct fb_info *info, struct mdp_blit_req *req)
 		if (((req->dst_rect.w == 1) && ((req->src_rect.w != 1) ||
 			(req->dst_rect.h != req->src_rect.h))) ||
 			((req->dst_rect.h == 1) && ((req->src_rect.h != 1) ||
-			(req->dst_rect.h != req->src_rect.h)))) {
+			(req->dst_rect.w != req->src_rect.w)))) {
 			printk(KERN_ERR "mpd_ppp: error scaling when size is 1!\n");
 			return -EINVAL;
 		}
@@ -2281,8 +2371,8 @@ static int msmfb_overlay_set(struct fb_info *info, void __user *p)
 
 	ret = mdp4_overlay_set(info, &req);
 	if (ret) {
-		printk(KERN_ERR "%s:ioctl failed \n",
-			__func__);
+		printk(KERN_ERR "%s: ioctl failed, rc=%d\n",
+			__func__, ret);
 		return ret;
 	}
 
@@ -2325,6 +2415,16 @@ static int msmfb_overlay_play(struct fb_info *info, unsigned long *argp)
 			__func__);
 		return ret;
 	}
+	
+	complete(&mfd->msmfb_update_notify);
+	mutex_lock(&msm_fb_notify_update_sem);
+	if (mfd->msmfb_no_update_notify_timer.function)
+		del_timer(&mfd->msmfb_no_update_notify_timer);
+
+	mfd->msmfb_no_update_notify_timer.expires =
+				jiffies + ((1000 * HZ) / 1000);
+	add_timer(&mfd->msmfb_no_update_notify_timer);
+	mutex_unlock(&msm_fb_notify_update_sem);
 
 	ret = mdp4_overlay_play(info, &req, &p_src_file);
 
@@ -2395,6 +2495,29 @@ static void msmfb_set_color_conv(struct mdp_ccs *p)
 }
 #endif
 
+static int msmfb_notify_update(struct fb_info *info, unsigned long *argp)
+{
+	int ret, notify;
+	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)info->par;
+
+	ret = copy_from_user(&notify, argp, sizeof(int));
+	if (ret) {
+		pr_err("%s:ioctl failed\n", __func__);
+		return ret;
+	}
+
+	if (notify > NOTIFY_UPDATE_STOP)
+		return -EINVAL;
+
+	if (notify == NOTIFY_UPDATE_START) {
+		INIT_COMPLETION(mfd->msmfb_update_notify);
+		wait_for_completion_killable(&mfd->msmfb_update_notify);
+	} else {
+		INIT_COMPLETION(mfd->msmfb_no_update_notify);
+		wait_for_completion_killable(&mfd->msmfb_no_update_notify);
+	}
+	return 0;
+}
 
 static int msm_fb_ioctl(struct fb_info *info, unsigned int cmd,
 			unsigned long arg)
@@ -2409,13 +2532,6 @@ static int msm_fb_ioctl(struct fb_info *info, unsigned int cmd,
 #endif
 	struct mdp_page_protection fb_page_protection;
 	int ret = 0;
-
-#ifdef CONFIG_FB_MSM_OVERLAY
-	/* always let unset cmd go */
-	if (cmd != MSMFB_OVERLAY_UNSET)
-#endif
-		if (!mfd->op_enable)
-			return -EPERM;
 
 	switch (cmd) {
 #ifdef CONFIG_FB_MSM_OVERLAY
@@ -2582,6 +2698,10 @@ static int msm_fb_ioctl(struct fb_info *info, unsigned int cmd,
 				sizeof(fb_page_protection));
 		if (ret)
 				return ret;
+		break;
+	
+	case MSMFB_NOTIFY_UPDATE:
+		ret = msmfb_notify_update(info, argp);
 		break;
 
 	case MSMFB_SET_PAGE_PROTECTION:

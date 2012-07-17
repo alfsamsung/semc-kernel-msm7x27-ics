@@ -61,6 +61,14 @@
 
 #define T_MSM7500
 
+#ifdef ENABLE_MDDI_MULTI_READ_WRITE
+#define MDDI_HOST_MAX_CLIENT_REG_IN_SAME_ADDR 128
+#else
+#define MDDI_HOST_MAX_CLIENT_REG_IN_SAME_ADDR 1
+#endif
+
+extern u32 mddi_msg_level;
+
 typedef enum {
 	format_16bpp,
 	format_18bpp,
@@ -146,7 +154,12 @@ typedef struct {
 } mddi_lcd_func_type;
 
 extern mddi_lcd_func_type mddi_lcd;
+extern int irq_enabled;
+extern unsigned char mddi_timer_shutdown_flag;
+extern struct mutex mddi_timer_lock;
+ 
 void mddi_init(void);
+extern int irq_enabled;
 
 void mddi_powerdown(void);
 
@@ -235,8 +248,11 @@ void mddi_assign_max_pkt_dimensions(uint16 image_cols,
 				    uint16 *max_cols, uint16 * max_rows);
 uint16 mddi_assign_pkt_height(uint16 pkt_width, uint16 pkt_height, uint16 bpp);
 void mddi_queue_reverse_encapsulation(boolean wait);
+int mddi_client_power(unsigned int client_id);
 void mddi_disable(int lock);
 void mddi_window_adjust(struct msm_fb_data_type *mfd,uint16 x1, uint16 x2, uint16 y1, uint16 y2);
+void mddi_send_fw_link_skew_cal(mddi_host_type host_idx);
+int pmdh_clk_func(int enable);
 boolean mddi_video_stream_black_display(uint32 x0, uint32 y0,
 			uint32 width, uint32 height, mddi_host_type host);
 #endif /* MDDIHOST_H */

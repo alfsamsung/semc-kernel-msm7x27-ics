@@ -6,9 +6,10 @@ obj-$(CONFIG_FB_BACKLIGHT) += msm_fb_bl.o
 # MDP
 obj-y += mdp.o
 
+obj-$(CONFIG_DEBUG_FS) += mdp_debugfs.o
+
 ifeq ($(CONFIG_FB_MSM_MDP40),y)
 obj-y += mdp4_util.o
-obj-$(CONFIG_DEBUG_FS) += mdp4_debugfs.o
 else
 obj-y += mdp_hw_init.o
 obj-y += mdp_ppp.o
@@ -34,7 +35,7 @@ endif
 
 obj-y += mdp_dma.o
 obj-y += mdp_dma_s.o
-obj-$(CONFIG_MSM7X27_VSYNC_ENABLE) += mdp_vsync.o
+obj-y += mdp_vsync.o
 obj-y += mdp_cursor.o
 obj-y += mdp_dma_tv.o
 

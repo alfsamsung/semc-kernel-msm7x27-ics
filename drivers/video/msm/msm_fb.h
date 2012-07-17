@@ -157,6 +157,12 @@ struct msm_fb_data_type {
 	struct early_suspend mddi_ext_early_suspend;
 #endif
 	u32 mdp_fb_page_protection;
+	
+	struct clk *ebi1_clk;
+	boolean dma_update_flag;
+	struct timer_list msmfb_no_update_notify_timer;
+	struct completion msmfb_update_notify;
+	struct completion msmfb_no_update_notify;
 };
 
 struct dentry *msm_fb_get_debugfs_root(void);

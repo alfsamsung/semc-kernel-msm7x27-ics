@@ -156,7 +156,7 @@ struct panel_data_ext {
 	void (*power_off) (void);
 	void (*window_adjust) (u16 x1, u16 x2, u16 y1, u16 y2);
 	void (*exit_deep_standby) (void);
-	int use_dma_edge_pixels_fix;
+	//int use_dma_edge_pixels_fix;
 	void (*backlight_ctrl) (bool);
 };
 
@@ -222,13 +222,30 @@ struct msm_adspdec_database {
 	struct dec_instance_table *dec_instance_list;
 };
 
+enum msm_mdp_hw_revision {
+	MDP_REV_20 = 1,
+	MDP_REV_22,
+	MDP_REV_30,
+	MDP_REV_303,
+	MDP_REV_31,
+	MDP_REV_40,
+	MDP_REV_41,
+	MDP_REV_42,
+};
+
 struct msm_panel_common_pdata {
+	uintptr_t hw_revision_addr;
 	int gpio;
 	int (*backlight_level)(int level, int max, int min);
 	int (*pmic_backlight)(int level);
 	int (*panel_num)(void);
 	void (*panel_config_gpio)(int);
 	int *gpio_num;
+	int mdp_core_clk_rate;
+	unsigned num_mdp_clk;
+	int *mdp_core_clk_table;
+	int mdp_rev;
+	int (*writeback_offset)(void);
 };
 
 struct lcdc_platform_data {
@@ -244,6 +261,7 @@ struct mddi_platform_data {
 	void (*mddi_power_save)(int on);
 	int (*mddi_sel_clk)(u32 *clk_rate);
 	int (*mddi_power_on)(int);
+	int (*mddi_client_power)(u32 client_id);
 };
 
 struct msm_fb_platform_data {
@@ -284,8 +302,7 @@ int __init rmt_storage_add_ramfs(void);
 struct msm_usb_host_platform_data;
 int __init msm_add_host(unsigned int host,
 		struct msm_usb_host_platform_data *plat);
-#if defined(CONFIG_USB_FUNCTION_MSM_HSUSB) \
-	|| defined(CONFIG_USB_MSM_72K) || defined(CONFIG_USB_MSM_72K_MODULE)
+#ifdef CONFIG_USB_MSM_72K
 void msm_hsusb_set_vbus_state(int online);
 #else
 static inline void msm_hsusb_set_vbus_state(int online) {}

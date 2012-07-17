@@ -898,7 +898,7 @@ static int mddi_hitachi_hvga_lcd_probe(struct platform_device *pdev)
 	panel_data = (struct msm_fb_panel_data *)pdev->dev.platform_data;
 
 	/* Todo: Remove. Fix for 2nd cut driver IC bug */
-	panel_data->panel_ext->use_dma_edge_pixels_fix = 0;
+	//panel_data->panel_ext->use_dma_edge_pixels_fix = 0;
 
 	if (!check_panel_ids()) {
 		printk(KERN_INFO "%s Found display with cell ID = 0x%x, "
@@ -922,8 +922,8 @@ static int mddi_hitachi_hvga_lcd_probe(struct platform_device *pdev)
 						hitachi_lcd_window_adjust;
 
 		/* Todo: Remove. Fix for 2nd cut driver IC bug */
-		if ((panel_ids.revision_id & 0xFF) < 0x02)
-			panel_data->panel_ext->use_dma_edge_pixels_fix = 1;
+		//if ((panel_ids.revision_id & 0xFF) < 0x02)
+		//	panel_data->panel_ext->use_dma_edge_pixels_fix = 1;
 
 		/* Add mfd on driver_data */
 		msm_fb_add_device(pdev);
