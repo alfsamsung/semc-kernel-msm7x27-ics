@@ -290,7 +290,7 @@ static int __init android_bind(struct usb_composite_dev *cdev)
 
 	if (gadget->ops->wakeup)
 		android_config_driver.bmAttributes |= USB_CONFIG_ATT_WAKEUP;
-	
+
 	/* register our configuration */
 	ret = usb_add_config(cdev, &android_config_driver);
 	if (ret) {

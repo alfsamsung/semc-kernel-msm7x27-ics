@@ -37,7 +37,7 @@ typedef __u16 __bitwise __hc16;
 #define __hc16	__le16
 #endif
 
-/* statistics can be kept for tuning/monitoring */
+/* statistics can be kept for for tuning/monitoring */
 struct ehci_stats {
 	/* irq usage */
 	unsigned long		normal;
@@ -116,12 +116,8 @@ struct ehci_hcd {			/* one per controller */
 	struct timer_list	watchdog;
 	unsigned long		actions;
 	unsigned		stamp;
-	unsigned		random_frame;
 	unsigned long		next_statechange;
-	ktime_t			last_periodic_enable;
 	u32			command;
-
-	void (*start_hnp)(struct ehci_hcd *ehci);
 
 	/* SILICON QUIRKS */
 	unsigned		no_selective_suspend:1;
@@ -129,8 +125,6 @@ struct ehci_hcd {			/* one per controller */
 	unsigned		big_endian_mmio:1;
 	unsigned		big_endian_desc:1;
 	unsigned		has_amcc_usb23:1;
-	unsigned		need_io_watchdog:1;
-	unsigned		broken_periodic:1;
 
 	/* required for usb32 quirk */
 	#define OHCI_CTRL_HCFS          (3 << 6)
@@ -140,7 +134,6 @@ struct ehci_hcd {			/* one per controller */
 	#define OHCI_HCCTRL_OFFSET      0x4
 	#define OHCI_HCCTRL_LEN         0x4
 	__hc32			*ohci_hcctrl_reg;
-	unsigned		has_hostpc:1;
 
 	u8			sbrn;		/* packed release number */
 
@@ -195,6 +188,40 @@ static inline void
 timer_action_done (struct ehci_hcd *ehci, enum ehci_timer_action action)
 {
 	clear_bit (action, &ehci->actions);
+}
+
+static inline void
+timer_action (struct ehci_hcd *ehci, enum ehci_timer_action action)
+{
+	/* Don't override timeouts which shrink or (later) disable
+	 * the async ring; just the I/O watchdog.  Note that if a
+	 * SHRINK were pending, OFF would never be requested.
+	 */
+	if (timer_pending(&ehci->watchdog)
+			&& ((BIT(TIMER_ASYNC_SHRINK) | BIT(TIMER_ASYNC_OFF))
+				& ehci->actions))
+		return;
+
+	if (!test_and_set_bit (action, &ehci->actions)) {
+		unsigned long t;
+
+		switch (action) {
+		case TIMER_IO_WATCHDOG:
+			t = EHCI_IO_JIFFIES;
+			break;
+		case TIMER_ASYNC_OFF:
+			t = EHCI_ASYNC_JIFFIES;
+			break;
+		// case TIMER_ASYNC_SHRINK:
+		default:
+			/* add a jiffie since we synch against the
+			 * 8 KHz uframe counter.
+			 */
+			t = DIV_ROUND_UP(EHCI_SHRINK_FRAMES * HZ, 1000) + 1;
+			break;
+		}
+		mod_timer(&ehci->watchdog, t + jiffies);
+	}
 }
 
 static void free_cached_itd_list(struct ehci_hcd *ehci);
@@ -260,7 +287,7 @@ struct ehci_qtd {
 
 /*
  * Now the following defines are not converted using the
- * cpu_to_le32() macro anymore, since we have to support
+ * __constant_cpu_to_le32() macro anymore, since we have to support
  * "dynamic" switching between be and le support, so that the driver
  * can be used on one system with SoC EHCI controller using big-endian
  * descriptors as well as a normal little-endian PCI EHCI controller.
@@ -304,8 +331,8 @@ union ehci_shadow {
  * These appear in both the async and (for interrupt) periodic schedules.
  */
 
-/* first part defined by EHCI spec */
-struct ehci_qh_hw {
+struct ehci_qh {
+	/* first part defined by EHCI spec */
 	__hc32			hw_next;	/* see EHCI 3.6.1 */
 	__hc32			hw_info1;       /* see EHCI 3.6.2 */
 #define	QH_HEAD		0x00008000
@@ -323,10 +350,7 @@ struct ehci_qh_hw {
 	__hc32			hw_token;
 	__hc32			hw_buf [5];
 	__hc32			hw_buf_hi [5];
-} __attribute__ ((aligned(32)));
 
-struct ehci_qh {
-	struct ehci_qh_hw	*hw;
 	/* the rest is HCD-private */
 	dma_addr_t		qh_dma;		/* address of qh */
 	union ehci_shadow	qh_next;	/* ptr to qh; or periodic */
@@ -345,7 +369,6 @@ struct ehci_qh {
 	u32			refcount;
 	unsigned		stamp;
 
-	u8			needs_rescan;	/* Dequeue during giveback */
 	u8			qh_state;
 #define	QH_STATE_LINKED		1		/* HC sees this */
 #define	QH_STATE_UNLINK		2		/* HC may still see this */
@@ -364,10 +387,8 @@ struct ehci_qh {
 	unsigned short		period;		/* polling interval */
 	unsigned short		start;		/* where polling starts */
 #define NO_FRAME ((unsigned short)~0)			/* pick new start */
-
 	struct usb_device	*dev;		/* access to TT */
-	unsigned		clearing_tt:1;	/* Clear-TT-Buf in progress */
-};
+} __attribute__ ((aligned (32)));
 
 /*-------------------------------------------------------------------------*/
 
@@ -554,7 +575,7 @@ static inline unsigned int
 ehci_port_speed(struct ehci_hcd *ehci, unsigned int portsc)
 {
 	if (ehci_is_TDI(ehci)) {
-		switch ((portsc >> (ehci->has_hostpc ? 25 : 26)) & 3) {
+		switch ((portsc>>26)&3) {
 		case 0:
 			return 0;
 		case 1:
