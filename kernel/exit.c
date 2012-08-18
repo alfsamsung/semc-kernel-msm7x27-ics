@@ -1090,6 +1090,7 @@ NORET_TYPE void do_exit(long code)
 		__free_pipe_info(tsk->splice_pipe);
 
 	preempt_disable();
+	exit_rcu();
 	/* causes final put_task_struct in finish_task_switch(). */
 	tsk->state = TASK_DEAD;
 	schedule();

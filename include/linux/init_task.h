@@ -81,7 +81,6 @@ extern struct group_info init_groups;
 		{ .first = &init_task.pids[PIDTYPE_PGID].node },	\
 		{ .first = &init_task.pids[PIDTYPE_SID].node },		\
 	},								\
-	.rcu		= RCU_HEAD_INIT,				\
 	.level		= 0,						\
 	.numbers	= { {						\
 		.nr		= 0,					\
@@ -116,6 +115,30 @@ extern struct group_info init_groups;
 # define CAP_INIT_BSET  CAP_FULL_SET
 #else
 # define CAP_INIT_BSET  CAP_INIT_EFF_SET
+#endif
+
+#ifdef CONFIG_RCU_BOOST
+#define INIT_TASK_RCU_BOOST()                                          \
+       .rcu_boost_mutex = NULL,
+#else
+#define INIT_TASK_RCU_BOOST()
+#endif
+
+#ifdef CONFIG_TREE_PREEMPT_RCU
+#define INIT_TASK_RCU_TREE_PREEMPT()                                   \
+	.rcu_blocked_node = NULL,
+#else
+#define INIT_TASK_RCU_TREE_PREEMPT(tsk)
+#endif
+#ifdef CONFIG_PREEMPT_RCU
+#define INIT_TASK_RCU_PREEMPT(tsk)                                     \
+	.rcu_read_lock_nesting = 0,                                     \
+	.rcu_read_unlock_special = 0,                                   \
+	.rcu_node_entry = LIST_HEAD_INIT(tsk.rcu_node_entry),           \
+	INIT_TASK_RCU_TREE_PREEMPT()                                    \
+	INIT_TASK_RCU_BOOST()
+#else
+#define INIT_TASK_RCU_PREEMPT(tsk)
 #endif
 
 extern struct cred init_cred;
@@ -184,6 +207,7 @@ extern struct cred init_cred;
 	INIT_IDS							\
 	INIT_TRACE_IRQFLAGS						\
 	INIT_LOCKDEP							\
+	INIT_TASK_RCU_PREEMPT(tsk)					\
 }
 
 

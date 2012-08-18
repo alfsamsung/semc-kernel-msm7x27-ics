@@ -23,39 +23,44 @@
  * PREEMPT_MASK: 0x000000ff
  * SOFTIRQ_MASK: 0x0000ff00
  * HARDIRQ_MASK: 0x0fff0000
+ *     NMI_MASK: 0x04000000
  */
 #define PREEMPT_BITS	8
 #define SOFTIRQ_BITS	8
+#define NMI_BITS        1
+
+#define MAX_HARDIRQ_BITS 10
 
 #ifndef HARDIRQ_BITS
-#define HARDIRQ_BITS	12
-
-#ifndef MAX_HARDIRQS_PER_CPU
-#define MAX_HARDIRQS_PER_CPU NR_IRQS
+# define HARDIRQ_BITS   MAX_HARDIRQ_BITS
 #endif
-
-/*
- * The hardirq mask has to be large enough to have space for potentially
- * all IRQ sources in the system nesting on a single CPU.
- */
-#if (1 << HARDIRQ_BITS) < MAX_HARDIRQS_PER_CPU
-# error HARDIRQ_BITS is too low!
+ 
+#if HARDIRQ_BITS > MAX_HARDIRQ_BITS
+#error HARDIRQ_BITS too high!
 #endif
+ 
+#define PREEMPT_SHIFT   0
+#define SOFTIRQ_SHIFT   (PREEMPT_SHIFT + PREEMPT_BITS)
+#define HARDIRQ_SHIFT   (SOFTIRQ_SHIFT + SOFTIRQ_BITS)
+#define NMI_SHIFT       (HARDIRQ_SHIFT + HARDIRQ_BITS)
+ 
+#define __IRQ_MASK(x)   ((1UL << (x))-1)
+ 
+#define PREEMPT_MASK    (__IRQ_MASK(PREEMPT_BITS) << PREEMPT_SHIFT)
+#define SOFTIRQ_MASK    (__IRQ_MASK(SOFTIRQ_BITS) << SOFTIRQ_SHIFT)
+#define HARDIRQ_MASK    (__IRQ_MASK(HARDIRQ_BITS) << HARDIRQ_SHIFT)
+#define NMI_MASK        (__IRQ_MASK(NMI_BITS)     << NMI_SHIFT)
+
+#define PREEMPT_OFFSET  (1UL << PREEMPT_SHIFT)
+#define SOFTIRQ_OFFSET  (1UL << SOFTIRQ_SHIFT)
+#define HARDIRQ_OFFSET  (1UL << HARDIRQ_SHIFT)
+#define NMI_OFFSET      (1UL << NMI_SHIFT)
+ 
+#ifndef PREEMPT_ACTIVE
+#define PREEMPT_ACTIVE_BITS     1
+#define PREEMPT_ACTIVE_SHIFT    (NMI_SHIFT + NMI_BITS)
+#define PREEMPT_ACTIVE  (__IRQ_MASK(PREEMPT_ACTIVE_BITS) << PREEMPT_ACTIVE_SHIFT)
 #endif
-
-#define PREEMPT_SHIFT	0
-#define SOFTIRQ_SHIFT	(PREEMPT_SHIFT + PREEMPT_BITS)
-#define HARDIRQ_SHIFT	(SOFTIRQ_SHIFT + SOFTIRQ_BITS)
-
-#define __IRQ_MASK(x)	((1UL << (x))-1)
-
-#define PREEMPT_MASK	(__IRQ_MASK(PREEMPT_BITS) << PREEMPT_SHIFT)
-#define SOFTIRQ_MASK	(__IRQ_MASK(SOFTIRQ_BITS) << SOFTIRQ_SHIFT)
-#define HARDIRQ_MASK	(__IRQ_MASK(HARDIRQ_BITS) << HARDIRQ_SHIFT)
-
-#define PREEMPT_OFFSET	(1UL << PREEMPT_SHIFT)
-#define SOFTIRQ_OFFSET	(1UL << SOFTIRQ_SHIFT)
-#define HARDIRQ_OFFSET	(1UL << HARDIRQ_SHIFT)
 
 #if PREEMPT_ACTIVE < (1 << (HARDIRQ_SHIFT + HARDIRQ_BITS))
 #error PREEMPT_ACTIVE is too low!
@@ -72,6 +77,11 @@
 #define in_irq()		(hardirq_count())
 #define in_softirq()		(softirq_count())
 #define in_interrupt()		(irq_count())
+
+/*
+ * Are we in NMI context?
+ */
+#define in_nmi()       (preempt_count() & NMI_OFFSET)
 
 #if defined(CONFIG_PREEMPT)
 # define PREEMPT_INATOMIC_BASE kernel_locked()
@@ -120,7 +130,7 @@ static inline void account_system_vtime(struct task_struct *tsk)
 #endif
 
 #if defined(CONFIG_NO_HZ) && !defined(CONFIG_CLASSIC_RCU)
-#if defined(CONFIG_TINY_RCU)
+#if defined(CONFIG_TINY_RCU) || defined(CONFIG_TINY_PREEMPT_RCU)
 extern void rcu_enter_nohz(void);
 extern void rcu_exit_nohz(void);
 
@@ -188,20 +198,24 @@ extern void irq_enter(void);
  */
 extern void irq_exit(void);
 
-#define nmi_enter()				\
-	do {					\
-		ftrace_nmi_enter();		\
-		lockdep_off();			\
-		rcu_nmi_enter();		\
-		__irq_enter();			\
+#define nmi_enter()                                            \
+	do {                                                    \
+		ftrace_nmi_enter();                             \
+		BUG_ON(in_nmi());                               \
+		add_preempt_count(NMI_OFFSET + HARDIRQ_OFFSET); \
+		lockdep_off();                                  \
+		rcu_nmi_enter();                                \
+		trace_hardirq_enter();                          \
 	} while (0)
 
-#define nmi_exit()				\
-	do {					\
-		__irq_exit();			\
-		rcu_nmi_exit();			\
-		lockdep_on();			\
-		ftrace_nmi_exit();		\
+#define nmi_exit()                                             \
+	do {                                                    \
+		trace_hardirq_exit();                           \
+		rcu_nmi_exit();                                 \
+		lockdep_on();                                   \
+		BUG_ON(!in_nmi());                              \
+		sub_preempt_count(NMI_OFFSET + HARDIRQ_OFFSET); \
+		ftrace_nmi_exit();                              \
 	} while (0)
 
 #endif /* LINUX_HARDIRQ_H */

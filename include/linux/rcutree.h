@@ -32,6 +32,7 @@
 
 struct notifier_block;
 
+extern void rcu_init(void);
 extern void rcu_sched_qs(int cpu);
 extern void rcu_bh_qs(int cpu);
 extern int rcu_needs_cpu(int cpu);
@@ -85,6 +86,8 @@ static inline void synchronize_rcu_bh_expedited(void)
 	synchronize_sched_expedited();
 }
 
+extern void rcu_barrier(void);
+
 extern void rcu_check_callbacks(int cpu, int user);
 
 extern long rcu_batches_completed(void);
@@ -108,5 +111,8 @@ static inline int rcu_blocking_is_gp(void)
 {
 	return num_online_cpus() == 1;
 }
+
+extern void rcu_scheduler_starting(void);
+extern int rcu_scheduler_active __read_mostly;
 
 #endif /* __LINUX_RCUTREE_H */
