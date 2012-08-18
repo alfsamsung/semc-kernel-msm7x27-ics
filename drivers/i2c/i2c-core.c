@@ -29,6 +29,7 @@
 #include <linux/i2c.h>
 #include <linux/init.h>
 #include <linux/idr.h>
+#include <linux/platform_device.h>
 #include <linux/mutex.h>
 #include <linux/completion.h>
 #include <linux/hardirq.h>
@@ -46,7 +47,6 @@ static DEFINE_MUTEX(core_lock);
 static DEFINE_IDR(i2c_adapter_idr);
 static LIST_HEAD(userspace_devices);
 
-static struct device_type i2c_client_type;
 static int i2c_check_addr(struct i2c_adapter *adapter, int addr);
 static int i2c_detect(struct i2c_adapter *adapter, struct i2c_driver *driver);
 
@@ -216,10 +216,10 @@ static void i2c_client_dev_release(struct device *dev)
 }
 
 static ssize_t
-show_name(struct device *dev, struct device_attribute *attr, char *buf)
+show_client_name(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	return sprintf(buf, "%s\n", dev->type == &i2c_client_type ?
-		       to_i2c_client(dev)->name : to_i2c_adapter(dev)->name);
+	struct i2c_client *client = to_i2c_client(dev);
+	return sprintf(buf, "%s\n", client->name);
 }
 
 static ssize_t
@@ -229,7 +229,7 @@ show_modalias(struct device *dev, struct device_attribute *attr, char *buf)
 	return sprintf(buf, "%s%s\n", I2C_MODULE_PREFIX, client->name);
 }
 
-static DEVICE_ATTR(name, S_IRUGO, show_name, NULL);
+static DEVICE_ATTR(name, S_IRUGO, show_client_name, NULL);
 static DEVICE_ATTR(modalias, S_IRUGO, show_modalias, NULL);
 
 static struct attribute *i2c_dev_attrs[] = {
@@ -431,6 +431,13 @@ static void i2c_adapter_dev_release(struct device *dev)
 	complete(&adap->dev_released);
 }
 
+static ssize_t
+show_adapter_name(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct i2c_adapter *adap = to_i2c_adapter(dev);
+	return sprintf(buf, "%s\n", adap->name);
+}
+
 /*
  * Let users instantiate I2C devices through sysfs. This can be used when
  * platform initialization code doesn't contain the proper data for
@@ -549,28 +556,17 @@ i2c_sysfs_delete_device(struct device *dev, struct device_attribute *attr,
 	return res;
 }
 
-static DEVICE_ATTR(new_device, S_IWUSR, NULL, i2c_sysfs_new_device);
-static DEVICE_ATTR(delete_device, S_IWUSR, NULL, i2c_sysfs_delete_device);
-
-static struct attribute *i2c_adapter_attrs[] = {
-	&dev_attr_name.attr,
-	&dev_attr_new_device.attr,
-	&dev_attr_delete_device.attr,
-	NULL
+static struct device_attribute i2c_adapter_attrs[] = {
+	__ATTR(name, S_IRUGO, show_adapter_name, NULL),
+	__ATTR(new_device, S_IWUSR, NULL, i2c_sysfs_new_device),
+	__ATTR(delete_device, S_IWUSR, NULL, i2c_sysfs_delete_device),
+	{ },
 };
 
-static struct attribute_group i2c_adapter_attr_group = {
-	.attrs		= i2c_adapter_attrs,
-};
-
-static const struct attribute_group *i2c_adapter_attr_groups[] = {
-	&i2c_adapter_attr_group,
-	NULL
-};
-
-static struct device_type i2c_adapter_type = {
-	.groups		= i2c_adapter_attr_groups,
-	.release	= i2c_adapter_dev_release,
+static struct class i2c_adapter_class = {
+	.owner                  = THIS_MODULE,
+	.name                   = "i2c-adapter",
+	.dev_attrs              = i2c_adapter_attrs,
 };
 
 #ifdef CONFIG_I2C_COMPAT
@@ -620,14 +616,24 @@ static int i2c_register_adapter(struct i2c_adapter *adap)
 	}
 
 	mutex_init(&adap->bus_lock);
+	
+	/* Add the adapter to the driver core.
+	 * If the parent pointer is not set up,
+	 * we add this adapter to the host bus.
+	 */
+	if (adap->dev.parent == NULL) {
+		adap->dev.parent = &platform_bus;
+		pr_debug("I2C adapter driver [%s] forgot to specify "
+			  "physical device\n", adap->name);
+	}
 
 	/* Set default timeout to 1 second if not already set */
 	if (adap->timeout == 0)
 		adap->timeout = HZ;
 
 	dev_set_name(&adap->dev, "i2c-%d", adap->nr);
-	adap->dev.bus = &i2c_bus_type;
-	adap->dev.type = &i2c_adapter_type;
+	adap->dev.release = &i2c_adapter_dev_release;
+	adap->dev.class = &i2c_adapter_class;
 	res = device_register(&adap->dev);
 	if (res)
 		goto out_list;
@@ -864,13 +870,9 @@ EXPORT_SYMBOL(i2c_del_adapter);
 
 static int __attach_adapter(struct device *dev, void *data)
 {
-	struct i2c_adapter *adapter;
+	struct i2c_adapter *adapter = to_i2c_adapter(dev);
 	struct i2c_driver *driver = data;
-
-	if (dev->type != &i2c_adapter_type)
-		return 0;
-	adapter = to_i2c_adapter(dev);
-
+	
 	i2c_detect(adapter, driver);
 
 	/* Legacy drivers scan i2c busses directly */
@@ -909,7 +911,8 @@ int i2c_register_driver(struct module *owner, struct i2c_driver *driver)
 	INIT_LIST_HEAD(&driver->clients);
 	/* Walk the adapters that are already present */
 	mutex_lock(&core_lock);
-	bus_for_each_dev(&i2c_bus_type, NULL, driver, __attach_adapter);
+	class_for_each_device(&i2c_adapter_class, NULL, driver,
+			      __attach_adapter);
 	mutex_unlock(&core_lock);
 
 	return 0;
@@ -918,14 +921,10 @@ EXPORT_SYMBOL(i2c_register_driver);
 
 static int __detach_adapter(struct device *dev, void *data)
 {
-	struct i2c_adapter *adapter;
+	struct i2c_adapter *adapter = to_i2c_adapter(dev);
 	struct i2c_driver *driver = data;
 	struct i2c_client *client, *_n;
-
-	if (dev->type != &i2c_adapter_type)
-		return 0;
-	adapter = to_i2c_adapter(dev);
-
+	
 	/* Remove the devices we created ourselves as the result of hardware
 	 * probing (using a driver's detect method) */
 	list_for_each_entry_safe(client, _n, &driver->clients, detected) {
@@ -953,7 +952,8 @@ static int __detach_adapter(struct device *dev, void *data)
 void i2c_del_driver(struct i2c_driver *driver)
 {
 	mutex_lock(&core_lock);
-	bus_for_each_dev(&i2c_bus_type, NULL, driver, __detach_adapter);
+	class_for_each_device(&i2c_adapter_class, NULL, driver,
+			      __detach_adapter);
 	mutex_unlock(&core_lock);
 
 	driver_unregister(&driver->driver);
@@ -1049,16 +1049,20 @@ static int __init i2c_init(void)
 		goto bus_err;
 	}
 #endif
+	retval = class_register(&i2c_adapter_class);
+	if (retval)
+		goto bus_err;
 	retval = i2c_add_driver(&dummy_driver);
 	if (retval)
 		goto class_err;
 	return 0;
 
 class_err:
+	class_unregister(&i2c_adapter_class);
 #ifdef CONFIG_I2C_COMPAT
 	class_compat_unregister(i2c_adapter_compat_class);
-bus_err:
 #endif
+bus_err:
 	bus_unregister(&i2c_bus_type);
 	return retval;
 }
@@ -1069,6 +1073,7 @@ static void __exit i2c_exit(void)
 #ifdef CONFIG_I2C_COMPAT
 	class_compat_unregister(i2c_adapter_compat_class);
 #endif
+	class_unregister(&i2c_adapter_class);
 	bus_unregister(&i2c_bus_type);
 }
 
