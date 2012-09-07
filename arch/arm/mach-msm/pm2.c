@@ -85,7 +85,8 @@ module_param_named(
 			"SMSM_POWER_MASTER_DEM %x, SMSM_MODEM_STATE %x, " \
 			"SMSM_APPS_DEM %x\n", \
 			tag, \
-			readl(APPS_CLK_SLEEP_EN), readl(APPS_PWRDOWN), \
+			__raw_readl(APPS_CLK_SLEEP_EN), \
+			__raw_readl(APPS_PWRDOWN), \
 			smsm_get_state(SMSM_POWER_MASTER_DEM), \
 			smsm_get_state(SMSM_MODEM_STATE), \
 			smsm_get_state(SMSM_APPS_DEM)); \
@@ -100,7 +101,6 @@ module_param_named(
 				msm_pm_smem_data->wakeup_reason, \
 				msm_pm_smem_data->pending_irqs); \
 	} while (0)
-
 
 /******************************************************************************
  * Sleep Modes and Parameters
@@ -375,16 +375,21 @@ enum {
 static void msm_pm_config_hw_before_power_down(void)
 {
 #if defined(CONFIG_ARCH_MSM7X30)
-	writel(1, APPS_PWRDOWN);
-	writel(4, APPS_SECOP);
+	__raw_writel(1, APPS_PWRDOWN);
+	dsb();
+	__raw_writel(4, APPS_SECOP);
 #elif defined(CONFIG_ARCH_MSM7X27)
-	writel(0x1f, APPS_CLK_SLEEP_EN);
-	writel(1, APPS_PWRDOWN);
+	__raw_writel(0x1f, APPS_CLK_SLEEP_EN);
+	dsb();
+	__raw_writel(1, APPS_PWRDOWN);
 #else
-	writel(0x1f, APPS_CLK_SLEEP_EN);
-	writel(1, APPS_PWRDOWN);
-	writel(0, APPS_STANDBY_CTL);
+	__raw_writel(0x1f, APPS_CLK_SLEEP_EN);
+	dsb();
+	__raw_writel(1, APPS_PWRDOWN);
+	dsb();
+	__raw_writel(0, APPS_STANDBY_CTL);
 #endif
+	dsb();
 }
 
 /*
@@ -393,12 +398,16 @@ static void msm_pm_config_hw_before_power_down(void)
 static void msm_pm_config_hw_after_power_up(void)
 {
 #if defined(CONFIG_ARCH_MSM7X30)
-	writel(0, APPS_SECOP);
-	writel(0, APPS_PWRDOWN);
+	__raw_writel(0, APPS_SECOP);
+	dsb();
+	__raw_writel(0, APPS_PWRDOWN);
+	dsb();
 	msm_spm_reinit();
 #else
-	writel(0, APPS_PWRDOWN);
-	writel(0, APPS_CLK_SLEEP_EN);
+	__raw_writel(0, APPS_PWRDOWN);
+	dsb();
+	__raw_writel(0, APPS_CLK_SLEEP_EN);
+	dsb();
 #endif
 }
 
@@ -408,10 +417,11 @@ static void msm_pm_config_hw_after_power_up(void)
 static void msm_pm_config_hw_before_swfi(void)
 {
 #if defined(CONFIG_ARCH_QSD8X50)
-	writel(0x1f, APPS_CLK_SLEEP_EN);
+	__raw_writel(0x1f, APPS_CLK_SLEEP_EN);
 #elif defined(CONFIG_ARCH_MSM7X27)
-	writel(0x0f, APPS_CLK_SLEEP_EN);
+	__raw_writel(0x0f, APPS_CLK_SLEEP_EN);
 #endif
+	dsb();
 }
 
 /*
@@ -502,7 +512,7 @@ static int msm_pm_poll_state(int nr_grps, struct msm_pm_polled_group *grps)
 {
 	int i, k;
 
-	for (i = 0; i < 500000; i++)
+	for (i = 0; i < 50000; i++) {
 		for (k = 0; k < nr_grps; k++) {
 			bool all_set, all_clear;
 			bool any_set, any_clear;
@@ -521,6 +531,8 @@ static int msm_pm_poll_state(int nr_grps, struct msm_pm_polled_group *grps)
 			if (all_set && all_clear && (any_set || any_clear))
 				return k;
 		}
+		udelay(50);
+	}
 
 	printk(KERN_ERR "%s failed:\n", __func__);
 	for (k = 0; k < nr_grps; k++)
@@ -667,7 +679,6 @@ static struct msm_pm_time_stats {
 };
 
 static uint32_t msm_pm_sleep_limit = SLEEP_LIMIT_NONE;
-static DECLARE_BITMAP(msm_pm_clocks_no_tcxo_shutdown, NR_CLKS);
 
 /*
  * Add the given time data to the statistics collection.
@@ -727,7 +738,6 @@ static int msm_pm_read_proc
 {
 	int i;
 	char *p = page;
-	char clk_name[16];
 
 	if (count < 1024) {
 		*start = (char *) 0;
@@ -736,13 +746,6 @@ static int msm_pm_read_proc
 	}
 
 	if (!off) {
-		SNPRINTF(p, count, "Clocks against last TCXO shutdown:\n");
-		for_each_set_bit(i, msm_pm_clocks_no_tcxo_shutdown, NR_CLKS) {
-			clk_name[0] = '\0';
-			msm_clock_get_name(i, clk_name, sizeof(clk_name));
-			SNPRINTF(p, count, "  %s (id=%d)\n", clk_name, i);
-		}
-
 		SNPRINTF(p, count, "Last power collapse voted ");
 		if (msm_pm_sleep_limit == SLEEP_LIMIT_NONE)
 			SNPRINTF(p, count, "for TCXO shutdown\n\n");
@@ -833,7 +836,6 @@ static int msm_pm_write_proc(struct file *file, const char __user *buffer,
 	}
 
 	msm_pm_sleep_limit = SLEEP_LIMIT_NONE;
-	bitmap_zero(msm_pm_clocks_no_tcxo_shutdown, NR_CLKS);
 	local_irq_restore(flags);
 
 	return count;
@@ -905,6 +907,17 @@ struct msm_pm_smem_t {
 static struct msm_pm_smem_t *msm_pm_smem_data;
 static uint32_t *msm_pm_reset_vector;
 static atomic_t msm_pm_init_done = ATOMIC_INIT(0);
+
+static int msm_pm_modem_busy(void)
+{
+	if (!(smsm_get_state(SMSM_POWER_MASTER_DEM) & DEM_MASTER_SMSM_READY)) {
+		MSM_PM_DPRINTK(MSM_PM_DEBUG_POWER_COLLAPSE,
+			KERN_INFO, "%s(): master not ready\n", __func__);
+		return -EBUSY;
+	}
+
+	return 0;
+}
 
 /*
  * Power collapse the Apps processor.  This function executes the handshake
@@ -1051,7 +1064,8 @@ static int msm_pm_power_collapse
 	MSM_PM_DPRINTK(MSM_PM_DEBUG_CLOCK, KERN_INFO,
 		"%s(): restore clock rate to %lu\n", __func__,
 		saved_acpuclk_rate);
-	if (acpuclk_set_rate(saved_acpuclk_rate, SETRATE_PC) < 0)
+	if (acpuclk_set_rate(smp_processor_id(), saved_acpuclk_rate,
+			SETRATE_PC) < 0)
 		printk(KERN_ERR "%s(): failed to restore clock rate(%lu)\n",
 			__func__, saved_acpuclk_rate);
 
@@ -1304,7 +1318,8 @@ static int msm_pm_swfi(bool ramp_acpu)
 		MSM_PM_DPRINTK(MSM_PM_DEBUG_CLOCK, KERN_INFO,
 			"%s(): restore clock rate to %lu\n", __func__,
 			saved_acpuclk_rate);
-		if (acpuclk_set_rate(saved_acpuclk_rate, SETRATE_SWFI) < 0)
+		if (acpuclk_set_rate(smp_processor_id(), saved_acpuclk_rate,
+				SETRATE_SWFI) < 0)
 			printk(KERN_ERR
 				"%s(): failed to restore clock rate(%lu)\n",
 				__func__, saved_acpuclk_rate);
@@ -1334,7 +1349,6 @@ void arch_idle(void)
 	int i;
 
 #ifdef CONFIG_MSM_IDLE_STATS
-	DECLARE_BITMAP(clk_ids, NR_CLKS);
 	int64_t t1;
 	static int64_t t2;
 	int exit_stat;
@@ -1387,7 +1401,7 @@ void arch_idle(void)
 #ifdef CONFIG_HAS_WAKELOCK
 		has_wake_lock(WAKE_LOCK_IDLE) ||
 #endif
-		!msm_irq_idle_sleep_allowed()) {
+		!msm_irq_idle_sleep_allowed() || msm_pm_modem_busy()) {
 		allow[MSM_PM_SLEEP_MODE_POWER_COLLAPSE] = false;
 		allow[MSM_PM_SLEEP_MODE_POWER_COLLAPSE_NO_XO_SHUTDOWN] = false;
 		allow[MSM_PM_SLEEP_MODE_APPS_SLEEP] = false;
@@ -1400,17 +1414,6 @@ void arch_idle(void)
 			mode->residency * 1000ULL >= timer_expiration)
 			allow[i] = false;
 	}
-
-#ifdef CONFIG_MSM_IDLE_STATS
-	ret = msm_clock_require_tcxo(clk_ids, NR_CLKS);
-#elif defined(CONFIG_CLOCK_BASED_SLEEP_LIMIT)
-	ret = msm_clock_require_tcxo(NULL, 0);
-#endif /* CONFIG_MSM_IDLE_STATS */
-
-#ifdef CONFIG_CLOCK_BASED_SLEEP_LIMIT
-	if (ret)
-		sleep_limit = SLEEP_LIMIT_NO_TCXO_SHUTDOWN;
-#endif
 
 	MSM_PM_DPRINTK(MSM_PM_DEBUG_IDLE, KERN_INFO,
 		"%s(): latency qos %d, next timer %lld, sleep limit %u\n",
@@ -1442,8 +1445,6 @@ void arch_idle(void)
 		else {
 			exit_stat = MSM_PM_STAT_IDLE_POWER_COLLAPSE;
 			msm_pm_sleep_limit = sleep_limit;
-			bitmap_copy(msm_pm_clocks_no_tcxo_shutdown, clk_ids,
-				NR_CLKS);
 		}
 #endif /* CONFIG_MSM_IDLE_STATS */
 	} else if (allow[MSM_PM_SLEEP_MODE_APPS_SLEEP]) {
@@ -1523,19 +1524,10 @@ static int msm_pm_enter(suspend_state_t state)
 	int i;
 
 #ifdef CONFIG_MSM_IDLE_STATS
-	DECLARE_BITMAP(clk_ids, NR_CLKS);
 	int64_t period = 0;
 	int64_t time = 0;
 
 	time = msm_timer_get_sclk_time(&period);
-	ret = msm_clock_require_tcxo(clk_ids, NR_CLKS);
-#elif defined(CONFIG_CLOCK_BASED_SLEEP_LIMIT)
-	ret = msm_clock_require_tcxo(NULL, 0);
-#endif /* CONFIG_MSM_IDLE_STATS */
-
-#ifdef CONFIG_CLOCK_BASED_SLEEP_LIMIT
-	if (ret)
-		sleep_limit = SLEEP_LIMIT_NO_TCXO_SHUTDOWN;
 #endif
 
 	MSM_PM_DPRINTK(MSM_PM_DEBUG_SUSPEND, KERN_INFO,
@@ -1593,6 +1585,9 @@ static int msm_pm_enter(suspend_state_t state)
 #endif
 		if (!allow[MSM_PM_SLEEP_MODE_POWER_COLLAPSE])
 			sleep_limit = SLEEP_LIMIT_NO_TCXO_SHUTDOWN;
+		
+		for (i = 0; i < 30 && msm_pm_modem_busy(); i++)
+			udelay(500);
 
 		ret = msm_pm_power_collapse(
 			false, msm_pm_max_sleep_time, sleep_limit);
@@ -1603,8 +1598,6 @@ static int msm_pm_enter(suspend_state_t state)
 		else {
 			id = MSM_PM_STAT_SUSPEND;
 			msm_pm_sleep_limit = sleep_limit;
-			bitmap_copy(msm_pm_clocks_no_tcxo_shutdown, clk_ids,
-				NR_CLKS);
 		}
 
 		if (time != 0) {
@@ -1766,4 +1759,4 @@ static int __init msm_pm_init(void)
 	return 0;
 }
 
-late_initcall(msm_pm_init);
+late_initcall_sync(msm_pm_init);

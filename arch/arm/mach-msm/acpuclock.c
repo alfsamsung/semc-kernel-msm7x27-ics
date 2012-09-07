@@ -208,10 +208,10 @@ static struct clkctl_acpu_speed pll0_960_pll1_245_pll2_1200[] = {
 	{ 1, 245760, ACPU_PLL_1, 1, 0, 122880, 1, 1,  61440 },
 	{ 1, 320000, ACPU_PLL_0, 4, 2, 160000, 1, 4, 122880 },
 	{ 0, 400000, ACPU_PLL_2, 2, 2, 133333, 2, 5, 122880 },
-	{ 1, 480000, ACPU_PLL_0, 4, 1, 160000, 2, 6, 160000 },
-	{ 1, 600000, ACPU_PLL_2, 2, 1, 200000, 2, 7, 200000 },
-	//{ 1, 652800, ACPU_PLL_0, 4, 1, 163200, 3, 7, 200000 },
-	{ 1, 691200, ACPU_PLL_0, 4, 1, 172800, 3, 7, 200000 },
+	{ 1, 480000, ACPU_PLL_0, 4, 1, 160000, 2, 6, 122880 },
+	{ 1, 600000, ACPU_PLL_2, 2, 1, 200000, 2, 7, 192000 },
+	//{ 1, 652800, ACPU_PLL_0, 4, 1, 163200, 3, 7, 192000 },
+	//{ 1, 691200, ACPU_PLL_0, 4, 1, 172800, 3, 7, 192000 },
 	{ 1, 729600, ACPU_PLL_0, 4, 1, 182400, 3, 7, 200000 },
 	{ 1, 748800, ACPU_PLL_0, 4, 1, 187200, 3, 7, 200000 },
 	{ 1, 768000, ACPU_PLL_0, 4, 1, 192000, 3, 7, 200000 },
@@ -392,16 +392,18 @@ static int pc_pll_request(unsigned id, unsigned on)
  *---------------------------------------------------------------------------*/
 
 #define POWER_COLLAPSE_KHZ 19200
-unsigned long acpuclk_power_collapse(void) {
-	int ret = acpuclk_get_rate();
-	acpuclk_set_rate(POWER_COLLAPSE_KHZ, SETRATE_PC);
+unsigned long acpuclk_power_collapse(void)
+{
+	int ret = acpuclk_get_rate(smp_processor_id());
+	acpuclk_set_rate(smp_processor_id(), POWER_COLLAPSE_KHZ, SETRATE_PC);
 	return ret;
 }
 
 #define WAIT_FOR_IRQ_KHZ 128000
-unsigned long acpuclk_wait_for_irq(void) {
-	int ret = acpuclk_get_rate();
-	acpuclk_set_rate(WAIT_FOR_IRQ_KHZ, SETRATE_SWFI);
+unsigned long acpuclk_wait_for_irq(void)
+{
+	int ret = acpuclk_get_rate(smp_processor_id());
+	acpuclk_set_rate(smp_processor_id(), WAIT_FOR_IRQ_KHZ, SETRATE_SWFI);
 	return ret;
 }
 
@@ -485,7 +487,7 @@ static void acpuclk_set_div(const struct clkctl_acpu_speed *hunt_s)
 	}
 }
 
-int acpuclk_set_rate(unsigned long rate, enum setrate_reason reason)
+int acpuclk_set_rate(int cpu, unsigned long rate, enum setrate_reason reason)
 {
 	uint32_t reg_clkctl;
 	struct clkctl_acpu_speed *cur_s, *tgt_s, *strt_s;
@@ -713,7 +715,7 @@ static void __init acpuclk_init(void)
 	pr_info("ACPU running at %d KHz\n", speed->a11clk_khz);
 }
 
-unsigned long acpuclk_get_rate(void)
+unsigned long acpuclk_get_rate(int cpu)
 {
 	WARN_ONCE(drv_state.current_speed == NULL,
 		  "acpuclk_get_rate: not initialized\n");
