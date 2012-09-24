@@ -217,6 +217,9 @@ int kobject_set_name_vargs(struct kobject *kobj, const char *fmt,
 {
 	const char *old_name = kobj->name;
 	char *s;
+	
+	if (kobj->name && !fmt)
+		return 0;
 
 	kobj->name = kvasprintf(GFP_KERNEL, fmt, vargs);
 	if (!kobj->name)
@@ -786,15 +789,20 @@ static struct kobj_type kset_ktype = {
  * If the kset was not able to be created, NULL will be returned.
  */
 static struct kset *kset_create(const char *name,
-				struct kset_uevent_ops *uevent_ops,
+				const struct kset_uevent_ops *uevent_ops,
 				struct kobject *parent_kobj)
 {
 	struct kset *kset;
+	int retval;
 
 	kset = kzalloc(sizeof(*kset), GFP_KERNEL);
 	if (!kset)
 		return NULL;
-	kobject_set_name(&kset->kobj, name);
+	retval = kobject_set_name(&kset->kobj, name);
+	if (retval) {
+		kfree(kset);
+		return NULL;
+	}
 	kset->uevent_ops = uevent_ops;
 	kset->kobj.parent = parent_kobj;
 
@@ -824,7 +832,7 @@ static struct kset *kset_create(const char *name,
  * If the kset was not able to be created, NULL will be returned.
  */
 struct kset *kset_create_and_add(const char *name,
-				 struct kset_uevent_ops *uevent_ops,
+				 const struct kset_uevent_ops *uevent_ops,
 				 struct kobject *parent_kobj)
 {
 	struct kset *kset;
@@ -841,6 +849,107 @@ struct kset *kset_create_and_add(const char *name,
 	return kset;
 }
 EXPORT_SYMBOL_GPL(kset_create_and_add);
+
+static DEFINE_SPINLOCK(kobj_ns_type_lock);
+static const struct kobj_ns_type_operations *kobj_ns_ops_tbl[KOBJ_NS_TYPES];
+
+int kobj_ns_type_register(const struct kobj_ns_type_operations *ops)
+{
+       enum kobj_ns_type type = ops->type;
+       int error;
+
+       spin_lock(&kobj_ns_type_lock);
+
+       error = -EINVAL;
+       if (type >= KOBJ_NS_TYPES)
+               goto out;
+
+       error = -EINVAL;
+       if (type <= KOBJ_NS_TYPE_NONE)
+               goto out;
+
+       error = -EBUSY;
+       if (kobj_ns_ops_tbl[type])
+               goto out;
+
+       error = 0;
+       kobj_ns_ops_tbl[type] = ops;
+
+out:
+       spin_unlock(&kobj_ns_type_lock);
+       return error;
+}
+
+int kobj_ns_type_registered(enum kobj_ns_type type)
+{
+       int registered = 0;
+
+       spin_lock(&kobj_ns_type_lock);
+       if ((type > KOBJ_NS_TYPE_NONE) && (type < KOBJ_NS_TYPES))
+               registered = kobj_ns_ops_tbl[type] != NULL;
+       spin_unlock(&kobj_ns_type_lock);
+
+       return registered;
+}
+
+const struct kobj_ns_type_operations *kobj_child_ns_ops(struct kobject *parent)
+{
+       const struct kobj_ns_type_operations *ops = NULL;
+
+       if (parent && parent->ktype->child_ns_type)
+               ops = parent->ktype->child_ns_type(parent);
+
+       return ops;
+}
+
+const struct kobj_ns_type_operations *kobj_ns_ops(struct kobject *kobj)
+{
+       return kobj_child_ns_ops(kobj->parent);
+}
+
+
+const void *kobj_ns_current(enum kobj_ns_type type)
+{
+       const void *ns = NULL;
+
+       spin_lock(&kobj_ns_type_lock);
+       if ((type > KOBJ_NS_TYPE_NONE) && (type < KOBJ_NS_TYPES) &&
+           kobj_ns_ops_tbl[type])
+               ns = kobj_ns_ops_tbl[type]->current_ns();
+       spin_unlock(&kobj_ns_type_lock);
+
+       return ns;
+}
+
+const void *kobj_ns_netlink(enum kobj_ns_type type, struct sock *sk)
+{
+       const void *ns = NULL;
+
+       spin_lock(&kobj_ns_type_lock);
+       if ((type > KOBJ_NS_TYPE_NONE) && (type < KOBJ_NS_TYPES) &&
+           kobj_ns_ops_tbl[type])
+               ns = kobj_ns_ops_tbl[type]->netlink_ns(sk);
+       spin_unlock(&kobj_ns_type_lock);
+
+       return ns;
+}
+
+const void *kobj_ns_initial(enum kobj_ns_type type)
+{
+       const void *ns = NULL;
+
+       spin_lock(&kobj_ns_type_lock);
+       if ((type > KOBJ_NS_TYPE_NONE) && (type < KOBJ_NS_TYPES) &&
+           kobj_ns_ops_tbl[type])
+               ns = kobj_ns_ops_tbl[type]->initial_ns();
+       spin_unlock(&kobj_ns_type_lock);
+
+       return ns;
+}
+
+void kobj_ns_exit(enum kobj_ns_type type, const void *ns)
+{
+}
 
 EXPORT_SYMBOL(kobject_get);
 EXPORT_SYMBOL(kobject_put);

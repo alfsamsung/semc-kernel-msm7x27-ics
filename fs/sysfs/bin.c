@@ -144,14 +144,9 @@ static ssize_t write(struct file *file, const char __user *userbuf,
 			count = size - offs;
 	}
 
-	temp = kmalloc(count, GFP_KERNEL);
-	if (!temp)
-		return -ENOMEM;
-
-	if (copy_from_user(temp, userbuf, count)) {
-		count = -EFAULT;
-		goto out_free;
-	}
+	temp = memdup_user(userbuf, count);
+	if (IS_ERR(temp))
+		return PTR_ERR(temp);
 
 	mutex_lock(&bb->mutex);
 
@@ -163,7 +158,6 @@ static ssize_t write(struct file *file, const char __user *userbuf,
 	if (count > 0)
 		*off = offs + count;
 
-out_free:
 	kfree(temp);
 	return count;
 }

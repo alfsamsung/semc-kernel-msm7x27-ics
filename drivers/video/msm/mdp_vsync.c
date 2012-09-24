@@ -1,4 +1,4 @@
-/* Copyright (c) 2008-2009, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2008-2009, 2012 Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -67,7 +67,6 @@ extern int vsync_mode;
 
 #ifdef MDP_HW_VSYNC
 static struct clk *mdp_vsync_clk;
-#endif
 int vsync_above_th = 4;
 int vsync_start_th = 1;
 int vsync_load_cnt;
@@ -78,7 +77,6 @@ DEFINE_MUTEX(vsync_timer_lock);
 static struct msm_fb_data_type *vsync_mfd;
 static unsigned char timer_shutdown_flag;
 
-#ifdef MDP_HW_VSYNC
 void mdp_hw_vsync_clk_enable(struct msm_fb_data_type *mfd)
 {
 	if (vsync_clk_status == 1)
@@ -102,15 +100,12 @@ void mdp_hw_vsync_clk_disable(struct msm_fb_data_type *mfd)
 	}
 	mutex_unlock(&vsync_clk_lock);
 }
-#endif
 
 static void mdp_set_vsync(unsigned long data);
 void mdp_vsync_clk_enable(void)
 {
 	if (vsync_mfd) {
-#ifdef MDP_HW_VSYNC
 		mdp_hw_vsync_clk_enable(vsync_mfd);
-#endif
 		if (!vsync_mfd->vsync_resync_timer.function) {
 			mdp_set_vsync((unsigned long) vsync_mfd);
 		}
@@ -130,11 +125,10 @@ void mdp_vsync_clk_disable(void)
 			mutex_unlock(&vsync_timer_lock);
 			vsync_mfd->vsync_resync_timer.function = NULL;
 		}
-#ifdef MDP_HW_VSYNC
 		mdp_hw_vsync_clk_disable(vsync_mfd);
-#endif
 	}
 }
+#endif
 
 static void mdp_set_vsync(unsigned long data)
 {
@@ -246,7 +240,8 @@ static void mdp_set_sync_cfg_1(struct msm_fb_data_type *mfd, int vsync_cnt)
 #endif
 #endif
 
-void mdp_config_vsync(struct msm_fb_data_type *mfd)
+void mdp_config_vsync(struct platform_device *pdev,
+	struct msm_fb_data_type *mfd)
 {
 	/* vsync on primary lcd only for now */
 	if ((mfd->dest != DISPLAY_LCD) || (mfd->panel_info.pdest != DISPLAY_1)
@@ -269,7 +264,7 @@ void mdp_config_vsync(struct msm_fb_data_type *mfd)
 
 #ifdef MDP_HW_VSYNC
 		if (mdp_vsync_clk == NULL)
-			mdp_vsync_clk = clk_get(NULL, "mdp_vsync_clk");
+			mdp_vsync_clk = clk_get(&pdev->dev, "vsync_clk");
 
 		if (IS_ERR(mdp_vsync_clk)) {
 			printk(KERN_ERR "error: can't get mdp_vsync_clk!\n");

@@ -126,7 +126,7 @@ static int blk_ioctl_discard(struct block_device *bdev, uint64_t start,
 		return -EINVAL;
 
 	return blkdev_issue_discard(bdev, start, len, GFP_KERNEL,
-				    DISCARD_FL_WAIT);
+				    BLKDEV_DISCARD_SECURE);
 }
 
 static int put_ushort(unsigned long arg, unsigned short val)

@@ -17,7 +17,7 @@ static inline void frozen_process(void)
 {
 	if (!unlikely(current->flags & PF_NOFREEZE)) {
 		current->flags |= PF_FROZEN;
-		wmb();
+		smp_wmb();
 	}
 	clear_freeze_flag(current);
 }
@@ -43,6 +43,9 @@ void refrigerator(void)
 	spin_lock_irq(&current->sighand->siglock);
 	recalc_sigpending(); /* We sent fake signal, clean it up */
 	spin_unlock_irq(&current->sighand->siglock);
+	
+	/* prevent accounting of that task to load */
+	current->flags |= PF_FREEZING;
 
 	for (;;) {
 		set_current_state(TASK_UNINTERRUPTIBLE);
@@ -50,6 +53,10 @@ void refrigerator(void)
 			break;
 		schedule();
 	}
+	
+	/* Remove the accounting blocker */
+	current->flags &= ~PF_FREEZING;
+
 	pr_debug("%s left refrigerator\n", current->comm);
 	__set_current_state(save);
 }
@@ -86,7 +93,7 @@ bool freeze_task(struct task_struct *p, bool sig_only)
 	 * the task as frozen and next clears its TIF_FREEZE.
 	 */
 	if (!freezing(p)) {
-		rmb();
+		smp_rmb();
 		if (frozen(p))
 			return false;
 
@@ -97,8 +104,13 @@ bool freeze_task(struct task_struct *p, bool sig_only)
 	}
 
 	if (should_send_signal(p)) {
-		if (!signal_pending(p))
-			fake_signal_wake_up(p);
+		fake_signal_wake_up(p);
+		/*
+		 * fake_signal_wake_up() goes through p's scheduler
+		 * lock and guarantees that TASK_STOPPED/TRACED ->
+		 * TASK_RUNNING transition can't race with task state
+		 * testing in try_to_freeze_tasks().
+		 */
 	} else if (sig_only) {
 		return false;
 	} else {

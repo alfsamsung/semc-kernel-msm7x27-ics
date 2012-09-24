@@ -159,8 +159,6 @@ extern unsigned char mddi_timer_shutdown_flag;
 extern struct mutex mddi_timer_lock;
  
 void mddi_init(void);
-extern int irq_enabled;
-
 void mddi_powerdown(void);
 
 void mddi_host_start_ext_display(void);
@@ -246,13 +244,15 @@ void mddi_assign_max_pkt_dimensions(uint16 image_cols,
 				    uint16 image_rows,
 				    uint16 bpp,
 				    uint16 *max_cols, uint16 * max_rows);
+#ifdef MDDI_HOST_WINDOW_WORKAROUND
 uint16 mddi_assign_pkt_height(uint16 pkt_width, uint16 pkt_height, uint16 bpp);
+#endif
 void mddi_queue_reverse_encapsulation(boolean wait);
 int mddi_client_power(unsigned int client_id);
 void mddi_disable(int lock);
 void mddi_window_adjust(struct msm_fb_data_type *mfd,uint16 x1, uint16 x2, uint16 y1, uint16 y2);
 void mddi_send_fw_link_skew_cal(mddi_host_type host_idx);
 int pmdh_clk_func(int enable);
-boolean mddi_video_stream_black_display(uint32 x0, uint32 y0,
-			uint32 width, uint32 height, mddi_host_type host);
+//boolean mddi_video_stream_black_display(uint32 x0, uint32 y0,
+//			uint32 width, uint32 height, mddi_host_type host);
 #endif /* MDDIHOST_H */

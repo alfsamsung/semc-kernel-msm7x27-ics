@@ -1047,6 +1047,10 @@ static void mddi_process_rev_packets(void)
 				pmhctl->log_parms.reg_read_cnt++;
 			}
 			break;
+		
+		case INVALID_PKT_TYPE:  /* 0xFFFF */
+			MDDI_MSG_ERR("!!!INVALID_PKT_TYPE rcvd\n");
+			break;
 
 		default:	/* any other packet */
 			{
@@ -1055,10 +1059,12 @@ static void mddi_process_rev_packets(void)
 				for (hdlr = 0; hdlr < MAX_MDDI_REV_HANDLERS;
 				     hdlr++) {
 					if (mddi_rev_pkt_handler[hdlr].
+							handler == NULL)
+						continue;
+					if (mddi_rev_pkt_handler[hdlr].
 					    pkt_type ==
 					    rev_pkt_ptr->packet_type) {
-						(*
-						 (mddi_rev_pkt_handler[hdlr].
+						(*(mddi_rev_pkt_handler[hdlr].
 						  handler)) (rev_pkt_ptr);
 					/* pmhctl->rev_state = MDDI_REV_IDLE; */
 						break;
@@ -1643,6 +1649,23 @@ void mddi_host_configure_interrupts(mddi_host_type host_idx, boolean enable)
 
 }
 
+/*
+ * mddi_host_client_cnt_reset:
+ * reset client_status_cnt to 0 to make sure host does not
+ * send RTD cmd to client right after resume before mddi
+ * client be powered up. this fix "MDDI RTD Failure" problem
+ */
+void mddi_host_client_cnt_reset(void)
+{
+	unsigned long flags;
+	mddi_host_cntl_type *pmhctl;
+
+	pmhctl = &(mhctl[MDDI_HOST_PRIM]);
+	spin_lock_irqsave(&mddi_host_spin_lock, flags);
+	pmhctl->client_status_cnt = 0;
+	spin_unlock_irqrestore(&mddi_host_spin_lock, flags);
+}
+
 static void mddi_host_powerup(mddi_host_type host_idx)
 {
 	mddi_host_cntl_type *pmhctl = &(mhctl[host_idx]);
@@ -1825,6 +1848,7 @@ uint32 mddi_get_client_id(void)
 	mddi_host_cntl_type *pmhctl;
 	unsigned long flags;
 	uint16 saved_rev_pkt_size;
+	int ret;
 
 	if (!client_detection_try) {
 		/* Toshiba display requires larger drive_lo value */
@@ -1877,6 +1901,10 @@ uint32 mddi_get_client_id(void)
 
 		if (!mddi_client_id)
 			mddi_disable(1);
+		
+		ret = mddi_client_power(mddi_client_id);
+		if (ret < 0)
+			MDDI_MSG_ERR("mddi_client_power return %d", ret);
 	}
 
 #if 0

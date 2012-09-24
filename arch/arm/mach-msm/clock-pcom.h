@@ -1,4 +1,4 @@
-/* Copyright (c) 2009, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2009-2011, Code Aurora Forum. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -138,7 +138,8 @@
 
 
 struct clk_ops;
-extern struct clk_ops clk_ops_pcom;
+extern struct clk_ops clk_ops_remote;
+enum clk_reset_action;
 
 int pc_clk_reset(unsigned id, enum clk_reset_action action);
 
@@ -146,7 +147,7 @@ int pc_clk_reset(unsigned id, enum clk_reset_action action);
 	.name = clk_name, \
 	.id = P_##clk_id, \
 	.remote_id = P_##clk_id, \
-	.ops = &clk_ops_pcom, \
+	.ops = &clk_ops_remote, \
 	.flags = clk_flags, \
 	.dev = clk_dev, \
 	.dbg_name = #clk_id, \

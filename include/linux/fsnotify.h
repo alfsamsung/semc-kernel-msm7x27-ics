@@ -38,11 +38,12 @@ static inline void fsnotify_d_move(struct dentry *entry)
  * fsnotify_move - file old_name at old_dir was moved to new_name at new_dir
  */
 static inline void fsnotify_move(struct inode *old_dir, struct inode *new_dir,
-				 const char *old_name, const char *new_name,
+				 const char *old_name, 
 				 int isdir, struct inode *target, struct dentry *moved)
 {
 	struct inode *source = moved->d_inode;
 	u32 cookie = inotify_get_cookie();
+	const char *new_name = moved->d_name.name;
 
 	if (old_dir == new_dir)
 		inode_dir_notify(old_dir, DN_RENAME);

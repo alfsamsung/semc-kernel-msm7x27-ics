@@ -46,6 +46,7 @@
 #include <mach/rpc_pmapp.h>
 #include <mach/msm_serial_hs.h>
 #include <mach/memory.h>
+#include <mach/socinfo.h>
 
 #include <linux/mtd/nand.h>
 #include <linux/mtd/partitions.h>
@@ -54,7 +55,6 @@
 #include <mach/camera.h>
 
 #include "devices.h"
-#include "socinfo.h"
 #include "board-delta.h"
 #include "msm-keypad-devices.h"
 #include "board-delta-keypad.h"
@@ -1054,7 +1054,7 @@ static struct resource kgsl_3d0_resources[] = {
 	},
 };
 
-static struct kgsl_device_platform_data kgsl_3d0_pdata = {
+static struct kgsl_device_platform_data kgsl_3d0_pdata;/* = {
 	.pwr_data = {
 	.pwrlevel = {
 		{
@@ -1087,7 +1087,7 @@ static struct kgsl_device_platform_data kgsl_3d0_pdata = {
 	.clk = "imem_clk",
 	.pclk = NULL,
 	},
-};	
+};	*/
 
 static struct platform_device msm_kgsl_3d0 = {
 	.name = "kgsl-3d0",
@@ -1937,6 +1937,7 @@ static void hitachi_hvga_lcd_power_off(void)
 	gpio_set_value(GPIO_MSM_MDDI_XRES, 0);
 	mdelay(130); /* spec > 120 ms */
 	vreg_disable(vreg_vlcd);
+	//mdelay(10);  //ALFS test
 	vreg_disable(vreg_vlcd_io);
 }
 
@@ -1945,7 +1946,7 @@ static void hitachi_hvga_lcd_exit_deep_standby(void)
 	gpio_set_value(GPIO_MSM_MDDI_XRES, 0);
 	mdelay(4); /* spec: > 200 us */
 	gpio_set_value(GPIO_MSM_MDDI_XRES, 1);
-	mdelay(21); /* spec: > 10 ms */
+	mdelay(14); /* spec: > 10 ms */
 }
 
 static struct panel_data_ext hitachi_hvga_panel_ext = {
@@ -2199,7 +2200,7 @@ static struct msm_acpu_clock_platform_data msm7x27_clock_data = {
 	.max_speed_delta_khz = 400000,	//256000 alf ny 400000
 	.vdd_switch_time_us = 62,
 	.max_axi_khz = 200000,
-//	.max_axi_khz = 128000,
+//org	.max_axi_khz = 160000,
 };
 
 void msm_serial_debug_init(unsigned int base, int irq,
@@ -2584,33 +2585,30 @@ static void __init msm7x2x_init(void)
 	/* Toggle WLAN ENABLE */
 	wlan_init_seq();
 
-#if defined(CONFIG_MSM_SERIAL_DEBUGGER)
-	msm_serial_debug_init(MSM_UART3_PHYS, INT_UART3,
-			&msm_device_uart3.dev, 1);
-#endif
 	if (cpu_is_msm7x27())
 		msm7x27_clock_data.max_axi_khz = 200000;
 
 	msm_acpu_clock_init(&msm7x27_clock_data);
 	/*'OLD' kgsl_pdata.high_axi_3d = clk_get_max_axi_khz();*/
-	//kgsl_3d0_pdata.pwr_data.pwrlevel[0].bus_freq = clk_get_max_axi_khz() * 1000;
+	kgsl_3d0_pdata.pwr_data.pwrlevel[0].bus_freq = (clk_get_max_axi_khz()) * 1000;
 	
 	/* This value has been set to 160000 for power savings. */
 	/* OEMs may modify the value at their discretion for performance */
 	/* The appropriate maximum replacement for 160000 is: */
-	/* msm7x2x_clock_data.max_axi_khz */
-	//kgsl_3d0_pdata.pwr_data.pwrlevel[0].gpu_freq = 0;
+	/*  clk_get_max_axi_khz()  */
+	
+	kgsl_3d0_pdata.pwr_data.pwrlevel[0].gpu_freq = 0;
 	//kgsl_3d0_pdata.pwr_data.pwrlevel[0].bus_freq = 160000000;
-	//kgsl_3d0_pdata.pwr_data.init_level = 0;
-	//kgsl_3d0_pdata.pwr_data.num_levels = 1;
+	kgsl_3d0_pdata.pwr_data.init_level = 0;
+	kgsl_3d0_pdata.pwr_data.num_levels = 1;
 	/* 7x27 doesn't allow graphics clocks to be run asynchronously to */
 	/* the AXI bus */
-	//kgsl_3d0_pdata.pwr_data.set_grp_async = NULL;
-	//kgsl_3d0_pdata.pwr_data.idle_timeout = HZ/5;
+	kgsl_3d0_pdata.pwr_data.set_grp_async = NULL;
+	kgsl_3d0_pdata.pwr_data.idle_timeout = HZ/5;
 	// //kgsl_3d0_pdata.pwr_data.nap_allowed = true;
-	//kgsl_3d0_pdata.clk.name.clk = "grp_clk";
-	//kgsl_3d0_pdata.clk.name.pclk = "grp_pclk";
-	//kgsl_3d0_pdata.imem_clk_name.clk = "imem_clk";
+	kgsl_3d0_pdata.clk.name.clk = "grp_clk";
+	kgsl_3d0_pdata.clk.name.pclk = "grp_pclk";
+	kgsl_3d0_pdata.imem_clk_name.clk = "imem_clk";
 	
 //#ifdef CONFIG_KGSL_PER_PROCESS_PAGE_TABLE
 	//kgsl_pdata.pt_va_size = SZ_32M;
@@ -2744,15 +2742,18 @@ static void __init msm7x2x_map_io(void)
 #ifdef CONFIG_CACHE_L2X0
 	/* 7x27 has 256KB L2 cache:
 	    64Kb/Way and 4-Way Associativity;
-		evmon/parity/share disabled. */
-	if ((SOCINFO_VERSION_MAJOR(socinfo_get_version()) > 1)
-			|| ((SOCINFO_VERSION_MAJOR(socinfo_get_version()) == 1)
-			&& (SOCINFO_VERSION_MINOR(socinfo_get_version()) >= 3)))
-			/* R/W latency: 4 cycles; */
-			l2x0_init(MSM_L2CC_BASE, 0x0006801B, 0xfe000000);
-		else
-			/* R/W latency: 3 cycles; */
-			l2x0_init(MSM_L2CC_BASE, 0x00068012, 0xfe000000);
+	    evmon/parity/share disabled.
+	    Shakira X8= v3, id=43, ver=0.0, raw_id=0, raw_ver=0, hw_plat=0*/
+	//if ((SOCINFO_VERSION_MAJOR(socinfo_get_version()) > 1)
+		//|| ((SOCINFO_VERSION_MAJOR(socinfo_get_version()) == 1)
+		//&& (SOCINFO_VERSION_MINOR(socinfo_get_version()) >= 3)))
+	
+		/* R/W latency: 4 cycles; For version >1 or v1 and minor >= 3*/
+		l2x0_init(MSM_L2CC_BASE, 0x0006801B, 0xfe000000);
+	//else
+		/* R/W latency: 3 cycles; */
+		//l2x0_init(MSM_L2CC_BASE, 0x00068012, 0xfe000000);
+
 #endif
 }
 

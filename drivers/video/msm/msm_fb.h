@@ -142,6 +142,7 @@ struct msm_fb_data_type {
 	__u32 bl_level;
 
 	struct platform_device *pdev;
+	struct platform_device *panel_pdev;
 
 	__u32 var_xres;
 	__u32 var_yres;
@@ -153,9 +154,11 @@ struct msm_fb_data_type {
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
 	struct early_suspend early_suspend;
+#ifdef CONFIG_FB_MSM_MDDI
 	struct early_suspend mddi_early_suspend;
 	struct early_suspend mddi_ext_early_suspend;
 #endif
+#endif	
 	u32 mdp_fb_page_protection;
 	
 	struct clk *ebi1_clk;
@@ -168,10 +171,9 @@ struct msm_fb_data_type {
 struct dentry *msm_fb_get_debugfs_root(void);
 void msm_fb_debugfs_file_create(struct dentry *root, const char *name,
 				u32 *var);
-void msm_fb_set_backlight(struct msm_fb_data_type *mfd, __u32 bkl_lvl,
-				u32 save);
+void msm_fb_set_backlight(struct msm_fb_data_type *mfd, __u32 bkl_lvl);
 
-void msm_fb_add_device(struct platform_device *pdev);
+struct platform_device *msm_fb_add_device(struct platform_device *pdev);
 
 int msm_fb_detect_client(const char *name);
 

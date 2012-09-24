@@ -447,6 +447,8 @@ static int mddi_toshiba_lcd_on(struct platform_device *pdev)
 {
 	DBG(KERN_INFO, LEVEL_TRACE, "%s %s enter. lcd_state: %d\n",
 			DBG_STR, __func__, lcd_state);
+	
+	mddi_host_client_cnt_reset();  //ALFS not sure where this belongs
 
 	mutex_lock(&mddi_mutex);
 

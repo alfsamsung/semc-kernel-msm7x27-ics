@@ -91,6 +91,6 @@ int ext4_sync_file(struct file *file, struct dentry *dentry, int datasync)
 	if (jbd2_log_start_commit(journal, commit_tid))
 		jbd2_log_wait_commit(journal, commit_tid);
 	else if (journal->j_flags & JBD2_BARRIER)
-		blkdev_issue_flush(inode->i_sb->s_bdev, NULL);
+		blkdev_issue_flush(inode->i_sb->s_bdev, GFP_KERNEL, NULL);
 	return ret;
 }

@@ -325,8 +325,6 @@ extern void tty_write_flush(struct tty_struct *);
 
 extern struct ktermios tty_std_termios;
 
-extern int kmsg_redirect;
-
 extern void console_init(void);
 extern int vcs_init(void);
 
@@ -492,6 +490,9 @@ static inline void tty_audit_push_task(struct task_struct *tsk,
 }
 #endif
 
+/* tty_io.c */
+extern int __init tty_init(void);
+
 /* tty_ioctl.c */
 extern int n_tty_ioctl_helper(struct tty_struct *tty, struct file *file,
 		       unsigned int cmd, unsigned long arg);
@@ -512,6 +513,9 @@ extern void console_print(const char *);
 
 extern int vt_ioctl(struct tty_struct *tty, struct file *file,
 		    unsigned int cmd, unsigned long arg);
+
+extern long vt_compat_ioctl(struct tty_struct *tty, struct file * file,
+		      unsigned int cmd, unsigned long arg);
 
 #endif /* __KERNEL__ */
 #endif

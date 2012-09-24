@@ -267,9 +267,9 @@ static void hitachi_lcd_driver_init(struct platform_device *pdev)
 		hitachi_lcd_window_address_set(LCD_REG_PAGE_ADDRESS,
 				0, panel->panel_info.yres - 1);
 		/* Replace display internal random data with black pixels */
-		mddi_video_stream_black_display(0, 0, panel->panel_info.xres,
-				panel->panel_info.yres, MDDI_HOST_PRIM);
-		mddi_wait(100); //ALFS test
+		//mddi_video_stream_black_display(0, 0, panel->panel_info.xres,
+		//		panel->panel_info.yres, MDDI_HOST_PRIM);
+
 }
 
 static void hitachi_lcd_window_adjust(uint16 x1, uint16 x2,
@@ -280,16 +280,16 @@ static void hitachi_lcd_window_adjust(uint16 x1, uint16 x2,
 
 	mutex_lock(&mddi_mutex);
 
-	if ((panel_ids.revision_id & 0xFF) <  0x02) {
+	/*if ((panel_ids.revision_id & 0xFF) <  0x02) {*/
 		/* Temp solution for cut 1 & 2 HW sample */
-		DBG(KERN_INFO, LEVEL_TRACE, "%s (column) [%d, %d]\n",
+		/*DBG(KERN_INFO, LEVEL_TRACE, "%s (column) [%d, %d]\n",
 				   __func__, x1, x2);
 		hitachi_lcd_window_address_set(LCD_REG_COLUMN_ADDRESS, x1, x2);
 
 		DBG(KERN_INFO, LEVEL_TRACE, "%s (page) [%d, %d]\n",
 				   __func__, y1, y2);
 		hitachi_lcd_window_address_set(LCD_REG_PAGE_ADDRESS, y1, y2);
-	} else {
+	} else {	/*  //ALFS TEST this fixed screen cut/displace on boot
 		/* cut 3 and up */
 		if (lcd_data.last_window.x1 != x1 ||
 					 lcd_data.last_window.x2 != x2) {
@@ -307,7 +307,7 @@ static void hitachi_lcd_window_adjust(uint16 x1, uint16 x2,
 								y1, y2);
 		}
 		write_reg_16(0x3C, 0, 0, 0, 0, 1);
-	}
+	//}
 
 	mutex_unlock(&mddi_mutex);
 }
@@ -407,6 +407,8 @@ static void hitachi_power_off(struct platform_device *pdev)
 static int mddi_hitachi_lcd_on(struct platform_device *pdev)
 {
 	DBG(KERN_INFO, LEVEL_TRACE, DBG_STR"%s [%d]\n", __func__, lcd_state);
+	
+	mddi_host_client_cnt_reset();  //ALFS not sure where this belongs
 
 	mutex_lock(&mddi_mutex);
 	
@@ -898,7 +900,7 @@ static int mddi_hitachi_hvga_lcd_probe(struct platform_device *pdev)
 	panel_data = (struct msm_fb_panel_data *)pdev->dev.platform_data;
 
 	/* Todo: Remove. Fix for 2nd cut driver IC bug */
-	//panel_data->panel_ext->use_dma_edge_pixels_fix = 0;
+	panel_data->panel_ext->use_dma_edge_pixels_fix = 0;
 
 	if (!check_panel_ids()) {
 		printk(KERN_INFO "%s Found display with cell ID = 0x%x, "
@@ -923,7 +925,7 @@ static int mddi_hitachi_hvga_lcd_probe(struct platform_device *pdev)
 
 		/* Todo: Remove. Fix for 2nd cut driver IC bug */
 		//if ((panel_ids.revision_id & 0xFF) < 0x02)
-		//	panel_data->panel_ext->use_dma_edge_pixels_fix = 1;
+			panel_data->panel_ext->use_dma_edge_pixels_fix = 1;
 
 		/* Add mfd on driver_data */
 		msm_fb_add_device(pdev);

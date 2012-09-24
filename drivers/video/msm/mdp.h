@@ -307,6 +307,12 @@ struct mdp_dma_data {
 #endif
 #endif
 
+//ALFS test hitachi screen cuts
+/*
+#ifdef CONFIG_FB_MSM_MDDI_HITACHI_HVGA_LCD
+#define MDDI_HOST_WINDOW_WORKAROUND
+#endif */
+
 /*
  * 0x0018 MDP VSYNC THREASH
  */
@@ -648,7 +654,8 @@ int mdp_ppp_blit(struct fb_info *info, struct mdp_blit_req *req);
 void mdp_lcd_update_workqueue_handler(struct work_struct *work);
 void mdp_vsync_resync_workqueue_handler(struct work_struct *work);
 void mdp_dma2_update(struct msm_fb_data_type *mfd);
-void mdp_config_vsync(struct msm_fb_data_type *);
+void mdp_config_vsync(struct platform_device *pdev,
+	struct msm_fb_data_type *mfd);
 uint32 mdp_get_lcd_line_counter(struct msm_fb_data_type *mfd);
 enum hrtimer_restart mdp_dma2_vsync_hrtimer_handler(struct hrtimer *ht);
 void mdp_set_scale(MDPIBUF *iBuf,
@@ -676,6 +683,7 @@ void mdp_dma3_update(struct msm_fb_data_type *mfd);
 int mdp_lcdc_on(struct platform_device *pdev);
 int mdp_lcdc_off(struct platform_device *pdev);
 void mdp_lcdc_update(struct msm_fb_data_type *mfd);
+
 int mdp_hw_cursor_update(struct fb_info *info, struct fb_cursor *cursor);
 void mdp_enable_irq(uint32 term);
 void mdp_disable_irq(uint32 term);

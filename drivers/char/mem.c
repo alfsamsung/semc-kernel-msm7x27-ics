@@ -725,10 +725,13 @@ static ssize_t read_zero(struct file * file, char __user * buf,
 
 		if (chunk > PAGE_SIZE)
 			chunk = PAGE_SIZE;	/* Just for latency reasons */
-		unwritten = clear_user(buf, chunk);
+		unwritten = __clear_user(buf, chunk);
 		written += chunk - unwritten;
 		if (unwritten)
 			break;
+		/* Consider changing this to just 'signal_pending()' with lots of testing */
+		if (fatal_signal_pending(current))
+			return written ? written : -EINTR;
 		buf += chunk;
 		count -= chunk;
 		cond_resched();
@@ -1017,7 +1020,7 @@ static int __init chr_dev_init(void)
 			      MKDEV(MEM_MAJOR, devlist[i].minor), NULL,
 			      devlist[i].name);
 
-	return 0;
+	return tty_init();
 }
 
 fs_initcall(chr_dev_init);

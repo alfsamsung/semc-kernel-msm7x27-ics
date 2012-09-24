@@ -1,4 +1,4 @@
-/* Copyright (c) 2009, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2009-2011, Code Aurora Forum. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -61,7 +61,7 @@
 
 #include <linux/types.h>
 #include <linux/sysdev.h>
-#include "socinfo.h"
+#include <mach/socinfo.h>
 #include "smd_private.h"
 
 #define BUILD_ID_LENGTH 32
@@ -73,11 +73,11 @@ enum {
 	HW_PLATFORM_INVALID
 };
 
-char *hw_platform[] = {
-	"Unknown",
-	"Surf",
-	"FFA",
-	"Fluid"
+const char *hw_platform[] = {
+	[HW_PLATFORM_UNKNOWN] = "Unknown",
+	[HW_PLATFORM_SURF] = "Surf",
+	[HW_PLATFORM_FFA] = "FFA",
+	[HW_PLATFORM_FLUID] = "Fluid",
 };
 
 /* Used to parse shared memory.  Must match the modem. */
@@ -185,6 +185,7 @@ uint32_t socinfo_get_id(void)
 {
 	return (socinfo) ? socinfo->v1.id : 0;
 }
+EXPORT_SYMBOL_GPL(socinfo_get_id);
 
 uint32_t socinfo_get_version(void)
 {
@@ -229,6 +230,7 @@ enum msm_cpu socinfo_get_msm_cpu(void)
 {
 	return cur_cpu;
 }
+EXPORT_SYMBOL_GPL(socinfo_get_msm_cpu);
 
 static ssize_t
 socinfo_show_id(struct sys_device *dev,
@@ -382,7 +384,7 @@ static struct sys_device soc_sys_device = {
 	.cls = &soc_sysdev_class,
 };
 
-static void __init socinfo_create_files(struct sys_device *dev,
+static int __init socinfo_create_files(struct sys_device *dev,
 					struct sysdev_attribute files[],
 					int size)
 {
@@ -392,12 +394,13 @@ static void __init socinfo_create_files(struct sys_device *dev,
 		if (err) {
 			pr_err("%s: sysdev_create_file(%s)=%d\n",
 			       __func__, files[i].attr.name, err);
-			return;
+			return err;
 		}
 	}
+	return 0;
 }
 
-static void __init socinfo_init_sysdev(void)
+static int __init socinfo_init_sysdev(void)
 {
 	int err;
 
@@ -405,31 +408,31 @@ static void __init socinfo_init_sysdev(void)
 	if (err) {
 		pr_err("%s: sysdev_class_register fail (%d)\n",
 		       __func__, err);
-		return;
+		return err;
 	}
 	err = sysdev_register(&soc_sys_device);
 	if (err) {
 		pr_err("%s: sysdev_register fail (%d)\n",
 		       __func__, err);
-		return;
+		return err;
 	}
 	socinfo_create_files(&soc_sys_device, socinfo_v1_files,
 				ARRAY_SIZE(socinfo_v1_files));
 	if (socinfo->v1.format < 2)
-		return;
+		return err;
 	socinfo_create_files(&soc_sys_device, socinfo_v2_files,
 				ARRAY_SIZE(socinfo_v2_files));
 
 	if (socinfo->v1.format < 3)
-		return;
+		return err;
 
 	socinfo_create_files(&soc_sys_device, socinfo_v3_files,
 				ARRAY_SIZE(socinfo_v3_files));
 
 	if (socinfo->v1.format < 4)
-		return;
-
-	socinfo_create_files(&soc_sys_device, socinfo_v4_files,
+		return err;
+	
+	return socinfo_create_files(&soc_sys_device, socinfo_v4_files,
 				ARRAY_SIZE(socinfo_v4_files));
 
 }
@@ -454,9 +457,16 @@ static struct socinfo_v3 s1_dummy_socinfo = {
 	.hw_platform = 0,
 };
 
+arch_initcall(socinfo_init_sysdev);
+
 int __init socinfo_init(void)
 {
 	socinfo = smem_alloc(SMEM_HW_SW_BUILD_ID, sizeof(struct socinfo_v4));
+	
+	if (!socinfo)
+               socinfo = smem_alloc(SMEM_HW_SW_BUILD_ID,
+                               sizeof(struct socinfo_v4));
+	
 	if (!socinfo)
 		socinfo = smem_alloc(SMEM_HW_SW_BUILD_ID,
 				sizeof(struct socinfo_v3));
@@ -478,8 +488,6 @@ int __init socinfo_init(void)
 
 	if (socinfo->v1.id < ARRAY_SIZE(cpu_of_id))
 		cur_cpu = cpu_of_id[socinfo->v1.id];
-
-	socinfo_init_sysdev();
 
 	switch (socinfo->v1.format) {
 	case 1:

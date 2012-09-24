@@ -38,9 +38,9 @@ fi
 SEMC_BUILD_TIMESTAMP=`cd $srctree && scripts/timestamp_gen.sh`
 
 if [ -z "$SEMC_BUILD_TIMESTAMP" ]; then
-	TIMESTAMP=`date +"%d/%m/%Y"`
+	TIMESTAMP=`date`
 else
-	TIMESTAMP=`date +"%d/%m/%Y"`
+	TIMESTAMP=`date`
 fi
 
 CONFIG_FLAGS=""

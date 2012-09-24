@@ -1,5 +1,5 @@
 obj-y += io.o dma.o memory.o
-obj-y += devices.o
+obj-y += devices.o clock-voter.o
 obj-y += proc_comm.o
 obj-y += vreg.o mpp.o
 obj-y += vreg.o
@@ -11,7 +11,7 @@ obj-y += rpc_hsusb.o rpc_pmapp.o rpc_fsusb.o
 obj-y += socinfo.o
 obj-$(CONFIG_MSM_CPU_FREQ_SCREEN) += cpufreq.o
 obj-$(CONFIG_CPU_FREQ_MSM) += cpufreq.o
-obj-$(CONFIG_DEBUG_FS) += nohlt.o
+obj-$(CONFIG_DEBUG_FS) += nohlt.o clock-debug.o
 obj-y += pmic.o
 obj-y += internal_power_rail.o
 

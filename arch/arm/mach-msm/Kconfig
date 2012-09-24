@@ -1017,4 +1017,28 @@ config MSM7X27_VSYNC_ENABLE
 	help
 	  Enable vsync on panels.
 
+config YAFFS2_AUTO_CHECKPOINT_PATCH
+	bool "Set yaffs_auto_checkpoint to 2"
+	default n
+	help
+	  set value of yaffs_auto_checkpoint to 2. this patch can decreases 
+	  mount time due to scanning all blocks of yaffs partition
+
+config LGE_FBCON_INACTIVE_CONSOLE
+	bool "Support LGE FBCON inactive console"
+	default n
+	help
+	 Choose if inactive console.Removes console cursor on booting screen
+
+config LGE_GRAM_REFRESH_PATCH
+	bool "LGE gram refresh patch"
+	default n
+	help
+	  This patch is added for gram-embedded device like mddi.
+	  because, when suspend state, power of mddi is off usually,
+	  gram of DDI chip has garbage data until data of gram is refreshed.
+	  this can cause displaying broken screen in time of turning backlight on.
+	  for preventing this problem, add refreshing routine before turning 
+	  backlight on by using late resume mechanism.
+
 endif

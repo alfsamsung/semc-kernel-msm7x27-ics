@@ -155,6 +155,42 @@ static void mdp_dma2_update_lcd(struct msm_fb_data_type *mfd)
 
 	mdp_curr_dma2_update_width = iBuf->dma_w;
 	mdp_curr_dma2_update_height = iBuf->dma_h;
+	
+/* SEMC Begin */
+#ifdef CONFIG_FB_MSM_MDDI_HITACHI_HVGA_LCD
+	/* Todo: To be removed!
+	  This is a temporary fix for a HW bug in early driver IC version.
+	*/
+	if (pdata->panel_ext->use_dma_edge_pixels_fix == 1) {
+		struct fb_info *tmp_fbi;
+		struct fb_fix_screeninfo *tmp_fix;
+		uint8 *first_packet_in_dma_window_p;
+		uint8 *last_packet_in_dma_row_p;
+		int i = 0;
+
+		tmp_fbi = mfd->fbi;
+		tmp_fix = &tmp_fbi->fix;
+
+		dma2_cfg_reg &= ~DMA_DITHER_EN;
+
+		first_packet_in_dma_window_p = tmp_fbi->screen_base +
+			(iBuf->dma_x + (iBuf->dma_y + tmp_fbi->var.yoffset) *
+			iBuf->ibuf_width) * outBpp;
+		last_packet_in_dma_row_p = first_packet_in_dma_window_p +
+			(iBuf->dma_w - 1) * outBpp;
+
+		for (i=0; i < (iBuf->dma_h - 1); i++) {
+			/* Check for not allowed data */
+			if (((last_packet_in_dma_row_p[0] & 0x3F) == 0x2a) ||
+				((last_packet_in_dma_row_p[0] & 0x3F) == 0x2b)) {
+			      /* clr bit5 */
+			      last_packet_in_dma_row_p[0] &= 0xDF;
+			}
+	last_packet_in_dma_row_p += (iBuf->ibuf_width) * outBpp;
+		}
+	}
+#endif  /* CONFIG_FB_MSM_MDDI_HITACHI_HVGA_LCD */
+/* SEMC End */
 
 	/* MDP cmd block enable */
 	mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_ON, FALSE);
@@ -300,7 +336,6 @@ static void mdp_dma_schedule(struct msm_fb_data_type *mfd, uint32 term)
 		mdp_pipe_kickoff(term, mfd);
 		return;
 	}
-#ifdef CONFIG_MSM7X27_VSYNC_ENABLE
 	/* SW vsync logic starts here */
 
 	/* get current rd counter */
@@ -340,7 +375,7 @@ static void mdp_dma_schedule(struct msm_fb_data_type *mfd, uint32 term)
 		mdp_lcd_rd_cnt = mfd->total_lcd_lines + mdp_lcd_rd_cnt;
 	else if (mdp_lcd_rd_cnt > mfd->total_lcd_lines)
 		mdp_lcd_rd_cnt = mdp_lcd_rd_cnt - mfd->total_lcd_lines - 1;
-#endif
+
 	/* get wrt pointer position */
 	start_y = mfd->ibuf.dma_y;
 

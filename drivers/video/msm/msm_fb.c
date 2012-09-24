@@ -49,7 +49,7 @@
 #include "mdp4.h"
 
 #ifdef CONFIG_FB_MSM_LOGO
-#define INIT_IMAGE_FILE "/logo.rle"
+#define INIT_IMAGE_FILE "/initlogo.rle"
 extern int load_565rle_image(char *filename);
 #endif
 
@@ -65,6 +65,8 @@ int vsync_mode = 1;
 #else
 int vsync_mode = 0;
 #endif
+
+#define MAX_BLIT_REQ 256
 
 #define MAX_FBI_LIST 32
 static struct fb_info *fbi_list[MAX_FBI_LIST];
@@ -92,7 +94,7 @@ u32 msm_fb_debug_enabled;
 u32 msm_fb_msg_level = 7;
 
 /* Setting mddi_msg_level to 8 prints out ALL messages */
-u32 mddi_msg_level = 6;		//org5
+u32 mddi_msg_level = 5;
 
 extern int32 mdp_block_power_cnt[MDP_MAX_BLOCK];
 extern unsigned long mdp_timer_duration;
@@ -114,6 +116,35 @@ static int msm_fb_resume_sub(struct msm_fb_data_type *mfd);
 static int msm_fb_ioctl(struct fb_info *info, unsigned int cmd,
 			unsigned long arg);
 static int msm_fb_mmap(struct fb_info *info, struct vm_area_struct * vma);
+
+#ifdef CONFIG_LGE_GRAM_REFRESH_PATCH
+static struct fb_var_screeninfo *last_var;
+static struct fb_info *last_info;
+static struct early_suspend additional_early_suspend;
+static void msmfb_early_suspend_early(struct early_suspend *h);
+static void msmfb_late_resume_late(struct early_suspend *h);
+#endif
+
+/* LGE_CHANGE_S
+ * Change codes to remove console cursor on booting screen. Refered to VS740
+ * 2010-07-31. minjong.gong@lge.com
+ */
+#ifdef CONFIG_LGE_FBCON_INACTIVE_CONSOLE
+static int is_console_inactive = 0;
+
+static void msm_fb_set_console_inactive(int inactive)
+{
+
+       is_console_inactive = inactive;
+}
+
+int msm_fb_get_console_inactive(void)
+{
+       return is_console_inactive;
+}
+EXPORT_SYMBOL(msm_fb_get_console_inactive);
+#endif
+/* LGE_CHANGE_E, 2010-07-31. minjong.gong@lge.com  */
 
 #ifdef MSM_FB_ENABLE_DBGFS
 
@@ -184,7 +215,7 @@ static void msm_fb_set_bl_brightness(struct led_classdev *led_cdev,
 	if (!bl_lvl && value)
 		bl_lvl = 1;
 
-	msm_fb_set_backlight(mfd, bl_lvl, 1);
+	msm_fb_set_backlight(mfd, bl_lvl);
 }
 
 static struct led_classdev backlight_led = {
@@ -237,7 +268,7 @@ static int msm_fb_probe(struct platform_device *pdev)
 			printk(KERN_ERR "fbram ioremap failed!\n");
 			return -ENOMEM;
 		}
-		MSM_FB_INFO("msm_fb_probe:  phy_Addr = 0x%x virt = 0x%x\n",
+		MSM_FB_DEBUG("msm_fb_probe:  phy_Addr = 0x%x virt = 0x%x\n",
 			     (int)fbram_phys, (int)fbram);
 
 		msm_fb_resource_initialized = 1;
@@ -248,10 +279,6 @@ static int msm_fb_probe(struct platform_device *pdev)
 		return -EPERM;
 
 	mfd = (struct msm_fb_data_type *)platform_get_drvdata(pdev);
-	
-	err = pm_runtime_set_active(&pdev->dev);
-	if (err < 0)
-		printk(KERN_ERR "pm_runtime: fail to set active.\n");
 
 	if (!mfd)
 		return -ENODEV;
@@ -263,7 +290,7 @@ static int msm_fb_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	mfd->panel_info.frame_count = 0;
-	mfd->bl_level = mfd->panel_info.bl_max;
+	mfd->bl_level = 0;
 #ifdef CONFIG_FB_MSM_OVERLAY
 	mfd->overlay_play_enable = 1;
 #endif
@@ -271,7 +298,10 @@ static int msm_fb_probe(struct platform_device *pdev)
 	rc = msm_fb_register(mfd);
 	if (rc)
 		return rc;
-
+	err = pm_runtime_set_active(mfd->fbi->dev);
+	if (err < 0)
+		printk(KERN_ERR "pm_runtime: fail to set active.\n");
+	pm_runtime_enable(mfd->fbi->dev);
 #ifdef CONFIG_FB_BACKLIGHT
 	msm_fb_config_backlight(mfd);
 #else
@@ -284,8 +314,6 @@ static int msm_fb_probe(struct platform_device *pdev)
 	}
 #endif
 
-	pm_runtime_enable(&pdev->dev);
-	
 	pdev_list[pdev_list_cnt++] = pdev;
 	return 0;
 }
@@ -298,7 +326,7 @@ static int msm_fb_remove(struct platform_device *pdev)
 
 	mfd = (struct msm_fb_data_type *)platform_get_drvdata(pdev);
 	
-	pm_runtime_disable(&pdev->dev);
+	pm_runtime_disable(mfd->fbi->dev);
 
 	if (!mfd)
 		return -ENODEV;
@@ -528,15 +556,36 @@ static struct platform_driver msm_fb_driver = {
 		   },
 };
 
+#if defined(CONFIG_HAS_EARLYSUSPEND) && defined(CONFIG_FB_MSM_MDP303)
+static void memset32_io(u32 __iomem *_ptr, u32 val, size_t count)
+{
+        count >>= 2;
+        while (count--)
+                writel(val, _ptr++);
+}
+#endif
+ 
 #ifdef CONFIG_HAS_EARLYSUSPEND
 static void msmfb_early_suspend(struct early_suspend *h)
 {
 	struct msm_fb_data_type *mfd = container_of(h, struct msm_fb_data_type,
 						    early_suspend);
+#if defined(CONFIG_FB_MSM_MDP303)
+	/*
+	* For MDP with overlay, set framebuffer with black pixels
+	* to show black screen on HDMI.
+	*/
 	struct fb_info *fbi = mfd->fbi;
-
-	/* set the last frame on suspend as black frame */
-	memset(fbi->screen_base, 0x0, fbi->fix.smem_len);
+	switch (mfd->fbi->var.bits_per_pixel) {
+	case 32:
+		memset32_io((void *)fbi->screen_base, 0xFF000000,
+							fbi->fix.smem_len);
+		break;
+	default:
+		memset32_io((void *)fbi->screen_base, 0x00, fbi->fix.smem_len);
+		break;
+	}
+#endif
 	msm_fb_suspend_sub(mfd);
 }
 
@@ -546,9 +595,22 @@ static void msmfb_early_resume(struct early_suspend *h)
 						    early_suspend);
 	msm_fb_resume_sub(mfd);
 }
+
+#ifdef CONFIG_LGE_GRAM_REFRESH_PATCH
+static void msmfb_early_suspend_early(struct early_suspend *h)
+{
+	/* do nothing */
+}
+
+static void msmfb_late_resume_late(struct early_suspend *h)
+{
+	memset((void *)last_info->screen_base, 0, last_info->fix.smem_len);
+	msm_fb_pan_display(last_var, last_info);
+}
+#endif
 #endif
 
-void msm_fb_set_backlight(struct msm_fb_data_type *mfd, __u32 bkl_lvl, u32 save)
+void msm_fb_set_backlight(struct msm_fb_data_type *mfd, __u32 bkl_lvl)
 {
 	struct msm_fb_panel_data *pdata;
 
@@ -556,16 +618,8 @@ void msm_fb_set_backlight(struct msm_fb_data_type *mfd, __u32 bkl_lvl, u32 save)
 
 	if ((pdata) && (pdata->set_backlight)) {
 		down(&mfd->sem);
-		if ((bkl_lvl != mfd->bl_level) || (!save)) {
-			u32 old_lvl;
-
-			old_lvl = mfd->bl_level;
-			mfd->bl_level = bkl_lvl;
-			pdata->set_backlight(mfd);
-
-			if (!save)
-				mfd->bl_level = old_lvl;
-		}
+		mfd->bl_level = bkl_lvl;
+		pdata->set_backlight(mfd);
 		up(&mfd->sem);
 	}
 }
@@ -610,9 +664,7 @@ static int msm_fb_blank_sub(int blank_mode, struct fb_info *info,
 	switch (blank_mode) {
 	case FB_BLANK_UNBLANK:
 		if (!mfd->panel_power_on) {
-#if !defined(CONFIG_FB_MSM_MDDI_TMD_NT35580)
-			mdelay(16);
-#endif
+			msleep(16);
 			ret = pdata->on(mfd->pdev);
 			if (ret == 0) {
 #ifdef CONFIG_FB_MSM_SEMC_LCD_BACKLIGHT_CONTROL
@@ -636,9 +688,7 @@ static int msm_fb_blank_sub(int blank_mode, struct fb_info *info,
 				backlight_ctrl_fp =
 					pdata->panel_ext->backlight_ctrl;
 				msm_fb_resume_backlight_workqueue(100);
-#endif
-				msm_fb_set_backlight(mfd,
-						     mfd->bl_level, 0);
+#endif//ALFS TODO REMOVE THIS
 
 /* ToDo: possible conflict with android which doesn't expect sw refresher */
 /*
@@ -671,12 +721,11 @@ static int msm_fb_blank_sub(int blank_mode, struct fb_info *info,
 				pdata->panel_ext->backlight_ctrl(false);
 #endif
 
-			mdelay(16);
+			msleep(16);
 			ret = pdata->off(mfd->pdev);
 			if (ret)
 				mfd->panel_power_on = curr_pwr_state;
 
-			msm_fb_set_backlight(mfd, 0, 0);
 			mfd->op_enable = TRUE;
 		}
 		break;
@@ -838,6 +887,19 @@ static struct fb_ops msm_fb_ops = {
 	.fb_mmap = msm_fb_mmap,
 };
 
+static __u32 msm_fb_line_length(__u32 fb_index, __u32 xres, int bpp)
+{
+       /* The adreno GPU hardware requires that the pitch be aligned to
+          32 pixels for color buffers, so for the cases where the GPU
+          is writing directly to fb0, the framebuffer pitch
+          also needs to be 32 pixel aligned */
+
+       if (fb_index == 0)
+               return ALIGN(xres, 32) * bpp;
+       else
+               return xres * bpp;
+}
+
 static int msm_fb_register(struct msm_fb_data_type *mfd)
 {
 	int ret = -ENODEV;
@@ -980,18 +1042,17 @@ static int msm_fb_register(struct msm_fb_data_type *mfd)
 		return ret;
 	}
 
-	/* The adreno GPU hardware requires that the pitch be aligned to
-	   32 pixels for color buffers, so for the cases where the GPU
-	   is writing directly to fb0, the framebuffer pitch
-	   also needs to be 32 pixel aligned */
-
-	if (mfd->index == 0)
-		fix->line_length = ALIGN(panel_info->xres, 32) * bpp;
-	else
-		fix->line_length = panel_info->xres * bpp;
-
-	fix->smem_len = fix->line_length * panel_info->yres * mfd->fb_page;
-	fix->smem_len += 128*1024; /* Add 128KB, since QCT can't round numbers */
+	fix->line_length = msm_fb_line_length(mfd->index, panel_info->xres,
+					      bpp);
+	/* calculate smem_len based on max size of two supplied modes */
+	fix->smem_len = roundup(MAX(msm_fb_line_length(mfd->index,
+						panel_info->xres,
+						bpp) *
+			    panel_info->yres * mfd->fb_page,
+			    msm_fb_line_length(mfd->index,
+						panel_info->mode2_xres,
+						bpp) *
+			    panel_info->mode2_yres * mfd->fb_page), PAGE_SIZE);
 
 	mfd->var_xres = panel_info->xres;
 	mfd->var_yres = panel_info->yres;
@@ -1059,6 +1120,15 @@ static int msm_fb_register(struct msm_fb_data_type *mfd)
 	mfd->op_enable = TRUE;
 	mfd->panel_power_on = FALSE;
 
+/* LGE_CHANGE_S
+ * Change codes to remove console cursor on booting screen. Refered to VS740
+ * 2010-07-31. minjong.gong@lge.com
+ */
+#ifdef CONFIG_LGE_FBCON_INACTIVE_CONSOLE
+	msm_fb_set_console_inactive(1);
+#endif
+/* LGE_CHANGE_E, 2010-07-31. minjong.gong@lge.com */
+
 	/* cursor memory allocation */
 	if (mfd->cursor_update) {
 		mfd->cursor_buf = dma_alloc_coherent(NULL,
@@ -1099,22 +1169,7 @@ static int msm_fb_register(struct msm_fb_data_type *mfd)
 	     mfd->index, fbi->var.xres, fbi->var.yres, fbi->fix.smem_len);
 
 #ifdef CONFIG_FB_MSM_LOGO
-	ret = load_565rle_image(INIT_IMAGE_FILE);	/* Flip buffer */
-#if defined(CONFIG_FB_MSM_MDDI_TMD_NT35580)
-	if (!ret) {
-		struct fb_var_screeninfo var;
-		int ret;
-
-		var = fbi->var;
-		var.reserved[0] = 0x54445055;
-		var.reserved[1] = 0;
-		var.reserved[2] = (mfd->panel_info.yres << 16) | (mfd->panel_info.xres);
-		msm_fb_open(fbi, 0);
-		ret = msm_fb_pan_display(&var, fbi);
-		if(ret)
-			MSM_FB_INFO("msm_fb_pan_display ret=%d\n", ret);
-	}
-#endif
+	if (!load_565rle_image(INIT_IMAGE_FILE)) ;      /* Flip buffer */
 #endif
 	ret = 0;
 
@@ -1123,6 +1178,13 @@ static int msm_fb_register(struct msm_fb_data_type *mfd)
 	mfd->early_suspend.resume = msmfb_early_resume;
 	mfd->early_suspend.level = EARLY_SUSPEND_LEVEL_DISABLE_FB - 2;
 	register_early_suspend(&mfd->early_suspend);
+	
+#ifdef CONFIG_LGE_GRAM_REFRESH_PATCH
+	additional_early_suspend.suspend = msmfb_early_suspend_early;
+	additional_early_suspend.resume = msmfb_late_resume_late;
+	additional_early_suspend.level = EARLY_SUSPEND_LEVEL_DISABLE_FB - 10;
+	register_early_suspend(&additional_early_suspend);
+#endif
 #endif
 
 #ifdef MSM_FB_ENABLE_DBGFS
@@ -1265,7 +1327,7 @@ static int msm_fb_open(struct fb_info *info, int user)
 	if (result < 0) {
 		printk(KERN_ERR "pm_runtime: fail to wake up\n");
 	}
-
+	
 	if (!mfd->ref_cnt) {
 		mdp_set_dma_pan_info(info, NULL, TRUE);
 
@@ -1274,6 +1336,16 @@ static int msm_fb_open(struct fb_info *info, int user)
 			return -1;
 		}
 	}
+
+/* LGE_CHANGE_S
+ * Change codes to remove console cursor on booting screen. Refered to VS740
+ * 2010-07-31. minjong.gong@lge.com
+ */
+#ifdef CONFIG_LGE_FBCON_INACTIVE_CONSOLE
+		if(mfd->ref_cnt > 1 && msm_fb_get_console_inactive())
+				msm_fb_set_console_inactive(0);
+#endif
+/* LGE_CHANGE_E, 2010-07-31. minjong.gong@lge.com */
 
 	mfd->ref_cnt++;
 	return 0;
@@ -1313,6 +1385,11 @@ static int msm_fb_pan_display(struct fb_var_screeninfo *var,
 	struct mdp_dirty_region dirty;
 	struct mdp_dirty_region *dirtyPtr = NULL;
 	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)info->par;
+	
+#ifdef CONFIG_LGE_GRAM_REFRESH_PATCH
+	last_var = var;
+	last_info = info;
+#endif
 
 	if ((!mfd->op_enable) || (!mfd->panel_power_on))
 		return -EPERM;
@@ -1374,6 +1451,7 @@ static int msm_fb_pan_display(struct fb_var_screeninfo *var,
 	mutex_unlock(&msm_fb_notify_update_sem);
 
 	down(&msm_fb_pan_sem);
+		
 	mdp_set_dma_pan_info(info, dirtyPtr,
 			     (var->activate == FB_ACTIVATE_VBL));
 	mdp_dma_pan_update(info);
@@ -1458,8 +1536,10 @@ static int msm_fb_check_var(struct fb_var_screeninfo *var, struct fb_info *info)
 	if ((var->xres == 0) || (var->yres == 0))
 		return -EINVAL;
 
-	if ((var->xres > mfd->panel_info.xres) ||
-		(var->yres > mfd->panel_info.yres))
+	if ((var->xres > MAX(mfd->panel_info.xres,
+			      mfd->panel_info.mode2_xres)) ||
+		(var->yres > MAX(mfd->panel_info.yres,
+				  mfd->panel_info.mode2_yres)))
 		return -EINVAL;
 
 	if (var->xoffset > (var->xres_virtual - var->xres))
@@ -1520,6 +1600,8 @@ static int msm_fb_set_par(struct fb_info *info)
 		msm_fb_blank_sub(FB_BLANK_POWERDOWN, info, mfd->op_enable);
 		msm_fb_blank_sub(FB_BLANK_UNBLANK, info, mfd->op_enable);
 	}
+	mfd->fbi->fix.line_length = msm_fb_line_length(mfd->index, var->xres,
+							var->bits_per_pixel/8);
 
 	return 0;
 }
@@ -1907,10 +1989,8 @@ int mdp_blit(struct fb_info *info, struct mdp_blit_req *req)
 		d_h_0 = d_h_1 = req->dst_rect.h;
 		d_x_0 = req->dst_rect.x;
 
-		if (remainder == 14)
-			d_w_1 = (req->dst_rect.w - 14) / 2 + 4;
-		else if (remainder == 6)
-			d_w_1 = req->dst_rect.w / 2 - 1;
+		if (remainder == 14 || remainder == 6)
+			d_w_1 = req->dst_rect.w / 2;
 		else
 			d_w_1 = (req->dst_rect.w - 1) / 2 - 1;
 
@@ -2279,6 +2359,8 @@ static int msmfb_blit(struct fb_info *info, void __user *p)
 		return -EFAULT;
 	p += sizeof(req_list_header);
 	count = req_list_header.count;
+	if (count < 0 || count >= MAX_BLIT_REQ)
+		return -EINVAL;
 	while (count > 0) {
 		/*
 		 * Access the requests through a narrow window to decrease copy
@@ -2580,12 +2662,11 @@ static int msm_fb_ioctl(struct fb_info *info, unsigned int cmd,
 		}
 
 		down(&msm_fb_ioctl_ppp_sem);
-#if !defined(CONFIG_FB_MSM_MDDI_TMD_NT35580)
 		if (ccs_matrix.direction == MDP_CCS_RGB2YUV)
 			mdp_ccs_rgb2yuv = ccs_matrix;
 		else
 			mdp_ccs_yuv2rgb = ccs_matrix;
-#endif
+
 		msmfb_set_color_conv(&ccs_matrix) ;
 		up(&msm_fb_ioctl_ppp_sem);
 #else
@@ -2690,6 +2771,18 @@ static int msm_fb_ioctl(struct fb_info *info, unsigned int cmd,
 		ret = mfd->do_histogram(info, &hist);
 		mutex_unlock(&msm_fb_ioctl_hist_sem);
 		break;
+		
+	case MSMFB_HISTOGRAM_START:
+		if (!mfd->do_histogram)
+			return -ENODEV;
+		ret = mdp_start_histogram(info);
+		break;
+
+	case MSMFB_HISTOGRAM_STOP:
+		if (!mfd->do_histogram)
+			return -ENODEV;
+		ret = mdp_stop_histogram(info);
+		break;
 
 	case MSMFB_GET_PAGE_PROTECTION:
 		fb_page_protection.page_protection
@@ -2750,7 +2843,7 @@ static int msm_fb_register_driver(void)
 	return platform_driver_register(&msm_fb_driver);
 }
 
-void msm_fb_add_device(struct platform_device *pdev)
+struct platform_device *msm_fb_add_device(struct platform_device *pdev)
 {
 	struct msm_fb_panel_data *pdata;
 	struct platform_device *this_dev = NULL;
@@ -2759,21 +2852,21 @@ void msm_fb_add_device(struct platform_device *pdev)
 	u32 type, id, fb_num;
 
 	if (!pdev)
-		return;
+		return NULL;
 	id = pdev->id;
 
 	pdata = pdev->dev.platform_data;
 	if (!pdata)
-		return;
+		return NULL;
 	type = pdata->panel_info.type;
 	fb_num = pdata->panel_info.fb_num;
 
 	if (fb_num <= 0)
-		return;
+		return NULL;
 
 	if (fbi_list_index >= MAX_FBI_LIST) {
 		printk(KERN_ERR "msm_fb: no more framebuffer info list!\n");
-		return;
+		return NULL;
 	}
 	/*
 	 * alloc panel device data
@@ -2783,7 +2876,7 @@ void msm_fb_add_device(struct platform_device *pdev)
 	if (!this_dev) {
 		printk(KERN_ERR
 		"%s: msm_fb_device_alloc failed!\n", __func__);
-		return;
+		return NULL;
 	}
 
 	/*
@@ -2793,7 +2886,7 @@ void msm_fb_add_device(struct platform_device *pdev)
 	if (fbi == NULL) {
 		platform_device_put(this_dev);
 		printk(KERN_ERR "msm_fb: can't alloca framebuffer info data!\n");
-		return;
+		return NULL;
 	}
 
 	mfd = (struct msm_fb_data_type *)fbi->par;
@@ -2807,6 +2900,9 @@ void msm_fb_add_device(struct platform_device *pdev)
 
 	/* link to the latest pdev */
 	mfd->pdev = this_dev;
+	
+	/* link to the panel pdev */
+	mfd->panel_pdev = pdev;
 
 	mfd_list[mfd_list_index++] = mfd;
 	fbi_list[fbi_list_index++] = fbi;
@@ -2821,8 +2917,9 @@ void msm_fb_add_device(struct platform_device *pdev)
 		platform_device_put(this_dev);
 		framebuffer_release(fbi);
 		fbi_list_index--;
-		return;
+		return NULL;
 	}
+	return this_dev;
 }
 EXPORT_SYMBOL(msm_fb_add_device);
 

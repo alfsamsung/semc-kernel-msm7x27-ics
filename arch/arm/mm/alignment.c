@@ -630,6 +630,7 @@ do_alignment(unsigned long addr, unsigned int fsr, struct pt_regs *regs)
 	mm_segment_t fs;
 	unsigned int fault;
 	u16 tinstr = 0;
+	offset.un = 0;
 
 	instrptr = instruction_pointer(regs);
 

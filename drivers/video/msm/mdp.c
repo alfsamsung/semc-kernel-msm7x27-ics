@@ -49,6 +49,7 @@ static struct clk *mdp_clk;
 static struct clk *mdp_pclk;
 int mdp_rev;
 
+static struct platform_device *mdp_init_pdev;
 struct regulator *footswitch;
 
 struct completion mdp_ppp_comp;
@@ -516,9 +517,7 @@ void mdp_pipe_kickoff(uint32 term, struct msm_fb_data_type *mfd)
 		/* DMA update timestamp */
 		mdp_dma2_last_update_time = ktime_get_real();
 		/* let's turn on DMA2 block */
-#if 0
-		mdp_pipe_ctrl(MDP_DMA2_BLOCK, MDP_BLOCK_POWER_ON, FALSE);
-#endif
+
 #ifdef CONFIG_FB_MSM_MDP22
 		outpdw(MDP_CMD_DEBUG_ACCESS_BASE + 0x0044, 0x0);/* start DMA */
 #else
@@ -556,6 +555,7 @@ void mdp_pipe_kickoff(uint32 term, struct msm_fb_data_type *mfd)
 	}
 #endif
 }
+
 static int mdp_clk_rate;
 static struct platform_device *pdev_list[MSM_FB_MAX_DEV_LIST];
 static int pdev_list_cnt;
@@ -1068,11 +1068,10 @@ static void configure_mdp_core_clk_table(uint32 min_clk_rate)
 {
 	uint8 count;
 	uint32 current_rate;
-	if (mdp_clk && mdp_pdata
-		&& mdp_pdata->mdp_core_clk_table) {
-		if (clk_set_min_rate(mdp_clk,
-				 min_clk_rate) < 0)
-			printk(KERN_ERR "%s: clk_set_min_rate failed\n",
+	if (mdp_clk && mdp_pdata && mdp_pdata->mdp_core_clk_table) {
+		min_clk_rate = clk_round_rate(mdp_clk, min_clk_rate);
+		if (clk_set_rate(mdp_clk, min_clk_rate) < 0)
+			printk(KERN_ERR "%s: clk_set_rate failed\n",
 							 __func__);
 		else {
 			count = 0;
@@ -1163,7 +1162,7 @@ unsigned long mdp_perf_level2clk_rate(uint32 perf_level)
 	return clk_rate;
 }
 
-static int mdp_irq_clk_setup(void)
+static int mdp_irq_clk_setup(struct platform_device *pdev)
 {
 	int ret;
 
@@ -1184,7 +1183,7 @@ static int mdp_irq_clk_setup(void)
 	else
 		regulator_enable(footswitch);
 
-	mdp_clk = clk_get(NULL, "mdp_clk");
+	mdp_clk = clk_get(&pdev->dev, "core_clk");
 	if (IS_ERR(mdp_clk)) {
 		ret = PTR_ERR(mdp_clk);
 		printk(KERN_ERR "can't get mdp_clk error:%d!\n", ret);
@@ -1192,7 +1191,7 @@ static int mdp_irq_clk_setup(void)
 		return ret;
 	}
 
-	mdp_pclk = clk_get(NULL, "mdp_pclk");
+	mdp_pclk = clk_get(&pdev->dev, "iface_clk");
 	if (IS_ERR(mdp_pclk))
 		mdp_pclk = NULL;
 
@@ -1226,8 +1225,9 @@ static int mdp_probe(struct platform_device *pdev)
 #if defined(CONFIG_FB_MSM_MIPI_DSI) && defined(CONFIG_FB_MSM_MDP40)
 	struct mipi_panel_info *mipi;
 #endif
-
+	
 	if ((pdev->id == 0) && (pdev->num_resources > 0)) {
+		mdp_init_pdev = pdev;
 		mdp_pdata = pdev->dev.platform_data;
 
 		size =  resource_size(&pdev->resource[0]);
@@ -1240,8 +1240,8 @@ static int mdp_probe(struct platform_device *pdev)
 			return -ENOMEM;
 
 		mdp_rev = mdp_pdata->mdp_rev;
-		rc = mdp_irq_clk_setup();
-
+		rc = mdp_irq_clk_setup(pdev);
+		
 		if (rc)
 			return rc;
 
@@ -1283,7 +1283,7 @@ static int mdp_probe(struct platform_device *pdev)
 
 	/* link to the latest pdev */
 	mfd->pdev = msm_fb_dev;
-
+	
 	/* add panel data */
 	if (platform_device_add_data
 	    (msm_fb_dev, pdev->dev.platform_data,
@@ -1353,7 +1353,7 @@ static int mdp_probe(struct platform_device *pdev)
 
 		mdp4_display_intf_sel(if_no, intf);
 #endif
-		mdp_config_vsync(mfd);
+		mdp_config_vsync(mdp_init_pdev, mfd);
 		break;
 
 #ifdef CONFIG_FB_MSM_MIPI_DSI
@@ -1389,7 +1389,7 @@ static int mdp_probe(struct platform_device *pdev)
 		mfd->do_histogram = mdp_do_histogram;
 		mdp4_display_intf_sel(if_no, DSI_CMD_INTF);
 
-		mdp_config_vsync(mfd);
+		mdp_config_vsync(mdp_init_pdev, mfd);
 		break;
 #endif
 
@@ -1482,6 +1482,7 @@ static int mdp_probe(struct platform_device *pdev)
 			return -ENOMEM;
 		}
 	}
+
 #endif
 	/* set driver data */
 	platform_set_drvdata(msm_fb_dev, mfd);
