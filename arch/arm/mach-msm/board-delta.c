@@ -2544,7 +2544,11 @@ msm_i2c_gpio_config(int iface, int config_type)
 }
 
 static struct msm_i2c_platform_data msm_i2c_pdata = {
+#ifdef CONFIG_TOUCHSCREEN_CYTTSP_I2C /*ALFS TEST to fix buggy cypress touchscreen*/
+	.clk_freq = 400000,
+#else
 	.clk_freq = 100000,
+#endif
 	.rmutex = 0,
 	.pri_clk = 60,
 	.pri_dat = 61,
