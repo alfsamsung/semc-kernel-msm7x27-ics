@@ -176,7 +176,7 @@ int file_fsync(struct file *filp, struct dentry *dentry, int datasync)
 	int ret, err;
 	
 	if (unlikely(fsync_disabled))
-	return 0;
+		return 0;
 
 	/* sync the inode to buffers */
 	ret = write_inode_now(inode, 0);
@@ -214,6 +214,9 @@ int vfs_fsync_range(struct file *file, struct dentry *dentry, loff_t start,
         const struct file_operations *fop;
         struct address_space *mapping;
         int err, ret;
+	
+	if (unlikely(fsync_disabled))
+		return 0;
  
          /*
          * Get mapping and operations from the file in case we have
@@ -275,7 +278,7 @@ static int do_fsync(unsigned int fd, int datasync)
 	int ret = -EBADF;
 	
 	if (unlikely(fsync_disabled))
-	return 0;
+		return 0;
 
 	file = fget(fd);
 	if (file) {
@@ -304,7 +307,7 @@ SYSCALL_DEFINE1(fdatasync, unsigned int, fd)
  */
 int generic_write_sync(struct file *file, loff_t pos, loff_t count)
 {
-        if (!(file->f_flags & O_SYNC) && !IS_SYNC(file->f_mapping->host))
+	if (!(file->f_flags & O_SYNC) && !IS_SYNC(file->f_mapping->host))
                 return 0;
         return vfs_fsync_range(file, file->f_path.dentry, pos,
                                pos + count - 1, 1);
@@ -368,7 +371,7 @@ SYSCALL_DEFINE(sync_file_range)(int fd, loff_t offset, loff_t nbytes,
 	umode_t i_mode;
 	
 	if (unlikely(fsync_disabled))
-	return 0;
+		return 0;
 
 	ret = -EINVAL;
 	if (flags & ~VALID_FLAGS)
