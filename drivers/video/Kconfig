@@ -2361,13 +2361,6 @@ config FB_MSM_MDDI_SEMC_LCD_WINDOW_ADJUST
 	---help---
 	  Support separate window adjust
 
-config FB_MSM_MDDI_DISABLE_MDP_HW_VSYNC
-	depends on FB_MSM
-	bool "Disable QC define"
-	select FB_MSM_MDDI
-	---help---
-	  Disables the Qualcomm define MDP_HW_VSYNC
-
 config FB_MSM_SEMC_LCD_BACKLIGHT_CONTROL
 	depends on FB_MSM
 	bool "FB lcd backlight control"
