@@ -38,7 +38,7 @@
 #include <linux/kthread.h>
 #include <linux/freezer.h>
 #include <linux/memcontrol.h>
-#include <linux/mem_notify.h>
+//#include <linux/mem_notify.h>
 #include <linux/delayacct.h>
 #include <linux/sysctl.h>
 #include <linux/prefetch.h>
@@ -1994,7 +1994,7 @@ out:
 		goto loop_again;
 	}
 
-	for (i = pgdat->nr_zones - 1; i >= 0; i--) {
+/*	for (i = pgdat->nr_zones - 1; i >= 0; i--) {
 		struct zone *zone = pgdat->node_zones + i;
 
 		if (!populated_zone(zone))
@@ -2002,7 +2002,7 @@ out:
 
 		memory_pressure_notify(zone, 0);
 	}
-
+*/
 	return sc.nr_reclaimed;
 }
 

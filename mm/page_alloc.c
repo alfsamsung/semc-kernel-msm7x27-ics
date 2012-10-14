@@ -46,7 +46,7 @@
 #include <linux/page-isolation.h>
 #include <linux/page_cgroup.h>
 #include <linux/debugobjects.h>
-#include <linux/mem_notify.h>
+//#include <linux/mem_notify.h>
 #include <linux/prefetch.h>
 
 #include <asm/tlbflush.h>
@@ -489,7 +489,7 @@ static inline void __free_one_page(struct page *page,
 	int order_size = 1 << order;
 	int migratetype = get_pageblock_migratetype(page);
 	unsigned long prev_free;
-	unsigned long notify_threshold;
+//	unsigned long notify_threshold;
 
 	if (unlikely(PageCompound(page)))
 		if (unlikely(destroy_compound_page(page, order)))
@@ -524,13 +524,14 @@ static inline void __free_one_page(struct page *page,
 		&zone->free_area[order].free_list[migratetype]);
 	zone->free_area[order].nr_free++;
 
-	notify_threshold = (zone->pages_high +
+/*	notify_threshold = (zone->pages_high +
 			    zone->lowmem_reserve[MAX_NR_ZONES-1]) * 2;
 
 	if (unlikely((zone->mem_notify_status == 1) &&
 		     (prev_free <= notify_threshold) &&
 		     (zone_page_state(zone, NR_FREE_PAGES) > notify_threshold)))
 		memory_pressure_notify(zone, 0);
+*/
 }
 
 static inline int free_pages_check(struct page *page)
