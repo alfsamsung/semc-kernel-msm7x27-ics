@@ -317,7 +317,6 @@ static void hitachi_panel_on(void)
 	/* Turn display ON */
 	DBG(KERN_INFO, LEVEL_TRACE, DBG_STR"%s \n", __func__);
 	write_reg_16(0x29, 0x00000000, 0, 0, 0, 1);
-	mddi_wait(100); //ALFS test
 }
 
 static void hitachi_panel_off(void)
@@ -347,10 +346,7 @@ static void hitachi_lcd_exit_sleep(void)
 	mddi_wait(120); /* >120 ms */
 	/* RAMWR to avoid 1st cut IC bug */
 	write_reg_16(0x2C, 0x00000000, 0, 0, 0, 1);
-	mddi_wait(200); //ALFS test
-	
-	/* Display on */
-	//write_reg_16(0x29, 0x00000000, 0, 0, 0, 1);
+	mddi_wait(16); //org: alfs test  mddi_wait(100);
 }
 
 static void hitachi_lcd_enter_deepstandby(void)
@@ -879,7 +875,7 @@ static void sysfs_attribute_register(struct platform_device *pdev)
 			" debug attributes (%d)\n", __func__, ret);
 }
 
-static int mddi_hitachi_hvga_lcd_probe(struct platform_device *pdev)
+static int __devinit mddi_hitachi_hvga_lcd_probe(struct platform_device *pdev)
 {
 	int ret = -ENODEV;
 	struct msm_fb_panel_data *panel_data;

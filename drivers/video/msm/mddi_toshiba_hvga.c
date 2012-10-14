@@ -420,7 +420,7 @@ static void toshiba_lcd_exit_sleep(void)
 	DBG(KERN_INFO, LEVEL_TRACE, DBG_STR"%s \n", __func__);
 	/* Sleep Out */
 	write_reg(0x1100, 0);
-	mddi_wait(100);
+	mddi_wait(16);//org: alfs test  mddi_wait(100);
 }
 
 static void toshiba_lcd_enter_deep_standby(void)
@@ -907,7 +907,7 @@ static void sysfs_attribute_register(struct platform_device *pdev)
 			" debug attributes (%d)\n", __func__, ret);
 }
 
-static int mddi_toshiba_hvga_lcd_probe(struct platform_device *pdev)
+static int __devinit mddi_toshiba_hvga_lcd_probe(struct platform_device *pdev)
 {
 	int ret = -ENODEV;
 	struct msm_fb_panel_data *panel_data;
