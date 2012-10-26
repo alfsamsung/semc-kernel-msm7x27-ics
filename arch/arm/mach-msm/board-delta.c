@@ -1075,7 +1075,7 @@ static struct kgsl_device_platform_data kgsl_3d0_pdata;/* = {
 	.init_level = 0,
 	.num_levels = 3,
 	.set_grp_async = NULL,
-	.idle_timeout = HZ/20, 	//HZ/5,
+	.idle_timeout = HZ/5, 	//HZ/20,
 	},
 	.clk = {
 	.name = {
@@ -1925,28 +1925,27 @@ static void __init msm_mddi_toshiba_hvga_display_device_init(void)
 static void hitachi_hvga_lcd_power_on(void)
 {
 	semc_delta_lcd_regulators_on();
-	mdelay(11); /* spec: > 310 us */
+	mdelay(1); /* spec: > 310 us */
 	gpio_set_value(GPIO_MSM_MDDI_XRES, 0);
-	mdelay(2);
+	mdelay(1);
 	gpio_set_value(GPIO_MSM_MDDI_XRES, 1);
-	mdelay(21); /* spec: > 10 ms */
+	mdelay(11); /* spec: > 10 ms */
 }
 
 static void hitachi_hvga_lcd_power_off(void)
 {
 	gpio_set_value(GPIO_MSM_MDDI_XRES, 0);
-	mdelay(130); /* spec > 120 ms */
+	mdelay(121); /* spec > 120 ms */
 	vreg_disable(vreg_vlcd);
-	//mdelay(10);  //ALFS test
 	vreg_disable(vreg_vlcd_io);
 }
 
 static void hitachi_hvga_lcd_exit_deep_standby(void)
 {
 	gpio_set_value(GPIO_MSM_MDDI_XRES, 0);
-	mdelay(4); /* spec: > 200 us */
+	mdelay(1); /* spec: > 200 us */
 	gpio_set_value(GPIO_MSM_MDDI_XRES, 1);
-	mdelay(14); /* spec: > 10 ms */
+	mdelay(11); /* spec: > 10 ms */
 }
 
 static struct panel_data_ext hitachi_hvga_panel_ext = {
@@ -1989,7 +1988,6 @@ static void __init msm_mddi_hitachi_hvga_display_device_init(void)
 #else
 	panel_data->panel_info.lcd.vsync_enable = FALSE;
 #endif
-	//ALFS NOTE hitachi needs vsync on to prevent screen displacement/cut bugs
 	
 	//lcd.refx100 = (mddi_hitachi_rows_per_second * 100) / mddi_hitachi_rows_per_refresh;
 	panel_data->panel_info.lcd.refx100 = 6510;  	//org8500;
@@ -2139,7 +2137,7 @@ static struct platform_device *devices[] __initdata = {
 };
 
 /* SEMC_LUND: Added rachel patch for board config */
-
+/*
 static void msm_fb_mddi_power_save(int on)
 {
 #if 0
@@ -2162,18 +2160,58 @@ static void msm_fb_mddi_power_save(int on)
 		mdelay(1);
 	}
 #endif
-}
-/* SEMC:SYS: Added by Qualcomm from 3135Y end */
+}*/
 
-static int msm_fb_mddi_sel_clk(u32 *clk_rate)
+//ALFS TEST from lg kernel
+#define MSM_FB_LCDC_VREG_OP(name, op, level)			\
+do { \
+	vreg = vreg_get(0, name); \
+	vreg_set_level(vreg, level); \
+	if (vreg_##op(vreg)) \
+		printk(KERN_ERR "%s: %s vreg operation failed \n", \
+			(vreg_##op == vreg_enable) ? "vreg_enable" \
+				: "vreg_disable", name); \
+} while (0)
+
+static char *msm_fb_vreg[] = {
+	"gp1",
+	"gp2",
+};
+
+static int mddi_power_save_on;
+static int msm_fb_mddi_power_save(int on)
 {
-	*clk_rate *= 2;
+	struct vreg *vreg;
+	int flag_on = !!on;
+
+	if (mddi_power_save_on == flag_on)
+		return 0;
+
+	mddi_power_save_on = flag_on;
+
+	if (on) {
+		MSM_FB_LCDC_VREG_OP(msm_fb_vreg[0], enable, 1800);
+		MSM_FB_LCDC_VREG_OP(msm_fb_vreg[1], enable, 2800);
+	} else{
+		MSM_FB_LCDC_VREG_OP(msm_fb_vreg[0], disable, 0);
+		MSM_FB_LCDC_VREG_OP(msm_fb_vreg[1], disable, 0);
+	}
+
 	return 0;
 }
 
+
+/* SEMC:SYS: Added by Qualcomm from 3135Y end */
+
+/*static int msm_fb_mddi_sel_clk(u32 *clk_rate)
+{
+	*clk_rate *= 2;
+	return 0;
+}*/
+
 static struct mddi_platform_data mddi_pdata = {
 	.mddi_power_save = msm_fb_mddi_power_save,
-	.mddi_sel_clk = msm_fb_mddi_sel_clk,
+//	.mddi_sel_clk = msm_fb_mddi_sel_clk,		// ALFS ??
 };
 
 static struct msm_panel_common_pdata mdp_pdata = {
@@ -2184,7 +2222,7 @@ static struct msm_panel_common_pdata mdp_pdata = {
 static void __init msm_fb_add_devices(void)
 {
 	msm_fb_register_device("mdp", &mdp_pdata);
-	msm_fb_register_device("pmdh", &mddi_pdata);
+	msm_fb_register_device("pmdh", &mddi_pdata); 	//0);
 }
 
 
@@ -2544,7 +2582,7 @@ msm_i2c_gpio_config(int iface, int config_type)
 }
 
 static struct msm_i2c_platform_data msm_i2c_pdata = {
-#ifdef CONFIG_TOUCHSCREEN_CYTTSP_I2C /*ALFS TEST to fix buggy cypress touchscreen*/
+#ifdef CONFIG_TOUCHSCREEN_CYTTSP_I2C /*ALFS cypress touchscreen doesn't work well @ 100kHz */
 	.clk_freq = 400000,
 #else
 	.clk_freq = 100000,
@@ -2591,6 +2629,7 @@ static void __init msm7x2x_init(void)
 
 	if (cpu_is_msm7x27())
 		msm7x27_clock_data.max_axi_khz = 200000;
+						  
 
 	msm_acpu_clock_init(&msm7x27_clock_data);
 	/*'OLD' kgsl_pdata.high_axi_3d = clk_get_max_axi_khz();*/
@@ -2602,7 +2641,7 @@ static void __init msm7x2x_init(void)
 	/*  clk_get_max_axi_khz()  */
 	
 	kgsl_3d0_pdata.pwr_data.pwrlevel[0].gpu_freq = 0;
-	//kgsl_3d0_pdata.pwr_data.pwrlevel[0].bus_freq = 160000000;
+	////kgsl_3d0_pdata.pwr_data.pwrlevel[0].bus_freq = 160000000;
 	kgsl_3d0_pdata.pwr_data.init_level = 0;
 	kgsl_3d0_pdata.pwr_data.num_levels = 1;
 	/* 7x27 doesn't allow graphics clocks to be run asynchronously to */
