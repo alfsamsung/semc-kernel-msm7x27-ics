@@ -278,31 +278,12 @@ static int fbcon_get_rotate(struct fb_info *info)
 	return (ops) ? ops->rotate : 0;
 }
 
-/* LGE_CHANGE_S
- * Change codes to remove console cursor on booting screen. Refered to VS740
- * 2010-07-31. minjong.gong@lge.com
- */
-#ifdef CONFIG_LGE_FBCON_INACTIVE_CONSOLE
-extern int msm_fb_get_console_inactive(void);
-#endif
-/* LGE_CHANGE_E, 2010-07-31. minjong.gong@lge.com  */
 static inline int fbcon_is_inactive(struct vc_data *vc, struct fb_info *info)
 {
 	struct fbcon_ops *ops = info->fbcon_par;
 
-/* LGE_CHANGE_S
- * Change codes to remove console cursor on booting screen. Refered to VS740
- * 2010-07-31. minjong.gong@lge.com
- */
-#ifdef CONFIG_LGE_FBCON_INACTIVE_CONSOLE
-	return (info->state != FBINFO_STATE_RUNNING ||
-		vc->vc_mode != KD_TEXT || ops->graphics
-		|| msm_fb_get_console_inactive());
-#else
 	return (info->state != FBINFO_STATE_RUNNING ||
 		vc->vc_mode != KD_TEXT || ops->graphics);
-#endif
-/* LGE_CHANGE_E, 2010-07-31. minjong.gong@lge.com  */
 }
 
 static inline int get_color(struct vc_data *vc, struct fb_info *info,
@@ -388,7 +369,7 @@ static void fb_flashcursor(struct work_struct *work)
 {
 	struct fb_info *info = container_of(work, struct fb_info, queue);
 	struct fbcon_ops *ops = info->fbcon_par;
-	struct display *p;
+	//struct display *p;
 	struct vc_data *vc = NULL;
 	int c;
 	int mode;
@@ -404,7 +385,7 @@ static void fb_flashcursor(struct work_struct *work)
 		return;
 	}
 
-	p = &fb_display[vc->vc_num];
+//	p = &fb_display[vc->vc_num];
 	c = scr_readw((u16 *) vc->vc_pos);
 	mode = (!ops->cursor_flash || ops->cursor_state.enable) ?
 		CM_ERASE : CM_DRAW;
@@ -413,43 +394,23 @@ static void fb_flashcursor(struct work_struct *work)
 	release_console_sem();
 }
 
-static void cursor_timer_handler(unsigned long dev_addr)
+/*static void cursor_timer_handler(unsigned long dev_addr)
 {
 	struct fb_info *info = (struct fb_info *) dev_addr;
 	struct fbcon_ops *ops = info->fbcon_par;
 
 	schedule_work(&info->queue);
 	mod_timer(&ops->cursor_timer, jiffies + HZ/5);
-}
+}*/ /*Alfs do nothing*/
 
 static void fbcon_add_cursor_timer(struct fb_info *info)
 {
-	struct fbcon_ops *ops = info->fbcon_par;
-
-	if ((!info->queue.func || info->queue.func == fb_flashcursor) &&
-	    !(ops->flags & FBCON_FLAGS_CURSOR_TIMER) &&
-	    !fbcon_cursor_noblink) {
-		if (!info->queue.func)
-			INIT_WORK(&info->queue, fb_flashcursor);
-
-		init_timer(&ops->cursor_timer);
-		ops->cursor_timer.function = cursor_timer_handler;
-		ops->cursor_timer.expires = jiffies + HZ / 5;
-		ops->cursor_timer.data = (unsigned long ) info;
-		add_timer(&ops->cursor_timer);
-		ops->flags |= FBCON_FLAGS_CURSOR_TIMER;
-	}
+	/*Alfs do nothing*/
 }
 
 static void fbcon_del_cursor_timer(struct fb_info *info)
 {
-	struct fbcon_ops *ops = info->fbcon_par;
-
-	if (info->queue.func == fb_flashcursor &&
-	    ops->flags & FBCON_FLAGS_CURSOR_TIMER) {
-		del_timer_sync(&ops->cursor_timer);
-		ops->flags &= ~FBCON_FLAGS_CURSOR_TIMER;
-	}
+	/*Alfs do nothing*/
 }
 
 #ifndef MODULE
@@ -2229,11 +2190,11 @@ static int fbcon_switch(struct vc_data *vc)
 			fbcon_del_cursor_timer(old_info);
 	}
 
-	if (fbcon_is_inactive(vc, info) ||
-	    ops->blank_state != FB_BLANK_UNBLANK)
-		fbcon_del_cursor_timer(info);
-	else
-		fbcon_add_cursor_timer(info);
+	//if (fbcon_is_inactive(vc, info) ||
+	  // ops->blank_state != FB_BLANK_UNBLANK)
+		//fbcon_del_cursor_timer(info);
+	//else
+		//fbcon_add_cursor_timer(info);	//ALFS remove this to fix screen anim
 
 	set_blitting_type(vc, info);
 	ops->cursor_reset = 1;
@@ -2352,11 +2313,11 @@ static int fbcon_blank(struct vc_data *vc, int blank, int mode_switch)
 			update_screen(vc);
 	}
 
-	if (mode_switch || fbcon_is_inactive(vc, info) ||
-	    ops->blank_state != FB_BLANK_UNBLANK)
-		fbcon_del_cursor_timer(info);
-	else
-		fbcon_add_cursor_timer(info);
+	//if (mode_switch || fbcon_is_inactive(vc, info) ||
+	   // ops->blank_state != FB_BLANK_UNBLANK)
+		//fbcon_del_cursor_timer(info);
+	//else
+		//fbcon_add_cursor_timer(info);	//ALFS remove this to fix screen anim
 
 	return 0;
 }
@@ -3499,7 +3460,7 @@ static void fbcon_exit(void)
 	softback_buf = 0UL;
 
 	for (i = 0; i < FB_MAX; i++) {
-		int pending;
+//		int pending;
 
 		mapped = 0;
 		info = registered_fb[i];
@@ -3507,9 +3468,9 @@ static void fbcon_exit(void)
 		if (info == NULL)
 			continue;
 
-		pending = cancel_work_sync(&info->queue);
-		DPRINTK("fbcon: %s pending work\n", (pending ? "canceled" :
-			"no"));
+//		pending = cancel_work_sync(&info->queue);
+//		DPRINTK("fbcon: %s pending work\n", (pending ? "canceled" :
+//			"no"));
 
 		for (j = first_fb_vc; j <= last_fb_vc; j++) {
 			if (con2fb_map[j] == i)
@@ -3545,7 +3506,7 @@ static int __init fb_console_init(void)
 	acquire_console_sem();
 	fb_register_client(&fbcon_event_notifier);
 	fbcon_device = device_create(fb_class, NULL, MKDEV(0, 0), NULL,
-				     "fbcon");
+				     "fbconsole");
 
 	if (IS_ERR(fbcon_device)) {
 		printk(KERN_WARNING "Unable to create device "
