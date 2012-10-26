@@ -144,8 +144,9 @@ static int mddi_ext_on(struct platform_device *pdev)
 			  "%s: can't select mddi io clk targate rate = %d\n",
 			  __func__, clk_rate);
 
-	if (clk_set_min_rate(mddi_ext_clk, clk_rate) < 0)
-		printk(KERN_ERR "%s: clk_set_min_rate failed\n",
+	clk_rate = clk_round_rate(mddi_ext_clk, clk_rate);
+	if (clk_set_rate(mddi_ext_clk, clk_rate) < 0)
+		printk(KERN_ERR "%s: clk_set_rate failed\n",
 			__func__);
 
 	mddi_host_start_ext_display();
@@ -167,6 +168,18 @@ static int mddi_ext_probe(struct platform_device *pdev)
 
 	if ((pdev->id == 0) && (pdev->num_resources >= 0)) {
 		mddi_ext_pdata = pdev->dev.platform_data;
+		mddi_ext_clk = clk_get(&pdev->dev, "core_clk");
+		if (IS_ERR(mddi_ext_clk)) {
+			pr_err("can't find emdh_clk\n");
+			return PTR_ERR(mddi_ext_clk);
+		}
+		clk_enable(mddi_ext_clk);
+
+		mddi_ext_pclk = clk_get(&pdev->dev, "iface_clk");
+		if (IS_ERR(mddi_ext_pclk))
+			mddi_ext_pclk = NULL;
+		else
+			clk_enable(mddi_ext_pclk);
 
 		size =  resource_size(&pdev->resource[0]);
 		msm_emdh_base = ioremap(pdev->resource[0].start, size);
@@ -278,9 +291,6 @@ static int mddi_ext_suspend(struct platform_device *pdev, pm_message_t state)
 
 	mddi_ext_is_in_suspend = 1;
 
-	if (clk_set_min_rate(mddi_ext_clk, 0) < 0)
-		printk(KERN_ERR "%s: clk_set_min_rate failed\n", __func__);
-
 	clk_disable(mddi_ext_clk);
 	disable_irq(INT_MDDI_EXT);
 
@@ -337,13 +347,6 @@ static int mddi_ext_register_driver(void)
 static int __init mddi_ext_driver_init(void)
 {
 	int ret;
-
-	mddi_ext_clk = clk_get(NULL, "emdh_clk");
-	if (IS_ERR(mddi_ext_clk)) {
-		printk(KERN_ERR "can't find emdh_clk\n");
-		return PTR_ERR(mddi_ext_clk);
-	}
-	clk_enable(mddi_ext_clk);
 
 	ret = mddi_ext_register_driver();
 	if (ret) {

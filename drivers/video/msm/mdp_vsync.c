@@ -70,13 +70,15 @@ static struct clk *mdp_vsync_clk;
 int vsync_above_th = 4;
 int vsync_start_th = 1;
 int vsync_load_cnt;
-int vsync_clk_status;
 DEFINE_MUTEX(vsync_clk_lock);
+#endif
+int vsync_clk_status;
 DEFINE_MUTEX(vsync_timer_lock);
 
 static struct msm_fb_data_type *vsync_mfd;
 static unsigned char timer_shutdown_flag;
 
+#ifdef MDP_HW_VSYNC
 void mdp_hw_vsync_clk_enable(struct msm_fb_data_type *mfd)
 {
 	if (vsync_clk_status == 1)
@@ -100,12 +102,14 @@ void mdp_hw_vsync_clk_disable(struct msm_fb_data_type *mfd)
 	}
 	mutex_unlock(&vsync_clk_lock);
 }
-
+#endif
 static void mdp_set_vsync(unsigned long data);
 void mdp_vsync_clk_enable(void)
 {
 	if (vsync_mfd) {
+#ifdef MDP_HW_VSYNC
 		mdp_hw_vsync_clk_enable(vsync_mfd);
+#endif
 		if (!vsync_mfd->vsync_resync_timer.function) {
 			mdp_set_vsync((unsigned long) vsync_mfd);
 		}
@@ -125,10 +129,11 @@ void mdp_vsync_clk_disable(void)
 			mutex_unlock(&vsync_timer_lock);
 			vsync_mfd->vsync_resync_timer.function = NULL;
 		}
+#ifdef MDP_HW_VSYNC
 		mdp_hw_vsync_clk_disable(vsync_mfd);
+#endif
 	}
 }
-#endif
 
 static void mdp_set_vsync(unsigned long data)
 {
@@ -410,7 +415,7 @@ err_handle:
 	if (mfd->vsync_width_boundary)
 		vfree(mfd->vsync_width_boundary);
 	mfd->panel_info.lcd.vsync_enable = FALSE;
-	printk(KERN_ERR "%s: failed!\n", __func__);
+	printk(KERN_ERR "%s: is off or failed!\n", __func__);
 }
 
 void mdp_vsync_resync_workqueue_handler(struct work_struct *work)

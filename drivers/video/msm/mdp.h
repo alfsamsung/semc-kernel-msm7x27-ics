@@ -302,16 +302,10 @@ struct mdp_dma_data {
 #define MDP_SYNCFG_HGT_LOC 21
 #define MDP_SYNCFG_VSYNC_EXT_EN BIT(20)
 #define MDP_SYNCFG_VSYNC_INT_EN BIT(19)
-#ifndef CONFIG_FB_MSM_MDDI_DISABLE_MDP_HW_VSYNC
+#ifndef CONFIG_FB_MSM_MDDI_DISABLE_HW_VSYNC
 #define MDP_HW_VSYNC
 #endif
 #endif
-
-//ALFS test hitachi screen cuts
-/*
-#ifdef CONFIG_FB_MSM_MDDI_HITACHI_HVGA_LCD
-#define MDDI_HOST_WINDOW_WORKAROUND
-#endif */
 
 /*
  * 0x0018 MDP VSYNC THREASH

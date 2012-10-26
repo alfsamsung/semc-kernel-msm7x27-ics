@@ -241,9 +241,11 @@ struct msm_panel_common_pdata {
 	int (*panel_num)(void);
 	void (*panel_config_gpio)(int);
 	int *gpio_num;
+#ifdef CONFIG_FB_MSM_MDP40
 	int mdp_core_clk_rate;
-	unsigned num_mdp_clk;
+#endif
 	int *mdp_core_clk_table;
+	unsigned num_mdp_clk;
 	int mdp_rev;
 	int (*writeback_offset)(void);
 };
@@ -258,15 +260,16 @@ struct tvenc_platform_data {
 };
 
 struct mddi_platform_data {
-	void (*mddi_power_save)(int on);
+	int (*mddi_power_save)(int on);		//void
 	int (*mddi_sel_clk)(u32 *clk_rate);
-	int (*mddi_power_on)(int);
+//	int (*mddi_power_on)(int);
 	int (*mddi_client_power)(u32 client_id);
 };
 
 struct msm_fb_platform_data {
 	int (*detect_client)(const char *name);
 	int mddi_prescan;
+	int (*allow_set_offset)(void);
 };
 
 struct msm_i2c_platform_data {
