@@ -213,8 +213,11 @@ unsigned long shrink_slab(struct shrink_control *shrink,
 	if (scanned == 0)
 		scanned = SWAP_CLUSTER_MAX;
 
-	if (!down_read_trylock(&shrinker_rwsem))
-		return 1;	/* Assume we'll be able to shrink next time */
+	if (!down_read_trylock(&shrinker_rwsem)) {
+	/* Assume we'll be able to shrink next time */
+	ret = 1;
+	goto out;
+	}
 
 	list_for_each_entry(shrinker, &shrinker_list, list) {
 		unsigned long long delta;
@@ -263,6 +266,8 @@ unsigned long shrink_slab(struct shrink_control *shrink,
 		shrinker->nr += total_scan;
 	}
 	up_read(&shrinker_rwsem);
+out:
+	cond_resched();
 	return ret;
 }
 
@@ -1351,6 +1356,7 @@ static void shrink_active_list(unsigned long nr_pages, struct zone *zone,
 	spin_unlock_irq(&zone->lru_lock);
 }
 
+#ifdef CONFIG_SWAP
 static int inactive_anon_is_low_global(struct zone *zone)
 {
 	unsigned long active, inactive;
@@ -1375,6 +1381,13 @@ static int inactive_anon_is_low_global(struct zone *zone)
 static int inactive_anon_is_low(struct zone *zone, struct scan_control *sc)
 {
 	int low;
+	
+	/*
+	* If we don't have swap space, anonymous page deactivation
+	* is pointless.
+	*/
+	if (!total_swap_pages)
+		return 0;
 
 	if (scanning_global_lru(sc))
 		low = inactive_anon_is_low_global(zone);
@@ -1382,6 +1395,13 @@ static int inactive_anon_is_low(struct zone *zone, struct scan_control *sc)
 		low = mem_cgroup_inactive_anon_is_low(sc->mem_cgroup);
 	return low;
 }
+#else
+static inline int inactive_anon_is_low(struct zone *zone,
+	      struct scan_control *sc)
+{
+	return 0;
+}
+#endif
 
 static unsigned long shrink_list(enum lru_list lru, unsigned long nr_to_scan,
 	struct zone *zone, struct scan_control *sc, int priority)
@@ -1919,7 +1939,8 @@ loop_again:
 			 */
 			if (!zone_watermark_ok(zone, order, 8*zone->pages_high,
 						end_zone, 0))
-				shrink_zone(priority, zone, &sc);
+			shrink_zone(priority, zone, &sc);
+			
 			reclaim_state->reclaimed_slab = 0;
 			shrink.nr_scanned = sc.nr_scanned;
 			shrink_slab(&shrink, lru_pages);
