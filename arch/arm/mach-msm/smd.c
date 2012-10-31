@@ -1076,6 +1076,7 @@ int smd_cur_packet_size(smd_channel_t *ch)
 {
 	return ch->current_packet;
 }
+EXPORT_SYMBOL(smd_cur_packet_size);
 
 int smd_tiocmget(smd_channel_t *ch)
 {
