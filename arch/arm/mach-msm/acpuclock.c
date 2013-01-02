@@ -213,8 +213,8 @@ static struct clkctl_acpu_speed pll0_960_pll1_245_pll2_1200[] = {
 	{ 1, 600000, ACPU_PLL_2, 2, 1, 200000, 2, 7, 192000 },
 	//{ 1, 652800, ACPU_PLL_0, 4, 1, 163200, 3, 7, 192000 },
 	//{ 1, 691200, ACPU_PLL_0, 4, 1, 172800, 3, 7, 192000 },
-	{ 1, 691200, ACPU_PLL_0, 4, 0, 230400, 2, 7, 200000 }, //alfs test
-	{ 1, 729600, ACPU_PLL_0, 4, 1, 182400, 3, 7, 200000 },
+	{ 1, 691200, ACPU_PLL_0, 4, 0, 230400, 2, 7, 192000 }, //alfs test
+	{ 1, 729600, ACPU_PLL_0, 4, 1, 182400, 3, 7, 192000 },
 	{ 1, 748800, ACPU_PLL_0, 4, 1, 187200, 3, 7, 200000 },
 	{ 1, 768000, ACPU_PLL_0, 4, 1, 192000, 3, 7, 200000 },
 	{ 1, 787200, ACPU_PLL_0, 4, 1, 196800, 3, 7, 200000 },
@@ -362,7 +362,7 @@ static int pc_pll_request(unsigned id, unsigned on)
 			if (!pll_control->pll[PLL_BASE + id].on) {
 				writel(6, PLLn_MODE(id));
 				udelay(50);
-				dsb();
+				mb();
 				writel(7, PLLn_MODE(id));
 				pll_control->pll[PLL_BASE + id].on = 1;
 			}
@@ -422,7 +422,7 @@ static int acpuclk_set_vdd_level(int vdd)
 	       current_vdd, vdd);
 
 	writel((1 << 7) | (vdd << 3), A11S_VDD_SVS_PLEVEL_ADDR);
-	dsb();
+	mb();
 	udelay(drv_state.vdd_switch_time_us);
 	if ((readl(A11S_VDD_SVS_PLEVEL_ADDR) & 0x7) != vdd) {
 		pr_err("VDD set failed\n");
@@ -624,7 +624,7 @@ int acpuclk_set_rate(int cpu, unsigned long rate, enum setrate_reason reason)
 		drv_state.current_speed = cur_s;
 		/* Re-adjust lpj for the new clock speed. */
 		loops_per_jiffy = cur_s->lpj;
-		dsb();
+		mb();
 		udelay(drv_state.acpu_switch_time_us);
 	}
 
