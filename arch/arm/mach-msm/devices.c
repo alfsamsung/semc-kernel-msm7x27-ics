@@ -1277,11 +1277,11 @@ struct clk msm_clocks_7x27[] = {
 	CLK_PCOM("icodec_tx_clk",	ICODEC_TX_CLK,	NULL, 0),
 	CLK_PCOM("imem_clk",	IMEM_CLK,	NULL, OFF),
 	CLK_PCOM("mdc_clk",	MDC_CLK,	NULL, 0),
-	CLK_PCOM("core_clk",	PMDH_CLK,	NULL, OFF | CLK_MINMAX), //"mddi.0"
-	CLK_PCOM("core_clk",	MDP_CLK,	NULL, CLK_MIN), 	//OFF), "mdp.0"
-	CLK_PCOM("mdp_clk", MDP_LCDC_PCLK_CLK, NULL, 0),		//"lcdc.0"
-	CLK_PCOM("lcdc_clk", MDP_LCDC_PAD_PCLK_CLK, NULL, 0),		//"lcdc.0"
-	CLK_PCOM("vsync_clk",	MDP_VSYNC_CLK,	NULL, OFF),		//"mdp.0"
+	CLK_PCOM("mddi_clk",	PMDH_CLK,	NULL, OFF | CLK_MINMAX),
+	CLK_PCOM("mdp_clk",	MDP_CLK,	NULL, OFF),
+	CLK_PCOM("mdp_lcdc_pclk_clk", MDP_LCDC_PCLK_CLK, NULL, 0),
+	CLK_PCOM("mdp_lcdc_pad_pclk_clk", MDP_LCDC_PAD_PCLK_CLK, NULL, 0),
+	CLK_PCOM("mdp_vsync_clk", MDP_VSYNC_CLK, NULL, OFF),
 	CLK_PCOM("pbus_clk",	PBUS_CLK,	NULL, CLK_MIN),
 	CLK_PCOM("pcm_clk",	PCM_CLK,	NULL, 0),
 	CLK_PCOM("sdac_clk",	SDAC_CLK,	NULL, OFF),
@@ -1307,8 +1307,8 @@ struct clk msm_clocks_7x27[] = {
 
 	CLK_VOTER("ebi1_acpu_clk",	EBI_ACPU_CLK,   "ebi1_clk", NULL, 0),
 	CLK_VOTER("ebi1_kgsl_clk",	EBI_KGSL_CLK,   "ebi1_clk", NULL, 0),
-	CLK_VOTER("mem_clk",		EBI_LCDC_CLK,   "ebi1_clk", NULL, 0),	//"lcdc.0"
-	CLK_VOTER("mem_clk",		EBI_MDDI_CLK,   "ebi1_clk", NULL, 0),	//"mddi.0"
+	CLK_VOTER("ebi1_lcdc_clk",	EBI_LCDC_CLK,   "ebi1_clk", NULL, 0),
+	CLK_VOTER("ebi1_mddi_clk",	EBI_MDDI_CLK,   "ebi1_clk", NULL, 0),
 	CLK_VOTER("ebi1_usb_clk",	EBI_USB_CLK,    "ebi1_clk", NULL, 0),
 	CLK_VOTER("ebi1_vfe_clk",	EBI_VFE_CLK,    "ebi1_clk", NULL, 0),
 	CLK_VOTER("ebi1_pm_qos_clk",	EBI_PM_QOS_CLK, "ebi1_clk", NULL, 0),

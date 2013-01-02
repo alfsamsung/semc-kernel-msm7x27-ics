@@ -245,8 +245,7 @@ static void mdp_set_sync_cfg_1(struct msm_fb_data_type *mfd, int vsync_cnt)
 #endif
 #endif
 
-void mdp_config_vsync(struct platform_device *pdev,
-	struct msm_fb_data_type *mfd)
+void mdp_config_vsync(struct msm_fb_data_type *mfd)
 {
 	/* vsync on primary lcd only for now */
 	if ((mfd->dest != DISPLAY_LCD) || (mfd->panel_info.pdest != DISPLAY_1)
@@ -269,7 +268,7 @@ void mdp_config_vsync(struct platform_device *pdev,
 
 #ifdef MDP_HW_VSYNC
 		if (mdp_vsync_clk == NULL)
-			mdp_vsync_clk = clk_get(&pdev->dev, "vsync_clk");
+			mdp_vsync_clk = clk_get(NULL, "mdp_vsync_clk");
 
 		if (IS_ERR(mdp_vsync_clk)) {
 			printk(KERN_ERR "error: can't get mdp_vsync_clk!\n");

@@ -244,9 +244,8 @@ static int mddi_on(struct platform_device *pdev)
 			  "%s: can't select mddi io clk targate rate = %d\n",
 			  __func__, clk_rate);
 
-	clk_rate = clk_round_rate(mddi_clk, clk_rate);
-	if (clk_set_rate(mddi_clk, clk_rate) < 0)
-		printk(KERN_ERR "%s: clk_set_rate failed\n",
+	if (clk_set_min_rate(mddi_clk, clk_rate) < 0)
+		printk(KERN_ERR "%s: clk_set_min_rate failed\n",
 			__func__);
 
 	if (mfd->ebi1_clk)
@@ -267,31 +266,9 @@ static int mddi_probe(struct platform_device *pdev)
 	int rc;
 	resource_size_t size ;
 	u32 clk_rate;
-	unsigned long rate;
-	int ret;
-	struct clk *ebi1_clk = NULL;
-
+	
 	if ((pdev->id == 0) && (pdev->num_resources >= 0)) {
 		mddi_pdata = pdev->dev.platform_data;
-		pmdh_clk_status = 0;
-
-		mddi_clk = clk_get(&pdev->dev, "core_clk");
-		if (IS_ERR(mddi_clk)) {
-			pr_err("can't find mddi_clk\n");
-			return PTR_ERR(mddi_clk);
-		}
-		rate = clk_round_rate(mddi_clk, 49000000);
-		ret = clk_set_rate(mddi_clk, rate);
-		if (ret)
-			pr_err("Can't set mddi_clk min rate to %lu\n",
-									rate);
-
-		pr_info("mddi_clk init rate is %lu\n",
-			clk_get_rate(mddi_clk));
-		mddi_pclk = clk_get(&pdev->dev, "iface_clk");
-		if (IS_ERR(mddi_pclk))
-			mddi_pclk = NULL;
-		pmdh_clk_enable();
 
 		size =  resource_size(&pdev->resource[0]);
 		msm_pmdh_base =  ioremap(pdev->resource[0].start, size);
@@ -313,7 +290,6 @@ static int mddi_probe(struct platform_device *pdev)
 		return -EPERM;
 
 	mfd = platform_get_drvdata(pdev);
-	mfd->ebi1_clk = ebi1_clk;
 
 	if (!mfd)
 		return -ENODEV;
@@ -373,6 +349,13 @@ static int mddi_probe(struct platform_device *pdev)
 	if (clk_set_max_rate(mddi_clk, clk_rate) < 0)
 		printk(KERN_ERR "%s: clk_set_max_rate failed\n", __func__);
 	mfd->panel_info.clk_rate = mfd->panel_info.clk_min;
+	
+	if (!mddi_client_type)
+		mddi_client_type = mfd->panel_info.lcd.rev;
+	else if (!mfd->panel_info.lcd.rev)
+		printk(KERN_ERR
+		"%s: mddi client is trying to revert back to type 1	!!!\n",
+		__func__);
 
 	/*
 	 * set driver data
@@ -433,6 +416,9 @@ void mddi_disable(int lock)
 	mddi_pad_ctrl = mddi_host_reg_in(PAD_CTL);
 	mddi_host_reg_out(PAD_CTL, 0x0);
 	
+	if (clk_set_min_rate(mddi_clk, 0) < 0)
+		printk(KERN_ERR "%s: clk_set_min_rate failed\n", __func__);
+	
 	pmdh_clk_disable();
 
 	if (mddi_pdata && mddi_pdata->mddi_power_save)
@@ -457,6 +443,9 @@ static int mddi_suspend(struct platform_device *pdev, pm_message_t state)
 
 	mddi_pad_ctrl = mddi_host_reg_in(PAD_CTL);
 	mddi_host_reg_out(PAD_CTL, 0x0);
+	
+	if (clk_set_min_rate(mddi_clk, 0) < 0)
+		printk(KERN_ERR "%s: clk_set_min_rate failed\n", __func__);
 
 	pmdh_clk_disable();
 
@@ -529,6 +518,23 @@ static int mddi_register_driver(void)
 static int __init mddi_driver_init(void)
 {
 	int ret;
+	pmdh_clk_status = 0;
+
+	mddi_clk = clk_get(NULL, "mddi_clk");
+	if (IS_ERR(mddi_clk)) {
+		printk(KERN_ERR "can't find mddi_clk\n");
+		return PTR_ERR(mddi_clk);
+	}
+	ret = clk_set_min_rate(mddi_clk, 49000000);
+	if (ret)
+		printk(KERN_ERR "Can't set mddi_clk min rate to 49000000\n");
+
+	printk(KERN_INFO "mddi_clk init rate is %lu\n",
+		clk_get_rate(mddi_clk));
+	mddi_pclk = clk_get(NULL, "mddi_pclk");
+	if (IS_ERR(mddi_pclk))
+		mddi_pclk = NULL;
+	pmdh_clk_enable();
 	
 	ret = mddi_register_driver();
 	if (ret) {
