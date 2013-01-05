@@ -1,0 +1,52 @@
+
+CROSS_COMPILE=/media/ICS/home-ics/Android/kernel/Toolchain/linaro4.7-2012.09/bin/arm-linux-gnueabihf-
+
+KERNEL_DIR=/media/ICS/home-ics/Android/kernel/Test-gammel-usb--kernel-new-kgsl-ginger2-6-35
+
+VENDOR_TI_WLAN=/media/Alf/home/alf/android/system/vendor/semc/shakira/vendor_ti_wlan
+
+CP=/$KERNEL_DIR/../compiled
+
+
+#cleanup
+if [ -e $CP ];
+then
+	rm -r $CP;
+fi;
+
+#prep
+if [ ! -e $CP ];
+then
+	mkdir $CP $CP/modules;
+fi;
+
+cp ./arch/arm/boot/zImage $CP/
+cp ./drivers/net/tun.ko $CP/modules/
+cp ./drivers/staging/zcache/zcache.ko $CP/modules/
+cp ./drivers/staging/ramzswap/ramzswap.ko $CP/modules/
+cp ./fs/cifs/cifs.ko $CP/modules/
+
+#make wifi
+
+cd /$VENDOR_TI_WLAN/sta/platforms/os/linux
+export CROSS_COMPILE=$CROSS_COMPILE
+export ARCH=arm
+export HOST_PLATFORM=msm
+export KERNEL_DIR=$KERNEL_DIR
+
+make clean
+make
+cp *.ko $CP/modules/
+make clean
+
+cd /$VENDOR_TI_WLAN/ap/platforms/os/linux
+export CROSS_COMPILE=$CROSS_COMPILE
+export ARCH=arm
+export HOST_PLATFORM=msm
+export KERNEL_DIR=$KERNEL_DIR
+
+make clean
+make
+cp *.ko $CP/modules/
+make clean
+cd /$CP
