@@ -225,7 +225,7 @@ void ext4_free_inode(handle_t *handle, struct inode *inode)
 	is_directory = S_ISDIR(inode->i_mode);
 
 	/* Do this BEFORE marking the inode not in use or returning an error */
-	clear_inode(inode);
+	ext4_clear_inode(inode);
 
 	es = EXT4_SB(sb)->s_es;
 	if (ino < EXT4_FIRST_INO(sb) || ino > le32_to_cpu(es->s_inodes_count)) {
@@ -1079,7 +1079,8 @@ fail_free_drop:
 fail_drop:
 	vfs_dq_drop(inode);
 	inode->i_flags |= S_NOQUOTA;
-	inode->i_nlink = 0;
+//	inode->i_nlink = 0;
+	set_nlink(inode, 0);
 	unlock_new_inode(inode);
 	iput(inode);
 	brelse(inode_bitmap_bh);

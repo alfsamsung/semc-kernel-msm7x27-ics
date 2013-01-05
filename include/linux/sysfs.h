@@ -99,8 +99,9 @@ int __must_check sysfs_chmod_file(struct kobject *kobj, struct attribute *attr,
 void sysfs_remove_file(struct kobject *kobj, const struct attribute *attr);
 
 int __must_check sysfs_create_bin_file(struct kobject *kobj,
-				       struct bin_attribute *attr);
-void sysfs_remove_bin_file(struct kobject *kobj, struct bin_attribute *attr);
+				       const struct bin_attribute *attr);
+void sysfs_remove_bin_file(struct kobject *kobj,
+			    const struct bin_attribute *attr);
 
 int __must_check sysfs_create_link(struct kobject *kobj, struct kobject *target,
 				   const char *name);
@@ -119,6 +120,10 @@ int sysfs_add_file_to_group(struct kobject *kobj,
 			const struct attribute *attr, const char *group);
 void sysfs_remove_file_from_group(struct kobject *kobj,
 			const struct attribute *attr, const char *group);
+int sysfs_merge_group(struct kobject *kobj,
+			const struct attribute_group *grp);
+void sysfs_unmerge_group(struct kobject *kobj,
+			const struct attribute_group *grp);
 
 void sysfs_notify(struct kobject *kobj, const char *dir, const char *attr);
 void sysfs_notify_dirent(struct sysfs_dirent *sd);
@@ -175,13 +180,13 @@ static inline void sysfs_remove_file(struct kobject *kobj,
 }
 
 static inline int sysfs_create_bin_file(struct kobject *kobj,
-					struct bin_attribute *attr)
+					const struct bin_attribute *attr)
 {
 	return 0;
 }
 
 static inline void sysfs_remove_bin_file(struct kobject *kobj,
-					 struct bin_attribute *attr)
+					 const struct bin_attribute *attr)
 {
 }
 
@@ -227,6 +232,17 @@ static inline int sysfs_add_file_to_group(struct kobject *kobj,
 
 static inline void sysfs_remove_file_from_group(struct kobject *kobj,
 		const struct attribute *attr, const char *group)
+{
+}
+
+static inline int sysfs_merge_group(struct kobject *kobj,
+			const struct attribute_group *grp)
+{
+	return 0;
+}
+
+static inline void sysfs_unmerge_group(struct kobject *kobj,
+			const struct attribute_group *grp)
 {
 }
 

@@ -14,7 +14,6 @@
 #include <linux/reboot.h>
 #include <linux/string.h>
 #include <linux/device.h>
-#include <linux/kmod.h>
 #include <linux/delay.h>
 #include <linux/fs.h>
 #include <linux/mount.h>
@@ -62,14 +61,14 @@ void hibernation_set_ops(struct platform_hibernation_ops *ops)
 		WARN_ON(1);
 		return;
 	}
-	mutex_lock(&pm_mutex);
+	lock_system_sleep();
 	hibernation_ops = ops;
 	if (ops)
 		hibernation_mode = HIBERNATION_PLATFORM;
 	else if (hibernation_mode == HIBERNATION_PLATFORM)
 		hibernation_mode = HIBERNATION_SHUTDOWN;
 
-	mutex_unlock(&pm_mutex);
+	unlock_system_sleep();
 }
 
 static bool entering_platform_hibernation;
@@ -236,7 +235,7 @@ static int create_image(int platform_mode)
 		goto Power_up_devices;
 	}
 
-	if (hibernation_test(TEST_CORE))
+	if (hibernation_test(TEST_CORE) || pm_wakeup_pending())
 		goto Power_up;
 
 	in_suspend = 1;
@@ -247,7 +246,8 @@ static int create_image(int platform_mode)
 			error);
 	/* Restore control flow magically appears here */
 	restore_processor_state();
-	if (!in_suspend)
+	if (!in_suspend) {
+		events_check_enabled = false;
 		platform_leave(platform_mode);
  Power_up:
 	sysdev_resume();
@@ -278,18 +278,29 @@ int hibernation_snapshot(int platform_mode)
 
 	error = platform_begin(platform_mode);
 	if (error)
-		return error;
+		goto Close;
 
 	/* Free memory before shutting down devices. */
 	error = swsusp_shrink_memory();
 	if (error)
 		goto Close;
 
+	error = freeze_kernel_threads();
+	if (error)
+		goto Cleanup;
+
+	error = dpm_prepare(PMSG_FREEZE);
+	if (error) {
+		dpm_complete(msg);
+		goto Cleanup;
+	}
+
 	suspend_console();
-	error = dpm_suspend_start(PMSG_FREEZE);
+	pm_restrict_gfp_mask(); //alfstest
+	error = dpm_suspend(PMSG_FREEZE);
 	if (error)
 		goto Recover_platform;
-
+	
 	if (hibernation_test(TEST_DEVICES))
 		goto Recover_platform;
 
@@ -323,6 +334,10 @@ int hibernation_snapshot(int platform_mode)
  Recover_platform:
 	platform_recover(platform_mode);
 	goto Resume_devices;
+
+ Cleanup:
+	swsusp_free();
+	goto Close;
 }
 
 /**
@@ -454,15 +469,20 @@ int hibernation_platform_enter(void)
 	if (!error) {
 		local_irq_disable();
 		sysdev_suspend(PMSG_HIBERNATE);
+		if (pm_wakeup_pending()) {
+		error = -EAGAIN;
+		goto Power_up;
+	}
+
 		hibernation_ops->enter();
 		/* We should never get here */
 		while (1);
 	}
 	
-	/*
-	 * We don't need to reenable the nonboot CPUs or resume consoles, since
-	 * the system is going to be halted anyway.
-	 */
+ Power_up:
+	sysdev_resume();
+	local_irq_enable();
+	enable_nonboot_cpus();
  Finish:
 	hibernation_ops->finish();
 	
@@ -510,17 +530,6 @@ static void power_down(void)
 	while(1);
 }
 
-static int prepare_processes(void)
-{
-	int error = 0;
-
-	if (freeze_processes()) {
-		error = -EBUSY;
-		thaw_processes();
-	}
-	return error;
-}
-
 /**
  *	hibernate - The granpappy of the built-in hibernation management
  */
@@ -529,7 +538,7 @@ int hibernate(void)
 {
 	int error;
 
-	mutex_lock(&pm_mutex);
+	lock_system_sleep();
 	/* The snapshot device should not be opened while we're running */
 	if (!atomic_add_unless(&snapshot_device_available, -1, 0)) {
 		error = -EBUSY;
@@ -538,10 +547,6 @@ int hibernate(void)
 
 	pm_prepare_console();
 	error = pm_notifier_call_chain(PM_HIBERNATION_PREPARE);
-	if (error)
-		goto Exit;
-
-	error = usermodehelper_disable();
 	if (error)
 		goto Exit;
 
@@ -554,7 +559,7 @@ int hibernate(void)
 	sys_sync();
 	printk("done.\n");
 
-	error = prepare_processes();
+	error = freeze_processes();
 	if (error)
 		goto Finish;
 
@@ -583,13 +588,12 @@ int hibernate(void)
 	thaw_processes();
  Finish:
 	free_basic_memory_bitmaps();
-	usermodehelper_enable();
  Exit:
 	pm_notifier_call_chain(PM_POST_HIBERNATION);
 	pm_restore_console();
 	atomic_inc(&snapshot_device_available);
  Unlock:
-	mutex_unlock(&pm_mutex);
+	unlock_system_sleep();
 	return error;
 }
 
@@ -671,16 +675,12 @@ static int software_resume(void)
 	if (error)
 		goto Finish;
 
-	error = usermodehelper_disable();
-	if (error)
-		goto Finish;
-
 	error = create_basic_memory_bitmaps();
 	if (error)
 		goto Finish;
 
 	pr_debug("PM: Preparing processes for restore.\n");
-	error = prepare_processes();
+	error = freeze_processes();
 	if (error) {
 		swsusp_close(FMODE_READ);
 		goto Done;
@@ -697,7 +697,6 @@ static int software_resume(void)
 	thaw_processes();
  Done:
 	free_basic_memory_bitmaps();
-	usermodehelper_enable();
  Finish:
 	pm_notifier_call_chain(PM_POST_RESTORE);
 	pm_restore_console();
@@ -789,7 +788,7 @@ static ssize_t disk_store(struct kobject *kobj, struct kobj_attribute *attr,
 	p = memchr(buf, '\n', n);
 	len = p ? p - buf : n;
 
-	mutex_lock(&pm_mutex);
+	lock_system_sleep();
 	for (i = HIBERNATION_FIRST; i <= HIBERNATION_MAX; i++) {
 		if (len == strlen(hibernation_modes[i])
 		    && !strncmp(buf, hibernation_modes[i], len)) {
@@ -817,7 +816,7 @@ static ssize_t disk_store(struct kobject *kobj, struct kobj_attribute *attr,
 	if (!error)
 		pr_debug("PM: Hibernation mode set to '%s'\n",
 			 hibernation_modes[mode]);
-	mutex_unlock(&pm_mutex);
+	unlock_system_sleep();
 	return error ? error : n;
 }
 
@@ -844,9 +843,9 @@ static ssize_t resume_store(struct kobject *kobj, struct kobj_attribute *attr,
 	if (maj != MAJOR(res) || min != MINOR(res))
 		goto out;
 
-	mutex_lock(&pm_mutex);
+	lock_system_sleep();
 	swsusp_resume_device = res;
-	mutex_unlock(&pm_mutex);
+	unlock_system_sleep();
 	printk(KERN_INFO "PM: Starting manual resume from disk\n");
 	noresume = 0;
 	software_resume();

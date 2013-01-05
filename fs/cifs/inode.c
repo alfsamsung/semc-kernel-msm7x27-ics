@@ -141,7 +141,7 @@ static void cifs_unix_info_to_inode(struct inode *inode,
 	else
 		inode->i_gid = le64_to_cpu(info->Gid);
 
-	inode->i_nlink = le64_to_cpu(info->Nlinks);
+	set_nlink(inode, le64_to_cpu(info->Nlinks));
 
 	spin_lock(&inode->i_lock);
 	if (is_size_safe_to_change(cifsInfo, end_of_file)) {
@@ -619,7 +619,7 @@ int cifs_get_inode_info(struct inode **pinode,
 	}
 	spin_unlock(&inode->i_lock);
 
-	inode->i_nlink = le32_to_cpu(pfindData->NumberOfLinks);
+	set_nlink(inode, le32_to_cpu(pfindData->NumberOfLinks));
 
 	/* BB fill in uid and gid here? with help from winbind?
 	   or retrieve from NTFS stream extended attribute */
@@ -726,7 +726,7 @@ struct inode *cifs_iget(struct super_block *sb, unsigned long ino)
 	if (rc && cifs_sb->tcon->ipc) {
 		cFYI(1, ("ipc connection - fake read inode"));
 		inode->i_mode |= S_IFDIR;
-		inode->i_nlink = 2;
+		set_nlink(inode, 2);
 		inode->i_op = &cifs_ipc_inode_ops;
 		inode->i_fop = &simple_dir_operations;
 		inode->i_uid = cifs_sb->mnt_uid;
@@ -1155,7 +1155,6 @@ int cifs_mkdir(struct inode *inode, struct dentry *direntry, int mode)
 				goto mkdir_get_info;
 			}
 
-			newinode->i_nlink = 2;
 			d_instantiate(direntry, newinode);
 
 			/* we already checked in POSIXCreate whether
@@ -1199,7 +1198,7 @@ mkdir_get_info:
 		 /* setting nlink not necessary except in cases where we
 		  * failed to get it from the server or was set bogus */
 		if ((direntry->d_inode) && (direntry->d_inode->i_nlink < 2))
-				direntry->d_inode->i_nlink = 2;
+				set_nlink(direntry->d_inode, 2);
 
 		mode &= ~current->fs->umask;
 		/* must turn on setgid bit if parent dir has it */

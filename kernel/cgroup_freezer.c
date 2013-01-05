@@ -47,17 +47,20 @@ static inline struct freezer *task_freezer(struct task_struct *task)
 			    struct freezer, css);
 }
 
-int cgroup_frozen(struct task_struct *task)
+int cgroup_freezing_or_frozen(struct task_struct *task)
 {
 	struct freezer *freezer;
 	enum freezer_state state;
 
 	task_lock(task);
 	freezer = task_freezer(task);
-	state = freezer->state;
+	if (!freezer->css.cgroup->parent)
+		state = CGROUP_THAWED; /* root cgroup can't be frozen */
+	else
+		state = freezer->state;
 	task_unlock(task);
 
-	return state == CGROUP_FROZEN;
+	return (state == CGROUP_FREEZING) || (state == CGROUP_FROZEN);
 }
 
 /*
@@ -142,10 +145,14 @@ static struct cgroup_subsys_state *freezer_create(struct cgroup_subsys *ss,
 static void freezer_destroy(struct cgroup_subsys *ss,
 			    struct cgroup *cgroup)
 {
-	kfree(cgroup_freezer(cgroup));
+	struct freezer *freezer = cgroup_freezer(cgroup);
+
+	if (freezer->state != CGROUP_THAWED)
+		atomic_dec(&system_freezing_cnt);
+	kfree(freezer);
 }
 
-/* Task is frozen or will freeze immediately when next it gets woken */
+/* task is frozen or will freeze immediately when next it gets woken */
 static bool is_task_frozen_enough(struct task_struct *task)
 {
 	return frozen(task) ||
@@ -212,19 +219,20 @@ static void freezer_fork(struct cgroup_subsys *ss, struct task_struct *task)
 
 	/* Locking avoids race with FREEZING -> THAWED transitions. */
 	if (freezer->state == CGROUP_FREEZING)
-		freeze_task(task, true);
+		freeze_task(task);
 	spin_unlock_irq(&freezer->lock);
 }
 
 /*
  * caller must hold freezer->lock
  */
-static void update_freezer_state(struct cgroup *cgroup,
+static void update_if_frozen(struct cgroup *cgroup,
 				 struct freezer *freezer)
 {
 	struct cgroup_iter it;
 	struct task_struct *task;
 	unsigned int nfrozen = 0, ntotal = 0;
+	enum freezer_state old_state = freezer->state;
 
 	cgroup_iter_start(cgroup, &it);
 	while ((task = cgroup_iter_next(cgroup, &it))) {
@@ -233,17 +241,15 @@ static void update_freezer_state(struct cgroup *cgroup,
 			nfrozen++;
 	}
 
-	/*
-	 * Transition to FROZEN when no new tasks can be added ensures
-	 * that we never exist in the FROZEN state while there are unfrozen
-	 * tasks.
-	 */
-	if (nfrozen == ntotal)
-		freezer->state = CGROUP_FROZEN;
-	else if (nfrozen > 0)
-		freezer->state = CGROUP_FREEZING;
-	else
-		freezer->state = CGROUP_THAWED;
+	if (old_state == CGROUP_THAWED) {
+		BUG_ON(nfrozen > 0);
+	} else if (old_state == CGROUP_FREEZING) {
+		if (nfrozen == ntotal)
+			freezer->state = CGROUP_FROZEN;
+	} else { /* old_state == CGROUP_FROZEN */
+		BUG_ON(nfrozen != ntotal);
+	}
+
 	cgroup_iter_end(cgroup, &it);
 }
 
@@ -262,7 +268,7 @@ static int freezer_read(struct cgroup *cgroup, struct cftype *cft,
 	if (state == CGROUP_FREEZING) {
 		/* We change from FREEZING to FROZEN lazily if the cgroup was
 		 * only partially frozen when we exitted write. */
-		update_freezer_state(cgroup, freezer);
+		update_if_frozen(cgroup, freezer);
 		state = freezer->state;
 	}
 	spin_unlock_irq(&freezer->lock);
@@ -282,7 +288,7 @@ static int try_to_freeze_cgroup(struct cgroup *cgroup, struct freezer *freezer)
 	freezer->state = CGROUP_FREEZING;
 	cgroup_iter_start(cgroup, &it);
 	while ((task = cgroup_iter_next(cgroup, &it))) {
-		if (!freeze_task(task, true))
+		if (!freeze_task(task))
 			continue;
 		if (is_task_frozen_enough(task))
 			continue;
@@ -300,9 +306,8 @@ static void unfreeze_cgroup(struct cgroup *cgroup, struct freezer *freezer)
 	struct task_struct *task;
 
 	cgroup_iter_start(cgroup, &it);
-	while ((task = cgroup_iter_next(cgroup, &it))) {
-		thaw_process(task);
-	}
+	while ((task = cgroup_iter_next(cgroup, &it)))
+		__thaw_task(task);
 	cgroup_iter_end(cgroup, &it);
 
 	freezer->state = CGROUP_THAWED;
@@ -318,15 +323,19 @@ static int freezer_change_state(struct cgroup *cgroup,
 
 	spin_lock_irq(&freezer->lock);
 
-	update_freezer_state(cgroup, freezer);
+	update_if_frozen(cgroup, freezer);
 	if (goal_state == freezer->state)
 		goto out;
 
 	switch (goal_state) {
 	case CGROUP_THAWED:
+		if (freezer->state != CGROUP_THAWED)
+			atomic_dec(&system_freezing_cnt);
 		unfreeze_cgroup(cgroup, freezer);
 		break;
 	case CGROUP_FROZEN:
+		if (freezer->state == CGROUP_THAWED)
+			atomic_inc(&system_freezing_cnt);
 		retval = try_to_freeze_cgroup(cgroup, freezer);
 		break;
 	default:

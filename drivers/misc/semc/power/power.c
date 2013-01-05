@@ -32,6 +32,10 @@
 /* Enable/disable sys fs debug */
 /* #define DEBUG_FS */
 
+#ifdef CONFIG_DEBUG_FS
+#define DEBUG_FS
+#endif
+
 #define MIN(x,y) ((x) < (y) ? (x) : (y))
 
 struct charger_info {

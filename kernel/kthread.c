@@ -13,6 +13,7 @@
 #include <linux/file.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
+#include <linux/freezer.h>
 #include <trace/events/sched.h>
 
 #define KTHREAD_NICE_LEVEL (-5)
@@ -62,6 +63,31 @@ int kthread_should_stop(void)
 	return (kthread_stop_info.k == current);
 }
 EXPORT_SYMBOL(kthread_should_stop);
+
+/**
+ * kthread_freezable_should_stop - should this freezable kthread return now?
+ * @was_frozen: optional out parameter, indicates whether %current was frozen
+ *
+ * kthread_should_stop() for freezable kthreads, which will enter
+ * refrigerator if necessary.  This function is safe from kthread_stop() /
+ * freezer deadlock and freezable kthreads should use this function instead
+ * of calling try_to_freeze() directly.
+ */
+bool kthread_freezable_should_stop(bool *was_frozen)
+{
+	bool frozen = false;
+
+	might_sleep();
+
+	if (unlikely(freezing(current)))
+		frozen = __refrigerator(true);
+
+	if (was_frozen)
+		*was_frozen = frozen;
+
+	return kthread_should_stop();
+}
+EXPORT_SYMBOL_GPL(kthread_freezable_should_stop);
 
 static int kthread(void *_create)
 {

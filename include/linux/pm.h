@@ -40,6 +40,12 @@ extern void (*pm_power_off_prepare)(void);
 
 struct device;
 
+#ifdef CONFIG_PM
+extern const char power_group_name[];          /* = "power" */
+#else
+#define power_group_name       NULL
+#endif
+
 typedef struct pm_message {
 	int event;
 } pm_message_t;
@@ -407,20 +413,22 @@ enum rpm_request {
        RPM_REQ_RESUME,
 };
 
+struct wakeup_source;
+
 struct dev_pm_info {
 	pm_message_t		power_state;
 	unsigned int            can_wakeup:1;
-	unsigned int            should_wakeup:1;
 	enum dpm_state		status;		/* Owned by the PM core */
+	spinlock_t      	lock;
 #ifdef CONFIG_PM_SLEEP
 	struct list_head	entry;
+	struct wakeup_source 	*wakeup;
 #endif
 #ifdef CONFIG_PM_RUNTIME
        struct timer_list       suspend_timer;
        unsigned long           timer_expires;
        struct work_struct      work;
        wait_queue_head_t       wait_queue;
-       spinlock_t              lock;
        atomic_t                usage_count;
        atomic_t                child_count;
        unsigned int            disable_depth:3;
@@ -428,6 +436,7 @@ struct dev_pm_info {
        unsigned int            idle_notification:1;
        unsigned int            request_pending:1;
        unsigned int            deferred_resume:1;
+       unsigned int            no_callbacks:1;
        enum rpm_request        request;
        enum rpm_status         runtime_status;
        int                     runtime_error;

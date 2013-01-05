@@ -240,7 +240,7 @@ static const struct address_space_operations fat_aops = {
  *			check if the location is still valid and retry if it
  *			isn't. Otherwise we do changes.
  *		5. Spinlock is used to protect hash/unhash/location check/lookup
- *		6. fat_clear_inode() unhashes the F-d-c entry.
+ *		6. fat_evict_inode() unhashes the F-d-c entry.
  *		7. lookup() and readdir() do igrab() if they find a F-d-c entry
  *			and consider negative result as cache miss.
  */
@@ -358,7 +358,7 @@ static int fat_fill_inode(struct inode *inode, struct msdos_dir_entry *de)
 			return error;
 		MSDOS_I(inode)->mmu_private = inode->i_size;
 
-		inode->i_nlink = fat_subdirs(inode);
+		set_nlink(inode, fat_subdirs(inode));
 	} else { /* not a directory */
 		inode->i_generation |= 1;
 		inode->i_mode = fat_make_mode(sbi, de->attr,
@@ -425,16 +425,15 @@ out:
 
 EXPORT_SYMBOL_GPL(fat_build_inode);
 
-static void fat_delete_inode(struct inode *inode)
+static void fat_evict_inode(struct inode *inode)
 {
 	truncate_inode_pages(&inode->i_data, 0);
-	inode->i_size = 0;
-	fat_truncate(inode);
-	clear_inode(inode);
-}
-
-static void fat_clear_inode(struct inode *inode)
-{
+	if (!inode->i_nlink) {
+		inode->i_size = 0;
+		fat_truncate(inode);
+	}
+	invalidate_inode_buffers(inode);
+	end_writeback(inode);
 	fat_cache_inval_inode(inode);
 	fat_detach(inode);
 }
@@ -631,11 +630,10 @@ static const struct super_operations fat_sops = {
 	.alloc_inode	= fat_alloc_inode,
 	.destroy_inode	= fat_destroy_inode,
 	.write_inode	= fat_write_inode,
-	.delete_inode	= fat_delete_inode,
+	.evict_inode    = fat_evict_inode,
 	.put_super	= fat_put_super,
 	.write_super	= fat_write_super,
 	.statfs		= fat_statfs,
-	.clear_inode	= fat_clear_inode,
 	.remount_fs	= fat_remount,
 
 	.show_options	= fat_show_options,
@@ -1185,7 +1183,7 @@ static int fat_read_root(struct inode *inode)
 	fat_save_attrs(inode, ATTR_DIR);
 	inode->i_mtime.tv_sec = inode->i_atime.tv_sec = inode->i_ctime.tv_sec = 0;
 	inode->i_mtime.tv_nsec = inode->i_atime.tv_nsec = inode->i_ctime.tv_nsec = 0;
-	inode->i_nlink = fat_subdirs(inode)+2;
+	set_nlink(inode, fat_subdirs(inode)+2);
 
 	return 0;
 }

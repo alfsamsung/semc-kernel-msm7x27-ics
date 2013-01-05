@@ -1058,18 +1058,16 @@ static struct kgsl_device_platform_data kgsl_3d0_pdata;/* = {
 	.pwr_data = {
 	.pwrlevel = {
 		{
-			.gpu_freq = 245760000, 		//200000000,
-			.bus_freq = 200000000, 		//192000000,
-			//.io_fraction = 0,
+			.gpu_freq = 0, 		//200000000,
+			.bus_freq = 196800000,
 		},
 		{
-			.gpu_freq = 192000000, 
-			.bus_freq = 153000000,
-			//.io_fraction = 33,
+			.gpu_freq = 0, 		//160000000, 
+			.bus_freq = 122880000,
 		},
 		{
-			.gpu_freq = 160000000,
-			.bus_freq = 0,
+			.gpu_freq = 0,		//122880000,
+			.bus_freq = 61440000,
 		},
 	},
 	.init_level = 0,
@@ -1078,16 +1076,15 @@ static struct kgsl_device_platform_data kgsl_3d0_pdata;/* = {
 	.idle_timeout = HZ/5, 	//HZ/20,
 	},
 	.clk = {
-	.name = {
-	.clk = "grp_clk",
-	.pclk = "grp_pclk",
-	},
+		.name = {
+			.clk = "grp_clk",
+			.pclk = "grp_pclk",
+		},
      },
 	.imem_clk_name = {
-	.clk = "imem_clk",
-	.pclk = NULL,
+		.clk = "imem_clk",
 	},
-};	*/
+}; */
 
 static struct platform_device msm_kgsl_3d0 = {
 	.name = "kgsl-3d0",
@@ -2535,24 +2532,32 @@ static void __init msm7x2x_init_mmc(void)
 }
 
 static struct msm_pm_platform_data msm7x27_pm_data[MSM_PM_SLEEP_MODE_NR] = {
-	[MSM_PM_SLEEP_MODE_POWER_COLLAPSE].supported = 1,
-	[MSM_PM_SLEEP_MODE_POWER_COLLAPSE].suspend_enabled = 1,
-	[MSM_PM_SLEEP_MODE_POWER_COLLAPSE].idle_enabled = 1,
-	[MSM_PM_SLEEP_MODE_POWER_COLLAPSE].latency = 16000,
-	[MSM_PM_SLEEP_MODE_POWER_COLLAPSE].residency = 20000,
+	[MSM_PM_SLEEP_MODE_POWER_COLLAPSE] = {
+		.idle_supported = 1,
+		.suspend_supported = 1,
+		.idle_enabled = 1,
+		.suspend_enabled = 1,
+		.latency = 16000,
+		.residency = 20000,
+	},
 
-	[MSM_PM_SLEEP_MODE_POWER_COLLAPSE_NO_XO_SHUTDOWN].supported = 1,
-	[MSM_PM_SLEEP_MODE_POWER_COLLAPSE_NO_XO_SHUTDOWN].suspend_enabled = 1,
-	[MSM_PM_SLEEP_MODE_POWER_COLLAPSE_NO_XO_SHUTDOWN].idle_enabled = 1,
-	[MSM_PM_SLEEP_MODE_POWER_COLLAPSE_NO_XO_SHUTDOWN].latency = 12000,
-	[MSM_PM_SLEEP_MODE_POWER_COLLAPSE_NO_XO_SHUTDOWN].residency = 20000,
+	[MSM_PM_SLEEP_MODE_POWER_COLLAPSE_NO_XO_SHUTDOWN] = {
+		.idle_supported = 1,
+		.suspend_supported = 1,
+		.idle_enabled = 1,
+		.suspend_enabled = 1,
+		.latency = 12000,
+		.residency = 20000,
+	},
 
-	[MSM_PM_SLEEP_MODE_RAMP_DOWN_AND_WAIT_FOR_INTERRUPT].supported = 1,
-	[MSM_PM_SLEEP_MODE_RAMP_DOWN_AND_WAIT_FOR_INTERRUPT].suspend_enabled
-		= 1,
-	[MSM_PM_SLEEP_MODE_RAMP_DOWN_AND_WAIT_FOR_INTERRUPT].idle_enabled = 1,
-	[MSM_PM_SLEEP_MODE_RAMP_DOWN_AND_WAIT_FOR_INTERRUPT].latency = 2000,
-	[MSM_PM_SLEEP_MODE_RAMP_DOWN_AND_WAIT_FOR_INTERRUPT].residency = 0,
+	[MSM_PM_SLEEP_MODE_RAMP_DOWN_AND_WAIT_FOR_INTERRUPT] = {
+		.idle_supported = 1,
+		.suspend_supported = 1,
+		.idle_enabled = 1,
+		.suspend_enabled = 1,
+		.latency = 2000,
+		.residency = 0,
+	},
 };
 
 static void

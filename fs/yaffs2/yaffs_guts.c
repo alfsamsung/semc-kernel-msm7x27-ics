@@ -4500,7 +4500,8 @@ int yaffs_CheckpointSave(yaffs_Device *dev)
 		yaffs_WriteCheckpointData(dev);
 	}
 
-	T(YAFFS_TRACE_ALWAYS, (TSTR("save exit: isCheckpointed %d"TENDSTR), dev->isCheckpointed));
+	T(YAFFS_TRACE_CHECKPOINT | YAFFS_TRACE_MTD, 
+		(TSTR("save exit: isCheckpointed %d"TENDSTR), dev->isCheckpointed));
 
 	return dev->isCheckpointed;
 }

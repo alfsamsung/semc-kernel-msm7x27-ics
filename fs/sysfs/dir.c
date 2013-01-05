@@ -133,7 +133,7 @@ struct dentry *sysfs_get_dentry(struct sysfs_dirent *sd)
  *	RETURNS:
  *	Pointer to @sd on success, NULL on failure.
  */
-static struct sysfs_dirent *sysfs_get_active(struct sysfs_dirent *sd)
+struct sysfs_dirent *sysfs_get_active(struct sysfs_dirent *sd)
 {
 	if (unlikely(!sd))
 		return NULL;
@@ -162,7 +162,7 @@ static struct sysfs_dirent *sysfs_get_active(struct sysfs_dirent *sd)
  *	Put an active reference to @sd.  This function is noop if @sd
  *	is NULL.
  */
-static void sysfs_put_active(struct sysfs_dirent *sd)
+void sysfs_put_active(struct sysfs_dirent *sd)
 {
 	struct completion *cmpl;
 	int v;
@@ -179,45 +179,6 @@ static void sysfs_put_active(struct sysfs_dirent *sd)
 	 */
 	cmpl = (void *)sd->s_sibling;
 	complete(cmpl);
-}
-
-/**
- *	sysfs_get_active_two - get active references to sysfs_dirent and parent
- *	@sd: sysfs_dirent of interest
- *
- *	Get active reference to @sd and its parent.  Parent's active
- *	reference is grabbed first.  This function is noop if @sd is
- *	NULL.
- *
- *	RETURNS:
- *	Pointer to @sd on success, NULL on failure.
- */
-struct sysfs_dirent *sysfs_get_active_two(struct sysfs_dirent *sd)
-{
-	if (sd) {
-		if (sd->s_parent && unlikely(!sysfs_get_active(sd->s_parent)))
-			return NULL;
-		if (unlikely(!sysfs_get_active(sd))) {
-			sysfs_put_active(sd->s_parent);
-			return NULL;
-		}
-	}
-	return sd;
-}
-
-/**
- *	sysfs_put_active_two - put active references to sysfs_dirent and parent
- *	@sd: sysfs_dirent of interest
- *
- *	Put active references to @sd and its parent.  This function is
- *	noop if @sd is NULL.
- */
-void sysfs_put_active_two(struct sysfs_dirent *sd)
-{
-	if (sd) {
-		sysfs_put_active(sd);
-		sysfs_put_active(sd->s_parent);
-	}
 }
 
 /**
@@ -581,6 +542,7 @@ void sysfs_addrm_finish(struct sysfs_addrm_cxt *acxt)
 
 		sysfs_drop_dentry(sd);
 		sysfs_deactivate(sd);
+		unmap_bin_file(sd);
 		sysfs_put(sd);
 	}
 }

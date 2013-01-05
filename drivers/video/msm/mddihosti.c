@@ -1,4 +1,4 @@
-/* Copyright (c) 2008-2009, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2008-2010, Code Aurora Forum. All rights reserved.
  * Copyright (C) 2010 Sony Ericsson Mobile Communications AB.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -92,6 +92,7 @@ boolean mddi_debug_log_statistics = FALSE;
 static boolean mddi_host_mdp_active_flag = TRUE;
 static uint32 mddi_log_stats_counter;
 uint32 mddi_log_stats_frequency = 4000;
+int32 mddi_client_type;
 
 #define MDDI_DEFAULT_REV_PKT_SIZE            0x20
 
@@ -403,6 +404,13 @@ static void mddi_report_state_change(uint32 int_reg)
 		pmhctl->link_state = MDDI_LINK_HIBERNATING;
 		pmhctl->log_parms.link_hibernate_cnt++;
 		MDDI_MSG_DEBUG("!!! MDDI Hibernating !!!\n");
+		
+		if (mddi_client_type == 2) {
+			mddi_host_reg_out(PAD_CTL, 0x402a850f);
+			mddi_host_reg_out(PAD_CAL, 0x10220020);
+			mddi_host_reg_out(TA1_LEN, 0x0010);
+			mddi_host_reg_out(TA2_LEN, 0x0040);
+		}
 		/* now interrupt on link_active */
 #ifdef FEATURE_MDDI_DISABLE_REVERSE
 		mddi_host_reg_outm(INTEN,
@@ -1531,10 +1539,8 @@ static void mddi_host_initialize_registers(mddi_host_type host_idx)
 #if defined(T_MSM7200)
 	/* Recommendation from PAD hw team */
 	mddi_host_reg_out(PAD_CTL, 0xa850a);
-	/* Recommendation from PAD hw team */
-#elif defined(CONFIG_FB_MSM_MDDI_2)
-	mddi_host_reg_out(PAD_CTL, 0x402a850f);
 #else
+	/* Recommendation from PAD hw team */
 	mddi_host_reg_out(PAD_CTL, 0xa850f);
 #endif
 
@@ -1542,10 +1548,6 @@ static void mddi_host_initialize_registers(mddi_host_type host_idx)
 	pad_reg_val = 0x00cc0020;
 #else
 	pad_reg_val = 0x00220020;
-#endif
-
-#ifdef CONFIG_FB_MSM_MDDI_2
-	pad_reg_val |= 0x10000000;
 #endif
 
 #if defined(CONFIG_FB_MSM_MDP31) || defined(CONFIG_FB_MSM_MDP40)

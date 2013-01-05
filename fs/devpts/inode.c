@@ -298,7 +298,7 @@ devpts_fill_super(struct super_block *s, void *data, int silent)
 	inode->i_mode = S_IFDIR | S_IRUGO | S_IXUGO | S_IWUSR;
 	inode->i_op = &simple_dir_inode_operations;
 	inode->i_fop = &simple_dir_operations;
-	inode->i_nlink = 2;
+	set_nlink(inode, 2);
 
 	s->s_root = d_alloc_root(inode);
 	if (s->s_root)
@@ -634,7 +634,7 @@ void devpts_pty_kill(struct tty_struct *tty)
 		goto out;
 
 	if (dentry) {
-		inode->i_nlink--;
+		drop_nlink(inode);
 		d_delete(dentry);
 		dput(dentry);	/* d_alloc_name() in devpts_pty_new() */
 	}

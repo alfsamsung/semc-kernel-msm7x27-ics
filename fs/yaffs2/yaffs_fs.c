@@ -51,6 +51,7 @@ extern const char *yaffs_guts_c_version;
 #include <linux/interrupt.h>
 #include <linux/string.h>
 #include <linux/ctype.h>
+#include <linux/cleancache.h>
 
 #include "asm/div64.h"
 
@@ -237,8 +238,7 @@ static int yaffs_statfs(struct super_block *sb, struct statfs *buf);
 static void yaffs_put_inode(struct inode *inode);
 #endif
 
-static void yaffs_delete_inode(struct inode *);
-static void yaffs_clear_inode(struct inode *);
+static void yaffs_evict_inode(struct inode *);
 
 static int yaffs_readpage(struct file *file, struct page *page);
 #if (LINUX_VERSION_CODE > KERNEL_VERSION(2, 5, 0))
@@ -363,8 +363,7 @@ static const struct super_operations yaffs_super_ops = {
 	.put_inode = yaffs_put_inode,
 #endif
 	.put_super = yaffs_put_super,
-	.delete_inode = yaffs_delete_inode,
-	.clear_inode = yaffs_clear_inode,
+	.evict_inode = yaffs_evict_inode,
 	.sync_fs = yaffs_sync_fs,
 	.write_super = yaffs_write_super,
 };
@@ -515,19 +514,36 @@ static void yaffs_put_inode(struct inode *inode)
 }
 #endif
 
-/* clear is called to tell the fs to release any per-inode data it holds */
-static void yaffs_clear_inode(struct inode *inode)
+/* yaffs_evict_inode combines into one operation what was previously done in
+ * yaffs_clear_inode() and yaffs_delete_inode()
+ *
+ */
+static void yaffs_evict_inode(struct inode *inode)
 {
 	yaffs_Object *obj;
 	yaffs_Device *dev;
+	int deleteme = 0;
 
 	obj = yaffs_InodeToObject(inode);
 
 	T(YAFFS_TRACE_OS,
-		("yaffs_clear_inode: ino %d, count %d %s\n", (int)inode->i_ino,
+		("yaffs_evict_inode: ino %d, count %d %s\n",
+		(int)inode->i_ino,
 		atomic_read(&inode->i_count),
 		obj ? "object exists" : "null object"));
 
+	if (!inode->i_nlink && !is_bad_inode(inode))
+		deleteme = 1;
+	truncate_inode_pages(&inode->i_data, 0);
+	end_writeback(inode);
+	
+	if (deleteme && obj) {
+		dev = obj->myDev;
+		yaffs_GrossLock(dev);
+		yaffs_DeleteObject(obj);
+		yaffs_GrossUnlock(dev);
+	}
+	
 	if (obj) {
 		dev = obj->myDev;
 		yaffs_GrossLock(dev);
@@ -548,33 +564,6 @@ static void yaffs_clear_inode(struct inode *inode)
 		yaffs_GrossUnlock(dev);
 	}
 
-}
-
-/* delete is called when the link count is zero and the inode
- * is put (ie. nobody wants to know about it anymore, time to
- * delete the file).
- * NB Must call clear_inode()
- */
-static void yaffs_delete_inode(struct inode *inode)
-{
-	yaffs_Object *obj = yaffs_InodeToObject(inode);
-	yaffs_Device *dev;
-
-	T(YAFFS_TRACE_OS,
-		("yaffs_delete_inode: ino %d, count %d %s\n", (int)inode->i_ino,
-		atomic_read(&inode->i_count),
-		obj ? "object exists" : "null object"));
-
-	if (obj) {
-		dev = obj->myDev;
-		yaffs_GrossLock(dev);
-		yaffs_DeleteObject(obj);
-		yaffs_GrossUnlock(dev);
-	}
-#if (LINUX_VERSION_CODE > KERNEL_VERSION(2, 6, 13))
-	truncate_inode_pages(&inode->i_data, 0);
-#endif
-	clear_inode(inode);
 }
 
 #if (LINUX_VERSION_CODE > KERNEL_VERSION(2, 6, 17))
@@ -615,6 +604,10 @@ static int yaffs_readpage_nolock(struct file *f, struct page *pg)
 			(unsigned)PAGE_CACHE_SIZE));
 
 	obj = yaffs_DentryToObject(f->f_dentry);
+	
+	ret = cleancache_get_page(pg);
+	if (!ret)
+		goto cleancache_got;
 
 	dev = obj->myDev;
 
@@ -638,12 +631,14 @@ static int yaffs_readpage_nolock(struct file *f, struct page *pg)
 
 	if (ret >= 0)
 		ret = 0;
-
+	
+cleancache_got:
 	if (ret) {
 		ClearPageUptodate(pg);
 		SetPageError(pg);
 	} else {
 		SetPageUptodate(pg);
+		SetPageMappedToDisk(pg);
 		ClearPageError(pg);
 	}
 
@@ -962,7 +957,7 @@ static void yaffs_FillInodeFromObject(struct inode *inode, yaffs_Object *obj)
 		inode->i_size = yaffs_GetObjectFileLength(obj);
 		inode->i_blocks = (inode->i_size + 511) >> 9;
 
-		inode->i_nlink = yaffs_GetObjectLinkCount(obj);
+		set_nlink(inode, yaffs_GetObjectLinkCount(obj));
 
 		T(YAFFS_TRACE_OS,
 			("yaffs_FillInode mode %x uid %d gid %d size %d count %d\n",
@@ -1350,7 +1345,8 @@ static int yaffs_unlink(struct inode *dir, struct dentry *dentry)
 	retVal = yaffs_Unlink(yaffs_InodeToObject(dir), dentry->d_name.name);
 
 	if (retVal == YAFFS_OK) {
-		dentry->d_inode->i_nlink--;
+		//dentry->d_inode->i_nlink--;
+		drop_nlink(dentry->d_inode);
 		dir->i_version++;
 		yaffs_GrossUnlock(dev);
 		mark_inode_dirty(dentry->d_inode);
@@ -1384,7 +1380,7 @@ static int yaffs_link(struct dentry *old_dentry, struct inode *dir,
 			obj);
 
 	if (link) {
-		old_dentry->d_inode->i_nlink = yaffs_GetObjectLinkCount(obj);
+		set_nlink(old_dentry->d_inode, yaffs_GetObjectLinkCount(obj));
 		d_instantiate(dentry, old_dentry->d_inode);
 		atomic_inc(&old_dentry->d_inode->i_count);
 		T(YAFFS_TRACE_OS,
@@ -1494,8 +1490,16 @@ static int yaffs_rename(struct inode *old_dir, struct dentry *old_dentry,
 
 	if (retVal == YAFFS_OK) {
 		if (target) {
-			new_dentry->d_inode->i_nlink--;
-			mark_inode_dirty(new_dentry->d_inode);
+			/*
+			 * We have identified target to be a
+			 * valid directory earlier. If it is
+			 * not the case throw a warning.
+			 */
+			WARN_ON(!new_dentry->d_inode);
+			if (new_dentry->d_inode) {
+				drop_nlink(new_dentry->d_inode);
+				mark_inode_dirty(new_dentry->d_inode);
+			}
 		}
 		
 		update_dir_time(old_dir);
@@ -1725,7 +1729,8 @@ static void yaffs_read_inode(struct inode *inode)
 
 static YLIST_HEAD(yaffs_dev_list);
 
-#if 0 /* not used */
+/* not used */
+#if 0 
 static int yaffs_remount_fs(struct super_block *sb, int *flags, char *data)
 {
 	yaffs_Device    *dev = yaffs_SuperToDevice(sb);
@@ -2170,6 +2175,7 @@ static struct super_block *yaffs_internal_read_super(int yaffsVersion,
 	  ("yaffs_read_super: isCheckpointed %d\n", dev->isCheckpointed));
 
 	T(YAFFS_TRACE_OS, ("yaffs_read_super: done\n"));
+	cleancache_init_fs(sb);
 	return sb;
 }
 

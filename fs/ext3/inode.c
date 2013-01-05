@@ -190,15 +190,27 @@ static int truncate_restart_transaction(handle_t *handle, struct inode *inode)
 }
 
 /*
- * Called at the last iput() if i_nlink is zero.
+ * Called at inode eviction from icache
  */
-void ext3_delete_inode (struct inode * inode)
+void ext3_evict_inode (struct inode *inode)
 {
+	struct ext3_block_alloc_info *rsv;
 	handle_t *handle;
+	int want_delete = 0;
+	
+	if (!inode->i_nlink && !is_bad_inode(inode)) {
+		want_delete = 1;
+	}
 
 	truncate_inode_pages(&inode->i_data, 0);
 
-	if (is_bad_inode(inode))
+	ext3_discard_reservation(inode);
+	rsv = EXT3_I(inode)->i_block_alloc_info;
+	EXT3_I(inode)->i_block_alloc_info = NULL;
+	if (unlikely(rsv))
+		kfree(rsv);
+
+	if (!want_delete)
 		goto no_delete;
 
 	handle = start_transaction(inode);
@@ -235,15 +247,22 @@ void ext3_delete_inode (struct inode * inode)
 	 * having errors), but we can't free the inode if the mark_dirty
 	 * fails.
 	 */
-	if (ext3_mark_inode_dirty(handle, inode))
-		/* If that failed, just do the required in-core inode clear. */
-		clear_inode(inode);
-	else
+	if (ext3_mark_inode_dirty(handle, inode)) {
+		/* If that failed, just dquot_drop() and be done with that */
+		vfs_dq_drop(inode);
+		end_writeback(inode);
+	} else {
+		ext3_xattr_delete_inode(handle, inode);
+		vfs_dq_free_inode(inode);
+		vfs_dq_drop(inode);
+		end_writeback(inode);
 		ext3_free_inode(handle, inode);
+	}
 	ext3_journal_stop(handle);
 	return;
 no_delete:
-	clear_inode(inode);	/* We must guarantee clearing of inode... */
+	end_writeback(inode);
+	vfs_dq_drop(inode);
 }
 
 typedef struct {
@@ -2543,7 +2562,7 @@ out_stop:
 	 * If this was a simple ftruncate(), and the file will remain alive
 	 * then we need to clear up the orphan record which we created above.
 	 * However, if this was a real unlink then we were called by
-	 * ext3_delete_inode(), and we allow that function to clean up the
+	 * ext3_evict_inode(), and we allow that function to clean up the
 	 * orphan info for us.
 	 */
 	if (inode->i_nlink)
@@ -2793,7 +2812,7 @@ struct inode *ext3_iget(struct super_block *sb, unsigned long ino)
 		inode->i_uid |= le16_to_cpu(raw_inode->i_uid_high) << 16;
 		inode->i_gid |= le16_to_cpu(raw_inode->i_gid_high) << 16;
 	}
-	inode->i_nlink = le16_to_cpu(raw_inode->i_links_count);
+	set_nlink(inode, le16_to_cpu(raw_inode->i_links_count));
 	inode->i_size = le32_to_cpu(raw_inode->i_size);
 	inode->i_atime.tv_sec = (signed)le32_to_cpu(raw_inode->i_atime);
 	inode->i_ctime.tv_sec = (signed)le32_to_cpu(raw_inode->i_ctime);

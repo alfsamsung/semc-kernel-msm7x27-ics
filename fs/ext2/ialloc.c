@@ -118,19 +118,14 @@ void ext2_free_inode (struct inode * inode)
 	 * Note: we must free any quota before locking the superblock,
 	 * as writing the quota to disk may need the lock as well.
 	 */
-	if (!is_bad_inode(inode)) {
-		/* Quota is already initialized in iput() */
-		ext2_xattr_delete_inode(inode);
-		vfs_dq_free_inode(inode);
-		vfs_dq_drop(inode);
-	}
+	/* Quota is already initialized in iput() */
+	ext2_xattr_delete_inode(inode);
+	vfs_dq_free_inode(inode);
+	vfs_dq_drop(inode);
 
 	es = EXT2_SB(sb)->s_es;
 	is_directory = S_ISDIR(inode->i_mode);
-
-	/* Do this BEFORE marking the inode not in use or returning an error */
-	clear_inode (inode);
-
+	
 	if (ino < EXT2_FIRST_INO(sb) ||
 	    ino > le32_to_cpu(es->s_inodes_count)) {
 		ext2_error (sb, "ext2_free_inode",
@@ -610,7 +605,8 @@ fail_free_drop:
 fail_drop:
 	vfs_dq_drop(inode);
 	inode->i_flags |= S_NOQUOTA;
-	inode->i_nlink = 0;
+//	inode->i_nlink = 0;
+	set_nlink(inode, 0);
 	unlock_new_inode(inode);
 	iput(inode);
 	return ERR_PTR(err);

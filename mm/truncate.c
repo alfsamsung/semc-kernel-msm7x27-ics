@@ -551,6 +551,30 @@ void truncate_pagecache(struct inode *inode, loff_t old, loff_t new)
 EXPORT_SYMBOL(truncate_pagecache);
 
 /**
+ * truncate_setsize - update inode and pagecache for a new file size
+ * @inode: inode
+ * @newsize: new file size
+ *
+ * truncate_setsize updastes i_size update and performs pagecache
+ * truncation (if necessary) for a file size updates. It will be
+ * typically be called from the filesystem's setattr function when
+ * ATTR_SIZE is passed in.
+ *
+ * Must be called with inode_mutex held and after all filesystem
+ * specific block truncation has been performed.
+ */
+void truncate_setsize(struct inode *inode, loff_t newsize)
+{
+	loff_t oldsize;
+
+	oldsize = inode->i_size;
+	i_size_write(inode, newsize);
+
+	truncate_pagecache(inode, oldsize, newsize);
+}
+EXPORT_SYMBOL(truncate_setsize);
+
+/**
  * vmtruncate - unmap mappings "freed" by truncate() syscall
  * @inode: inode of the file used
  * @offset: file offset to start truncating

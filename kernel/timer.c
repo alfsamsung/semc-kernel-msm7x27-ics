@@ -37,12 +37,16 @@
 #include <linux/delay.h>
 #include <linux/tick.h>
 #include <linux/kallsyms.h>
+#include <linux/slab.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
 #include <asm/div64.h>
 #include <asm/timex.h>
 #include <asm/io.h>
+
+#define CREATE_TRACE_POINTS
+#include <trace/events/timer.h>
 
 u64 jiffies_64 __cacheline_aligned_in_smp = INITIAL_JIFFIES;
 
@@ -491,14 +495,18 @@ static inline void debug_timer_free(struct timer_list *timer)
 	debug_object_free(timer, &timer_debug_descr);
 }
 
-static void __init_timer(struct timer_list *timer);
+static void __init_timer(struct timer_list *timer,
+                         const char *name,
+                         struct lock_class_key *key);
 
-void init_timer_on_stack(struct timer_list *timer)
+void init_timer_on_stack_key(struct timer_list *timer,
+                             const char *name,
+                             struct lock_class_key *key)
 {
-	debug_object_init_on_stack(timer, &timer_debug_descr);
-	__init_timer(timer);
+        debug_object_init_on_stack(timer, &timer_debug_descr);
+        __init_timer(timer, name, key);
 }
-EXPORT_SYMBOL_GPL(init_timer_on_stack);
+EXPORT_SYMBOL_GPL(init_timer_on_stack_key);
 
 void destroy_timer_on_stack(struct timer_list *timer)
 {
@@ -512,7 +520,15 @@ static inline void debug_timer_activate(struct timer_list *timer) { }
 static inline void debug_timer_deactivate(struct timer_list *timer) { }
 #endif
 
-static void __init_timer(struct timer_list *timer)
+static inline void debug_init(struct timer_list *timer)
+{
+        debug_timer_init(timer);
+        trace_timer_init(timer);
+}
+
+static void __init_timer(struct timer_list *timer,
+                         const char *name,
+                         struct lock_class_key *key)
 {
 	timer->entry.next = NULL;
 	timer->base = __raw_get_cpu_var(tvec_bases);
@@ -523,26 +539,43 @@ static void __init_timer(struct timer_list *timer)
 #endif
 }
 
+void setup_deferrable_timer_on_stack_key(struct timer_list *timer,
+					  const char *name,
+					  struct lock_class_key *key,
+					  void (*function)(unsigned long),
+					  unsigned long data)
+{
+	timer->function = function;
+	timer->data = data;
+	init_timer_on_stack_key(timer, name, key);
+	timer_set_deferrable(timer);
+}
+EXPORT_SYMBOL_GPL(setup_deferrable_timer_on_stack_key);
+
 /**
- * init_timer - initialize a timer.
+ * init_timer_key - initialize a timer.
  * @timer: the timer to be initialized
  *
  * init_timer() must be done to a timer prior calling *any* of the
  * other timer functions.
  */
-void init_timer(struct timer_list *timer)
+void init_timer_key(struct timer_list *timer,
+                    const char *name,
+                    struct lock_class_key *key)
 {
-	debug_timer_init(timer);
-	__init_timer(timer);
+        debug_init(timer);
+        __init_timer(timer, name, key);
 }
-EXPORT_SYMBOL(init_timer);
+EXPORT_SYMBOL(init_timer_key);
 
-void init_timer_deferrable(struct timer_list *timer)
+void init_timer_deferrable_key(struct timer_list *timer,
+                               const char *name,
+                               struct lock_class_key *key)
 {
-	init_timer(timer);
-	timer_set_deferrable(timer);
+        init_timer_key(timer, name, key);
+        timer_set_deferrable(timer);
 }
-EXPORT_SYMBOL(init_timer_deferrable);
+EXPORT_SYMBOL(init_timer_deferrable_key);
 
 static inline void detach_timer(struct timer_list *timer,
 				int clear_pending)

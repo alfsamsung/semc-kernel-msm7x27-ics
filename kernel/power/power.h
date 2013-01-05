@@ -14,6 +14,10 @@ struct swsusp_info {
 } __attribute__((aligned(PAGE_SIZE)));
 
 #ifdef CONFIG_HIBERNATION
+/* kernel/power/snapshot.c */
+extern void __init hibernate_reserved_size_init(void);
+extern void __init hibernate_image_size_init(void);
+
 #ifdef CONFIG_ARCH_HIBERNATION_HEADER
 /* Maximum size of architecture specific data in a hibernation header */
 #define MAX_ARCH_HEADER_SIZE	(sizeof(struct new_utsname) + 4)
@@ -45,11 +49,18 @@ static inline char *check_image_kernel(struct swsusp_info *info)
  */
 #define SPARE_PAGES	((1024 * 1024) >> PAGE_SHIFT)
 
-/* kernel/power/disk.c */
+/* kernel/power/hibernate.c */
+extern bool freezer_test_done;
+
 extern int hibernation_snapshot(int platform_mode);
 extern int hibernation_restore(int platform_mode);
 extern int hibernation_platform_enter(void);
-#endif
+
+#else /* !CONFIG_HIBERNATION */
+
+static inline void hibernate_reserved_size_init(void) {}
+static inline void hibernate_image_size_init(void) {}
+#endif /* !CONFIG_HIBERNATION */
 
 extern int pfn_is_nosave(unsigned long);
 
@@ -65,6 +76,8 @@ static struct kobj_attribute _name##_attr = {	\
 
 /* Preferred image size in bytes (default 500 MB) */
 extern unsigned long image_size;
+/* Size of memory reserved for drivers (default SPARE_PAGES x PAGE_SIZE) */
+extern unsigned long reserved_size;
 extern int in_suspend;
 extern dev_t swsusp_resume_device;
 extern sector_t swsusp_resume_block;
@@ -74,7 +87,7 @@ extern asmlinkage int swsusp_arch_resume(void);
 
 extern int create_basic_memory_bitmaps(void);
 extern void free_basic_memory_bitmaps(void);
-extern int swsusp_shrink_memory(void);
+extern int hibernate_preallocate_memory(void);
 
 /**
  *	Auxiliary structure used for reading the snapshot image data and
@@ -97,23 +110,11 @@ extern int swsusp_shrink_memory(void);
  */
 
 struct snapshot_handle {
-	loff_t		offset;	/* number of the last byte ready for reading
-				 * or writing in the sequence
-				 */
 	unsigned int	cur;	/* number of the block of PAGE_SIZE bytes the
 				 * next operation will refer to (ie. current)
 				 */
-	unsigned int	cur_offset;	/* offset with respect to the current
-					 * block (for the next operation)
-					 */
-	unsigned int	prev;	/* number of the block of PAGE_SIZE bytes that
-				 * was the current one previously
-				 */
 	void		*buffer;	/* address of the block to read from
 					 * or write to
-					 */
-	unsigned int	buf_offset;	/* location to read from or write to,
-					 * given as a displacement from 'buffer'
 					 */
 	int		sync_read;	/* Set to one to notify the caller of
 					 * snapshot_write_next() that it may
@@ -125,12 +126,12 @@ struct snapshot_handle {
  * snapshot_read_next()/snapshot_write_next() is allowed to
  * read/write data after the function returns
  */
-#define data_of(handle)	((handle).buffer + (handle).buf_offset)
+#define data_of(handle)	((handle).buffer)
 
 extern unsigned int snapshot_additional_pages(struct zone *zone);
 extern unsigned long snapshot_get_image_size(void);
-extern int snapshot_read_next(struct snapshot_handle *handle, size_t count);
-extern int snapshot_write_next(struct snapshot_handle *handle, size_t count);
+extern int snapshot_read_next(struct snapshot_handle *handle);
+extern int snapshot_write_next(struct snapshot_handle *handle);
 extern void snapshot_write_finalize(struct snapshot_handle *handle);
 extern int snapshot_image_loaded(struct snapshot_handle *handle);
 
@@ -146,13 +147,24 @@ extern int swsusp_swap_in_use(void);
  * the image header.
  */
 #define SF_PLATFORM_MODE	1
+#define SF_NOCOMPRESS_MODE	2
+#define SF_CRC32_MODE	        4
 
-/* kernel/power/disk.c */
+/* kernel/power/hibernate.c */
 extern int swsusp_check(void);
 extern void swsusp_free(void);
 extern int swsusp_read(unsigned int *flags_p);
 extern int swsusp_write(unsigned int flags);
 extern void swsusp_close(fmode_t);
+
+/* kernel/power/block_io.c */
+extern struct block_device *hib_resume_bdev;
+
+extern int hib_bio_read_page(pgoff_t page_off, void *addr,
+		struct bio **bio_chain);
+extern int hib_bio_write_page(pgoff_t page_off, void *addr,
+		struct bio **bio_chain);
+extern int hib_wait_on_bio_chain(struct bio **bio_chain);
 
 struct timeval;
 /* kernel/power/swsusp.c */
@@ -160,14 +172,27 @@ extern void swsusp_show_speed(struct timeval *, struct timeval *,
 				unsigned int, char *);
 
 #ifdef CONFIG_SUSPEND
-/* kernel/power/main.c */
+/* kernel/power/suspend.c */
+extern const char *const pm_states[];
+
+extern bool valid_state(suspend_state_t state);
 extern int suspend_devices_and_enter(suspend_state_t state);
 #else /* !CONFIG_SUSPEND */
 static inline int suspend_devices_and_enter(suspend_state_t state)
 {
 	return -ENOSYS;
 }
+static inline bool valid_state(suspend_state_t state) { return false; }
 #endif /* !CONFIG_SUSPEND */
+
+#ifdef CONFIG_PM_TEST_SUSPEND
+/* kernel/power/suspend_test.c */
+extern void suspend_test_start(void);
+extern void suspend_test_finish(const char *label);
+#else /* !CONFIG_PM_TEST_SUSPEND */
+static inline void suspend_test_start(void) {}
+static inline void suspend_test_finish(const char *label) {}
+#endif /* !CONFIG_PM_TEST_SUSPEND */
 
 #ifdef CONFIG_PM_SLEEP
 /* kernel/power/main.c */
@@ -204,7 +229,25 @@ extern int pm_test_level;
 #ifdef CONFIG_SUSPEND_FREEZER
 static inline int suspend_freeze_processes(void)
 {
-	return freeze_processes();
+	int error;
+
+	error = freeze_processes();
+	/*
+	 * freeze_processes() automatically thaws every task if freezing
+	 * fails. So we need not do anything extra upon error.
+	 */
+	if (error)
+		return error;
+
+	error = freeze_kernel_threads();
+	/*
+	 * freeze_kernel_threads() thaws only kernel threads upon freezing
+	 * failure. So we have to thaw the userspace tasks ourselves.
+	 */
+	if (error)
+		thaw_processes();
+
+	return error;
 }
 
 static inline void suspend_thaw_processes(void)
@@ -230,8 +273,8 @@ extern suspend_state_t requested_suspend_state;
 extern void suspend_sys_sync_queue(void);
 extern int suspend_sys_sync_wait(void);
 #else
-void suspend_sys_sync_queue(void) {}
-int suspend_sys_sync_wait(void) { return 0; }
+static inline void suspend_sys_sync_queue(void) {}
+static inline int suspend_sys_sync_wait(void) { return 0; }
 #endif
 
 #ifdef CONFIG_USER_WAKELOCK

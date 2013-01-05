@@ -608,6 +608,9 @@ asmlinkage void __init start_kernel(void)
 				 "enabled early\n");
 	early_boot_irqs_on();
 	local_irq_enable();
+	
+	/* Interrupts are enabled now so all GFP allocations are safe. */
+	gfp_allowed_mask = __GFP_BITS_MASK;
 
 	/*
 	 * HACK ALERT! This is early. We're enabling the console before
@@ -639,7 +642,6 @@ asmlinkage void __init start_kernel(void)
 #endif
 	vmalloc_init();
 	vfs_caches_init_early();
-	cpuset_init_early();
 	page_cgroup_init();
 	mem_init();
 	enable_debug_pagealloc();
@@ -830,6 +832,11 @@ static noinline int init_post(void)
 static int __init kernel_init(void * unused)
 {
 	lock_kernel();
+	
+	/*
+	 * init can allocate pages on any node
+	 */
+	set_mems_allowed(node_states[N_HIGH_MEMORY]);
 	/*
 	 * init can run on any cpu.
 	 */

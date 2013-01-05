@@ -217,10 +217,15 @@ int ext4_truncate_restart_trans(handle_t *handle, struct inode *inode,
 /*
  * Called at the last iput() if i_nlink is zero.
  */
-void ext4_delete_inode(struct inode *inode)
+void ext4_evict_inode(struct inode *inode)
 {
 	handle_t *handle;
 	int err;
+	
+	if (inode->i_nlink) {
+		truncate_inode_pages(&inode->i_data, 0);
+		goto no_delete;
+	}
 
 	if (ext4_should_order_data(inode))
 		ext4_begin_ordered_truncate(inode, 0);
@@ -292,13 +297,13 @@ void ext4_delete_inode(struct inode *inode)
 	 */
 	if (ext4_mark_inode_dirty(handle, inode))
 		/* If that failed, just do the required in-core inode clear. */
-		clear_inode(inode);
+		ext4_clear_inode(inode);
 	else
 		ext4_free_inode(handle, inode);
 	ext4_journal_stop(handle);
 	return;
 no_delete:
-	clear_inode(inode);	/* We must guarantee clearing of inode... */
+	ext4_clear_inode(inode);        /* We must guarantee clearing of inode... */
 }
 
 typedef struct {
@@ -4814,7 +4819,7 @@ struct inode *ext4_iget(struct super_block *sb, unsigned long ino)
 		inode->i_uid |= le16_to_cpu(raw_inode->i_uid_high) << 16;
 		inode->i_gid |= le16_to_cpu(raw_inode->i_gid_high) << 16;
 	}
-	inode->i_nlink = le16_to_cpu(raw_inode->i_links_count);
+	set_nlink(inode, le16_to_cpu(raw_inode->i_links_count));
 
 	ei->i_state = 0;
 	ei->i_dir_start_lookup = 0;

@@ -84,20 +84,32 @@ gfp_t gfp_allowed_mask __read_mostly = GFP_BOOT_MASK;
  * only be modified with pm_mutex held, unless the suspend/hibernate code is
  * guaranteed not to run in parallel with that modification).
  */
-void set_gfp_allowed_mask(gfp_t mask)
+static gfp_t saved_gfp_mask;
+
+void pm_restore_gfp_mask(void)
 {
         WARN_ON(!mutex_is_locked(&pm_mutex));
-        gfp_allowed_mask = mask;
+        if (saved_gfp_mask) {
+		gfp_allowed_mask = saved_gfp_mask;
+		saved_gfp_mask = 0;
+	}
 }
 
-gfp_t clear_gfp_allowed_mask(gfp_t mask)
+void pm_restrict_gfp_mask(void)
 {
-        gfp_t ret = gfp_allowed_mask;
-
         WARN_ON(!mutex_is_locked(&pm_mutex));
-        gfp_allowed_mask &= ~mask;
-        return ret;
+	WARN_ON(saved_gfp_mask);
+	saved_gfp_mask = gfp_allowed_mask;
+	gfp_allowed_mask &= ~GFP_IOFS;
 }
+
+bool pm_suspended_storage(void)
+{
+       if ((gfp_allowed_mask & GFP_IOFS) == GFP_IOFS)
+               return false;
+       return true;
+}
+
 #endif /* CONFIG_PM_SLEEP */
 
 #ifdef CONFIG_HUGETLB_PAGE_SIZE_VARIABLE
@@ -206,6 +218,8 @@ static void set_pageblock_migratetype(struct page *page, int migratetype)
 	set_pageblock_flags_group(page, (unsigned long)migratetype,
 					PB_migrate, PB_migrate_end);
 }
+
+bool oom_killer_disabled __read_mostly;
 
 #ifdef CONFIG_DEBUG_VM
 static int page_outside_zone_boundaries(struct zone *zone, struct page *page)
@@ -1505,12 +1519,25 @@ try_next_zone:
 
 static inline int
 should_alloc_retry(gfp_t gfp_mask, unsigned int order,
-                               unsigned long pages_reclaimed)
+			      unsigned long did_some_progress,
+			      unsigned long pages_reclaimed)
 
 {
 	/* Do not loop if specifically requested */
-       if (gfp_mask & __GFP_NORETRY)
-               return 0;
+	if (gfp_mask & __GFP_NORETRY)
+		return 0;
+	
+	/* Always retry if specifically requested */
+	if (gfp_mask & __GFP_NOFAIL)
+		return 1;
+
+	/*
+	 * Suspend converts GFP_KERNEL to __GFP_WAIT which can prevent reclaim
+	 * making forward progress without invoking OOM. Suspend also disables
+	 * storage devices so kswapd will not help. Bail if we are suspending.
+	 */
+	if (!did_some_progress && pm_suspended_storage())
+		return 0;
 
 	/*
         * In this implementation, order <= PAGE_ALLOC_COSTLY_ORDER
@@ -1528,13 +1555,6 @@ should_alloc_retry(gfp_t gfp_mask, unsigned int order,
         * allocation still fails, we stop retrying.
         */
        if (gfp_mask & __GFP_REPEAT && pages_reclaimed < (1 << order))
-               return 1;
-
-	/*
-        * Don't let big-order allocations loop unless the caller
-        * explicitly requests that.
-        */
-       if (gfp_mask & __GFP_NOFAIL)
                return 1;
 
        return 0;
@@ -1783,6 +1803,8 @@ rebalance:
         */
        if (!did_some_progress) {
                if ((gfp_mask & __GFP_FS) && !(gfp_mask & __GFP_NORETRY)) {
+			if (oom_killer_disabled)
+				goto nopage;
                        page = __alloc_pages_may_oom(gfp_mask, order,
                                        zonelist, high_zoneidx,
                                        nodemask, preferred_zone,
@@ -1805,7 +1827,8 @@ rebalance:
 	 /* Check if we should retry the allocation */
 	pages_reclaimed += did_some_progress;
 	
-	if (should_alloc_retry(gfp_mask, order, pages_reclaimed)) {
+	if (should_alloc_retry(gfp_mask, order, did_some_progress,
+						pages_reclaimed)) {
                /* Wait for some write requests to complete then retry */
 		congestion_wait(BLK_RW_ASYNC, HZ/50);
 		goto rebalance;

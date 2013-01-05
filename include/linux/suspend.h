@@ -6,17 +6,21 @@
 #include <linux/init.h>
 #include <linux/pm.h>
 #include <linux/mm.h>
+#include <linux/freezer.h>
 #include <asm/errno.h>
 
-#if defined(CONFIG_PM_SLEEP) && defined(CONFIG_VT) && defined(CONFIG_VT_CONSOLE)
+#ifdef CONFIG_VT
 extern void pm_set_vt_switch(int);
-extern int pm_prepare_console(void);
-extern void pm_restore_console(void);
 #else
 static inline void pm_set_vt_switch(int do_switch)
 {
 }
-
+#endif
+ 
+#ifdef CONFIG_VT_CONSOLE_SLEEP
+extern int pm_prepare_console(void);
+extern void pm_restore_console(void);
+#else
 static inline int pm_prepare_console(void)
 {
 	return 0;
@@ -93,8 +97,11 @@ struct platform_suspend_ops {
 	int (*valid)(suspend_state_t state);
 	int (*begin)(suspend_state_t state);
 	int (*prepare)(void);
+	int (*prepare_late)(void);
 	int (*enter)(suspend_state_t state);
+	void (*wake)(void);
 	void (*finish)(void);
+	bool (*suspend_again)(void);
 	void (*end)(void);
 	void (*recover)(void);
 };
@@ -253,6 +260,16 @@ static inline void hibernate_nvs_restore(void) {}
 static inline bool system_entering_hibernation(void) { return false; }
 #endif /* CONFIG_HIBERNATION */
 
+/* Hibernation and suspend events */
+#define PM_HIBERNATION_PREPARE  0x0001 /* Going to hibernate */
+#define PM_POST_HIBERNATION     0x0002 /* Hibernation finished */
+#define PM_SUSPEND_PREPARE      0x0003 /* Going to suspend the system */
+#define PM_POST_SUSPEND         0x0004 /* Suspend finished */
+#define PM_RESTORE_PREPARE      0x0005 /* Going to restore a saved image */
+#define PM_POST_RESTORE         0x0006 /* Restore failed */
+
+extern struct mutex pm_mutex;
+
 #ifdef CONFIG_PM_SLEEP
 void save_processor_state(void);
 void restore_processor_state(void);
@@ -265,6 +282,40 @@ extern int unregister_pm_notifier(struct notifier_block *nb);
 	static struct notifier_block fn##_nb =			\
 		{ .notifier_call = fn, .priority = pri };	\
 	register_pm_notifier(&fn##_nb);			\
+}
+
+/* drivers/base/power/wakeup.c */
+extern bool events_check_enabled;
+
+extern bool pm_wakeup_pending(void);
+extern bool pm_get_wakeup_count(unsigned int *count);
+extern bool pm_save_wakeup_count(unsigned int count);
+
+static inline void lock_system_sleep(void)
+{
+        current->flags |= PF_FREEZER_SKIP;
+        mutex_lock(&pm_mutex);
+}
+
+static inline void unlock_system_sleep(void)
+{
+       /*
+        * Don't use freezer_count() because we don't want the call to
+        * try_to_freeze() here.
+        *
+        * Reason:
+        * Fundamentally, we just don't need it, because freezing condition
+        * doesn't come into effect until we release the pm_mutex lock,
+        * since the freezer always works with pm_mutex held.
+        *
+        * More importantly, in the case of hibernation,
+        * unlock_system_sleep() gets called in snapshot_read() and
+        * snapshot_write() when the freezing condition is still in effect.
+        * Which means, if we use try_to_freeze() here, it would make them
+        * enter the refrigerator, thus causing hibernation to lockup.
+        */
+	current->flags &= ~PF_FREEZER_SKIP;
+        mutex_unlock(&pm_mutex);
 }
 #else /* !CONFIG_PM_SLEEP */
 
@@ -279,6 +330,12 @@ static inline int unregister_pm_notifier(struct notifier_block *nb)
 }
 
 #define pm_notifier(fn, pri)	do { (void)(fn); } while (0)
+
+static inline bool pm_wakeup_pending(void) { return false; }
+
+static inline void lock_system_sleep(void) {}
+static inline void unlock_system_sleep(void) {}
+
 #endif /* !CONFIG_PM_SLEEP */
 
 #ifndef CONFIG_HIBERNATION
@@ -290,6 +347,6 @@ static inline void register_nosave_region_late(unsigned long b, unsigned long e)
 }
 #endif
 
-extern struct mutex pm_mutex;
+
 
 #endif /* _LINUX_SUSPEND_H */

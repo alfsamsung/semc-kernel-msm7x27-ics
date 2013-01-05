@@ -373,7 +373,8 @@ static void unix_fill_in_inode(struct inode *tmp_inode,
 		tmp_inode->i_gid = cifs_sb->mnt_gid;
 	else
 		tmp_inode->i_gid = le64_to_cpu(pfindData->Gid);
-	tmp_inode->i_nlink = le64_to_cpu(pfindData->Nlinks);
+	//tmp_inode->i_nlink = le64_to_cpu(pfindData->Nlinks);
+	set_nlink(tmp_inode, le64_to_cpu(pfindData->Nlinks));
 
 	spin_lock(&tmp_inode->i_lock);
 	if (is_size_safe_to_change(cifsInfo, end_of_file)) {

@@ -997,8 +997,6 @@ EXPORT_SYMBOL_GPL(pm_runtime_enable);
  */
 void pm_runtime_init(struct device *dev)
 {
-	spin_lock_init(&dev->power.lock);
-
 	dev->power.runtime_status = RPM_SUSPENDED;
 	dev->power.idle_notification = false;
 

@@ -28,6 +28,7 @@ struct sysfs_elem_attr {
 
 struct sysfs_elem_bin_attr {
 	struct bin_attribute	*bin_attr;
+	struct hlist_head	buffers;
 };
 
 /*
@@ -103,8 +104,8 @@ extern const struct file_operations sysfs_dir_operations;
 extern const struct inode_operations sysfs_dir_inode_operations;
 
 struct dentry *sysfs_get_dentry(struct sysfs_dirent *sd);
-struct sysfs_dirent *sysfs_get_active_two(struct sysfs_dirent *sd);
-void sysfs_put_active_two(struct sysfs_dirent *sd);
+struct sysfs_dirent *sysfs_get_active(struct sysfs_dirent *sd);
+void sysfs_put_active(struct sysfs_dirent *sd);
 void sysfs_addrm_start(struct sysfs_addrm_cxt *acxt,
 		       struct sysfs_dirent *parent_sd);
 int __sysfs_add_one(struct sysfs_addrm_cxt *acxt, struct sysfs_dirent *sd);
@@ -163,6 +164,7 @@ int sysfs_add_file_mode(struct sysfs_dirent *dir_sd,
  * bin.c
  */
 extern const struct file_operations bin_fops;
+void unmap_bin_file(struct sysfs_dirent *attr_sd);
 
 /*
  * symlink.c

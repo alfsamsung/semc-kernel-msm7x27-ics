@@ -501,7 +501,8 @@ int ext4_ext_migrate(struct inode *inode)
 	 * the i_nlink to zero at the last stage after
 	 * switching the original file to extent format
 	 */
-	tmp_inode->i_nlink = 1;
+	//tmp_inode->i_nlink = 1;
+	set_nlink(tmp_inode, 1);
 
 	ext4_ext_tree_init(handle, tmp_inode);
 	ext4_orphan_add(handle, tmp_inode);
@@ -615,7 +616,8 @@ err_out:
 	 * generic_drop_inode really deletes the
 	 * inode
 	 */
-	tmp_inode->i_nlink = 0;
+	//tmp_inode->i_nlink = 0;
+	set_nlink(tmp_inode, 0);
 
 	ext4_journal_stop(handle);
 	unlock_new_inode(tmp_inode);

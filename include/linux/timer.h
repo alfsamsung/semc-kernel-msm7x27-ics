@@ -37,37 +37,68 @@ extern struct tvec_base boot_tvec_bases;
 	struct timer_list _name =				\
 		TIMER_INITIALIZER(_function, _expires, _data)
 
-void init_timer(struct timer_list *timer);
-void init_timer_deferrable(struct timer_list *timer);
+void init_timer_key(struct timer_list *timer,
+                    const char *name,
+                    struct lock_class_key *key);
+void init_timer_deferrable_key(struct timer_list *timer,
+                              const char *name,
+                              struct lock_class_key *key);
 
 #ifdef CONFIG_DEBUG_OBJECTS_TIMERS
-extern void init_timer_on_stack(struct timer_list *timer);
+extern void init_timer_on_stack_key(struct timer_list *timer,
+                                    const char *name,
+                                    struct lock_class_key *key);
 extern void destroy_timer_on_stack(struct timer_list *timer);
 #else
 static inline void destroy_timer_on_stack(struct timer_list *timer) { }
-static inline void init_timer_on_stack(struct timer_list *timer)
+static inline void init_timer_on_stack_key(struct timer_list *timer,
+                                            const char *name,
+                                            struct lock_class_key *key)
 {
-	init_timer(timer);
+        init_timer_key(timer, name, key);
 }
 #endif
 
-static inline void setup_timer(struct timer_list * timer,
-				void (*function)(unsigned long),
-				unsigned long data)
+#define init_timer(timer)\
+        init_timer_key((timer), NULL, NULL)
+#define init_timer_deferrable(timer)\
+        init_timer_deferrable_key((timer), NULL, NULL)
+#define init_timer_on_stack(timer)\
+        init_timer_on_stack_key((timer), NULL, NULL)
+#define setup_timer(timer, fn, data)\
+        setup_timer_key((timer), NULL, NULL, (fn), (data))
+#define setup_timer_on_stack(timer, fn, data)\
+        setup_timer_on_stack_key((timer), NULL, NULL, (fn), (data))
+#define setup_deferrable_timer_on_stack(timer, fn, data)\
+        setup_deferrable_timer_on_stack_key((timer), NULL, NULL, (fn), (data))
+
+static inline void setup_timer_key(struct timer_list * timer,
+                                const char *name,
+                                struct lock_class_key *key,
+                                void (*function)(unsigned long),
+                                unsigned long data)
 {
-	timer->function = function;
-	timer->data = data;
-	init_timer(timer);
+        timer->function = function;
+        timer->data = data;
+        init_timer_key(timer, name, key);
+}
+        
+static inline void setup_timer_on_stack_key(struct timer_list *timer,
+                                        const char *name,
+                                        struct lock_class_key *key,
+                                        void (*function)(unsigned long),
+                                        unsigned long data)
+{
+        timer->function = function;
+        timer->data = data;
+        init_timer_on_stack_key(timer, name, key);
 }
 
-static inline void setup_timer_on_stack(struct timer_list *timer,
-					void (*function)(unsigned long),
-					unsigned long data)
-{
-	timer->function = function;
-	timer->data = data;
-	init_timer_on_stack(timer);
-}
+extern void setup_deferrable_timer_on_stack_key(struct timer_list *timer,
+                                                const char *name,
+                                                struct lock_class_key *key,
+                                                void (*function)(unsigned long),
+                                                unsigned long data);
 
 /**
  * timer_pending - is a timer pending?

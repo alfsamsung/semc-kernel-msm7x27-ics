@@ -165,7 +165,7 @@ static void sysfs_init_inode(struct sysfs_dirent *sd, struct inode *inode)
 	case SYSFS_DIR:
 		inode->i_op = &sysfs_dir_inode_operations;
 		inode->i_fop = &sysfs_dir_operations;
-		inode->i_nlink = sysfs_count_nlink(sd);
+		set_nlink(inode, sysfs_count_nlink(sd));
 		break;
 	case SYSFS_KOBJ_ATTR:
 		inode->i_size = PAGE_SIZE;
