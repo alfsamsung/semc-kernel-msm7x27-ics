@@ -150,7 +150,12 @@ void mmc_add_host_debugfs(struct mmc_host *host)
 
 	if (!debugfs_create_file("ios", S_IRUSR, root, host, &mmc_ios_fops))
 		goto err_ios;
-
+	
+#ifdef CONFIG_MMC_CLKGATE
+	if (!debugfs_create_u32("clk_delay", (S_IRUSR | S_IWUSR),
+				  root, &host->clk_delay))
+		goto err_ios;
+#endif
 	return;
 
 err_ios:
