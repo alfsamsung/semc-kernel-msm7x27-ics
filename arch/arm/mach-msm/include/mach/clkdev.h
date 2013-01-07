@@ -1,4 +1,5 @@
-/* Copyright (c) 2010, Code Aurora Forum. All rights reserved.
+/*
+ * Copyright (c) 2011, Code Aurora Forum. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -24,42 +25,11 @@
  * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
  * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
  */
+#ifndef __ASM_ARCH_MSM_CLKDEV_H
+#define __ASM_ARCH_MSM_CLKDEV_H
 
-#ifndef __ARCH_ARM_MACH_MSM_CLOCK_VOTER_H
-#define __ARCH_ARM_MACH_MSM_CLOCK_VOTER_H
-
-enum {
-	V_EBI_ACPU_CLK,
-	V_EBI_DSI_CLK,
-	V_EBI_DTV_CLK,
-	V_EBI_KGSL_CLK,
-	V_EBI_LCDC_CLK,
-	V_EBI_MDDI_CLK,
-	V_EBI_MDP_CLK,
-	V_EBI_PM_CLK,
-	V_EBI_TV_CLK,
-	V_EBI_USB_CLK,
-	V_EBI_VCD_CLK,
-	V_EBI_VFE_CLK,
-	
-	V_NR_CLKS
-};
-
-struct clk_ops;
-extern struct clk_ops clk_ops_voter;
-
-#define CLK_VOTER(clk_name, clk_id, agg_name, clk_dev, clk_flags) {     \
-	.con_id = clk_name, \
-	.dev_id = clk_dev, \
-	.clk = &(struct clk){ \
-		.id = V_##clk_id, \
-		.flags = clk_flags | CLKFLAG_VOTER, \
-		.aggregator = agg_name, \
-		.dbg_name = #clk_id, \
-		.ops = &clk_ops_voter, \
-	}, \
-	}
-
+static inline int __clk_get(struct clk *clk) { return 1; }
+static inline void __clk_put(struct clk *clk) { }
 #endif
+ 

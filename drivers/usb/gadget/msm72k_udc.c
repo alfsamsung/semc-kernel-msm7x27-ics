@@ -31,6 +31,7 @@
 #include <linux/platform_device.h>
 #include <linux/debugfs.h>
 #include <linux/workqueue.h>
+#include <linux/clk.h>
 #include <linux/pm_qos_params.h>
 #include <linux/switch.h>
 
@@ -1402,7 +1403,10 @@ static void usb_start(struct usb_info *ui)
 }
 
 static int usb_free(struct usb_info *ui, int ret)
-{
+{	/*ALFS TEST clock fix*/
+	struct msm_hsusb_gadget_platform_data *pdata;
+	struct platform_device *pdev;
+	
 	INFO("usb_free(%d)\n", ret);
 
 	if (ui->xceiv)
@@ -1418,7 +1422,9 @@ static int usb_free(struct usb_info *ui, int ret)
 		dma_free_coherent(&ui->pdev->dev, 4096, ui->buf, ui->dma);
 	kfree(ui);
 	pm_qos_remove_requirement(PM_QOS_CPU_DMA_LATENCY, DRIVER_NAME);
-	pm_qos_remove_requirement(PM_QOS_SYSTEM_BUS_FREQ, DRIVER_NAME);
+	//pm_qos_remove_requirement(PM_QOS_SYSTEM_BUS_FREQ, DRIVER_NAME);
+	pdata = pdev->dev.platform_data;
+	clk_put(pdata->ebi1_clk);
 	return ret;
 }
 
@@ -1432,14 +1438,12 @@ static void msm72k_pm_qos_update(int vote)
 		pm_qos_update_requirement(PM_QOS_CPU_DMA_LATENCY,
 				DRIVER_NAME, swfi_latency);
 		if (depends_on_axi_freq(the_usb_info->xceiv))
-			pm_qos_update_requirement(PM_QOS_SYSTEM_BUS_FREQ,
-				DRIVER_NAME, MSM_AXI_MAX_FREQ);
+			clk_enable(pdata->ebi1_clk); /*ALFS TEST clock fix*/
 	} else {
 		pm_qos_update_requirement(PM_QOS_CPU_DMA_LATENCY,
 				DRIVER_NAME, PM_QOS_DEFAULT_VALUE);
 		if (depends_on_axi_freq(the_usb_info->xceiv))
-			pm_qos_update_requirement(PM_QOS_SYSTEM_BUS_FREQ,
-				DRIVER_NAME, PM_QOS_DEFAULT_VALUE);
+			clk_disable(pdata->ebi1_clk);   /*ALFS TEST clock fix*/
 	}
 }
 
@@ -2428,11 +2432,19 @@ static int msm72k_probe(struct platform_device *pdev)
 
 	pm_qos_add_requirement(PM_QOS_CPU_DMA_LATENCY, DRIVER_NAME,
 					PM_QOS_DEFAULT_VALUE);
-	pm_qos_add_requirement(PM_QOS_SYSTEM_BUS_FREQ, DRIVER_NAME,
-					PM_QOS_DEFAULT_VALUE);
+	
+	/*ALFS TEST clock fix*/
+	pdata = pdev->dev.platform_data;
+	pdata->ebi1_clk = clk_get(NULL, "ebi1_usb_clk");
+       if (IS_ERR(pdata->ebi1_clk))
+               pdata->ebi1_clk = NULL;
+       else
+               clk_set_rate(pdata->ebi1_clk, INT_MAX);
+       
 	usb_debugfs_init(ui);
 
 	usb_prepare(ui);
+ /*ALFS END */
 
 	retval = otg_set_peripheral(ui->xceiv, &ui->gadget);
 	if (retval) {
@@ -2444,6 +2456,9 @@ static int msm72k_probe(struct platform_device *pdev)
 	}
 
 	return 0;
+	
+//put_ebi_clk:
+  //     clk_put(dev->pdata->ebi1_clk);
 }
 
 int usb_gadget_register_driver(struct usb_gadget_driver *driver)

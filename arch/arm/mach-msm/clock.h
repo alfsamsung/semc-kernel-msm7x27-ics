@@ -1,7 +1,7 @@
 /* arch/arm/mach-msm/clock.h
  *
  * Copyright (C) 2007 Google, Inc.
- * Copyright (c) 2007-2010, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2007-2011, Code Aurora Forum. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -18,7 +18,7 @@
 #ifndef __ARCH_ARM_MACH_MSM_CLOCK_H
 #define __ARCH_ARM_MACH_MSM_CLOCK_H
 
-#include <linux/list.h>
+#include <linux/types.h>
 #include <mach/clk.h>
 
 #define CLKFLAG_INVERT			0x00000001
@@ -53,28 +53,12 @@ struct clk {
 	uint32_t id;
 	uint32_t remote_id;
 	uint32_t flags;
-	const char *name;
 	struct clk_ops *ops;
 	const char *dbg_name;
 	struct list_head list;
-	struct device *dev;
 	struct hlist_head voters;
 	const char *aggregator;
 };
-
-#ifdef CONFIG_DEBUG_FS
-#define CLOCK_DBG_NAME(x) .dbg_name = x,
-#else
-#define CLOCK_DBG_NAME(x)
-#endif
-
-#define CLOCK(clk_name, clk_id, clk_dev, clk_flags) {	\
-	.name = clk_name, \
-	.id = clk_id, \
-	.flags = clk_flags, \
-	.dev = clk_dev, \
-	 CLOCK_DBG_NAME(#clk_id) \
-	}
 
 #define OFF CLKFLAG_AUTO_OFF
 #define CLK_MIN CLKFLAG_MIN
@@ -91,12 +75,6 @@ enum {
 	PLL_5,
 	PLL_6,
 	NUM_PLL
-};
-
-enum clkvote_client {
-	CLKVOTE_ACPUCLK = 0,
-	CLKVOTE_PMQOS,
-	CLKVOTE_MAX,
 };
 
 #ifdef CONFIG_DEBUG_FS
@@ -126,10 +104,6 @@ static inline int msm_clock_get_name(uint32_t id, char *name, uint32_t size)
 {
        return 0;
 }
-
-unsigned long clk_get_max_axi_khz(void);
-
-int ebi1_clk_set_min_rate(enum clkvote_client client, unsigned long rate);
 
 #endif
 

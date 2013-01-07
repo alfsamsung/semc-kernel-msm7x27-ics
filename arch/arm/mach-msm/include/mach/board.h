@@ -23,6 +23,8 @@
 #include <linux/input.h>
 #include <linux/usb.h>
 
+#include <asm/clkdev.h>
+
 /* platform device data structures */
 struct msm_acpu_clock_platform_data {
 	uint32_t acpu_switch_time_us;
@@ -260,7 +262,7 @@ struct tvenc_platform_data {
 };
 
 struct mddi_platform_data {
-	int (*mddi_power_save)(int on);		//void
+	void (*mddi_power_save)(int on);		//void
 	int (*mddi_sel_clk)(u32 *clk_rate);
 //	int (*mddi_power_on)(int);
 	int (*mddi_client_power)(u32 client_id);
@@ -294,7 +296,7 @@ void __init msm_map_qsd8x50_io(void);
 void __init msm_map_msm7x30_io(void);
 void __init msm_map_comet_io(void);
 void __init msm_init_irq(void);
-void __init msm_clock_init(struct clk *clock_tbl, unsigned num_clocks);
+void __init msm_clock_init(struct clk_lookup *clock_tbl, unsigned num_clocks);
 void __init msm_acpu_clock_init(struct msm_acpu_clock_platform_data *);
 
 struct mmc_platform_data;

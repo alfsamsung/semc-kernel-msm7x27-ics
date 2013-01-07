@@ -76,6 +76,8 @@ struct msm_hsusb_gadget_platform_data {
 
 	u32 swfi_latency;
 	int self_powered;
+	
+	struct clk *ebi1_clk; /*Alfs clock test*/
 };
 
 struct msm_hsusb_platform_data {
@@ -116,6 +118,7 @@ struct msm_otg_platform_data {
 	int (*pmic_register_vbus_sn) (void (*callback)(int online));
 	void (*pmic_unregister_vbus_sn) (void (*callback)(int online));
 	int (*pmic_enable_ldo) (int);
+	struct clk *ebi1_clk;
 };
 
 struct msm_usb_host_platform_data {
@@ -123,6 +126,7 @@ struct msm_usb_host_platform_data {
 	int (*phy_reset)(void __iomem *addr);
 	void (*config_gpio)(unsigned int config);
 	void (*vbus_power) (unsigned phy_info, int on);
+	//struct clk *ebi1_clk;
 };
 
 #endif
