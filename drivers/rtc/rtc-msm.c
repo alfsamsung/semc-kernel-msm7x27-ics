@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2008 Google, Inc.
- * Copyright (c) 2009-2010 Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2009-2011 Code Aurora Forum. All rights reserved.
  * Author: San Mehat <san@google.com>
  *
  * This software is licensed under the terms of the GNU General Public
@@ -16,19 +16,17 @@
 
 #include <linux/module.h>
 #include <linux/version.h>
-
 #include <linux/kernel.h>
 #include <linux/platform_device.h>
 #include <linux/init.h>
 #include <linux/types.h>
+#include <linux/slab.h>
+#include <linux/android_alarm.h>
+
 #include <linux/rtc.h>
 #include <linux/rtc-msm.h>
 #include <linux/msm_rpcrouter.h>
-
 #include <mach/msm_rpcrouter.h>
-
-extern void msm_pm_set_max_sleep_time(int64_t sleep_time_ns);
-static int msmrtc_timeremote_set_time(struct device *dev, struct rtc_time *tm);
 
 #define APP_TIMEREMOTE_PDEV_NAME "rs00000000"
 
@@ -118,9 +116,16 @@ struct rtc_cb_recv {
 	union cb_info cb_info_data;
 };
 
-static struct msm_rpc_client *rpc_client;
-
-static u8 client_id;
+struct msm_rtc {
+	int proc;
+	struct msm_rpc_client *rpc_client;
+	u8 client_id;
+	struct rtc_device *rtc;
+#ifdef CONFIG_RTC_SECURE_TIME_SUPPORT
+	struct rtc_device *rtcsecure;
+#endif
+	unsigned long rtcalarm_time;
+};
 
 struct rpc_time_julian {
 	uint32_t year;
@@ -132,31 +137,46 @@ struct rpc_time_julian {
 	uint32_t day_of_week;
 };
 
-static struct rtc_device *rtc;
-#ifdef CONFIG_RTC_SECURE_TIME_SUPPORT
-static struct rtc_device *rtcsecure;
-#endif
-static unsigned long rtcalarm_time;
-
 struct rtc_tod_args {
 	int proc;
 	struct rtc_time *tm;
 };
 
-static int msmrtc_valid_tm(struct rtc_time *tm)
-{
-	if (tm->tm_year < 80
-		|| tm->tm_year > 137
-		|| ((unsigned)tm->tm_mon) >= 12
-		|| tm->tm_mday < 1
-		|| tm->tm_mday > rtc_month_days(tm->tm_mon, tm->tm_year + 1900)
-		|| ((unsigned)tm->tm_hour) >= 24
-		|| ((unsigned)tm->tm_min) >= 60
-		|| ((unsigned)tm->tm_sec) >= 60)
-		return -EINVAL;
+#ifdef CONFIG_PM
+struct suspend_state_info {
+	atomic_t state;
+	int64_t tick_at_suspend;
+};
 
-	return 0;
+static struct suspend_state_info suspend_state = {ATOMIC_INIT(0), 0};
+
+void msmrtc_updateatsuspend(struct timespec *ts)
+{
+	int64_t now, sleep, sclk_max;
+
+	if (atomic_read(&suspend_state.state)) {
+		now = msm_timer_get_sclk_time(&sclk_max);
+
+		if (now && suspend_state.tick_at_suspend) {
+			if (now < suspend_state.tick_at_suspend) {
+				sleep = sclk_max -
+					suspend_state.tick_at_suspend + now;
+			} else
+				sleep = now - suspend_state.tick_at_suspend;
+
+			timespec_add_ns(ts, sleep);
+			suspend_state.tick_at_suspend = now;
+		} else
+			pr_err("%s: Invalid ticks from SCLK now=%lld"
+				"tick_at_suspend=%lld", __func__, now,
+				suspend_state.tick_at_suspend);
+	}
+
 }
+#else
+void msmrtc_updateatsuspend(struct timespec *ts) { }
+#endif
+EXPORT_SYMBOL(msmrtc_updateatsuspend);
 
 static int msmrtc_tod_proc_args(struct msm_rpc_client *client, void *buff,
 							void *data)
@@ -195,6 +215,20 @@ static int msmrtc_tod_proc_args(struct msm_rpc_client *client, void *buff,
 		return sizeof(uint32_t);
 	} else
 		return 0;
+}
+
+static bool rtc_check_overflow(struct rtc_time *tm)
+{
+	if (tm->tm_year < 138)
+		return false;
+
+	if (tm->tm_year > 138)
+		return true;
+
+	if ((tm->tm_year == 138) && (tm->tm_mon == 0) && (tm->tm_mday < 19))
+		return false;
+
+	return true;
 }
 
 static int msmrtc_tod_proc_result(struct msm_rpc_client *client, void *buff,
@@ -240,6 +274,15 @@ static int msmrtc_tod_proc_result(struct msm_rpc_client *client, void *buff,
 			rtc_time_to_tm(0, rtc_args->tm);
 		}
 
+		/*
+		 * Check if the time received is > 01-19-2038, to prevent
+		 * overflow. In such a case, return the EPOCH time.
+		 */
+		if (rtc_check_overflow(rtc_args->tm) == true) {
+			pr_err("Invalid time (year > 2038)\n");
+			rtc_time_to_tm(0, rtc_args->tm);
+		}
+
 		return 0;
 	} else
 		return 0;
@@ -250,27 +293,26 @@ msmrtc_timeremote_set_time(struct device *dev, struct rtc_time *tm)
 {
 	int rc;
 	struct rtc_tod_args rtc_args;
-	struct rtc_time tm_req;
+	struct msm_rtc *rtc_pdata = dev_get_drvdata(dev);
 
-	memcpy(&tm_req, tm, sizeof(struct rtc_time));
+	if (tm->tm_year < 1900)
+		tm->tm_year += 1900;
 
-	if (tm_req.tm_year < 1900)
-		tm_req.tm_year += 1900;
-
-	if ((tm_req.tm_year < 1980) || (tm_req.tm_year > 2037))
+	if (tm->tm_year < 1970)
 		return -EINVAL;
 
-	pr_debug("%s: %.2u/%.2u/%.4u %.2u:%.2u:%.2u (%.2u)\n",
-	       __func__, tm_req.tm_mon, tm_req.tm_mday, tm_req.tm_year,
-	       tm_req.tm_hour, tm_req.tm_min, tm_req.tm_sec, tm_req.tm_wday);
+	dev_dbg(dev, "%s: %.2u/%.2u/%.4u %.2u:%.2u:%.2u (%.2u)\n",
+	       __func__, tm->tm_mon, tm->tm_mday, tm->tm_year,
+	       tm->tm_hour, tm->tm_min, tm->tm_sec, tm->tm_wday);
 
 	rtc_args.proc = TIMEREMOTE_PROCEEDURE_SET_JULIAN;
-	rtc_args.tm = &tm_req;
-	rc = msm_rpc_client_req(rpc_client, TIMEREMOTE_PROCEEDURE_SET_JULIAN,
+	rtc_args.tm = tm;
+	rc = msm_rpc_client_req(rtc_pdata->rpc_client,
+				TIMEREMOTE_PROCEEDURE_SET_JULIAN,
 				msmrtc_tod_proc_args, &rtc_args,
 				NULL, NULL, -1);
 	if (rc) {
-		pr_err("%s: rtc time (TOD) could not be set\n", __func__);
+		dev_err(dev, "%s: rtc time (TOD) could not be set\n", __func__);
 		return rc;
 	}
 
@@ -282,42 +324,19 @@ msmrtc_timeremote_read_time(struct device *dev, struct rtc_time *tm)
 {
 	int rc;
 	struct rtc_tod_args rtc_args;
+	struct msm_rtc *rtc_pdata = dev_get_drvdata(dev);
 
 	rtc_args.proc = TIMEREMOTE_PROCEEDURE_GET_JULIAN;
 	rtc_args.tm = tm;
 
-	rc = msm_rpc_client_req(rpc_client, TIMEREMOTE_PROCEEDURE_GET_JULIAN,
+	rc = msm_rpc_client_req(rtc_pdata->rpc_client,
+				TIMEREMOTE_PROCEEDURE_GET_JULIAN,
 				msmrtc_tod_proc_args, &rtc_args,
 				msmrtc_tod_proc_result, &rtc_args, -1);
 
 	if (rc) {
-		pr_err("%s: Error retrieving rtc (TOD) time\n", __func__);
+		dev_err(dev, "%s: Error retrieving rtc (TOD) time\n", __func__);
 		return rc;
-	}
-
-	if ((tm->tm_year < 80) ||
-		 (tm->tm_year > 137)) {
-		int rc;
-
-		tm->tm_year = 110;
-		tm->tm_mon = 0;
-		tm->tm_mday = 1;
-		tm->tm_hour = 0;
-		tm->tm_min = 0;
-		tm->tm_sec = 0;
-		tm->tm_wday = 5;
-
-		rc = msmrtc_timeremote_set_time(dev, tm);
-		if (rc < 0) {
-			pr_err("%s: Failed to set default "
-				"time and date.\n", __func__);
-			return rc;
-		}
-
-		if (msmrtc_valid_tm(tm) < 0) {
-			pr_err("%s: Retrived data/time not valid \n", __func__);
-			rtc_time_to_tm(0, tm);
-		}
 	}
 
 	return 0;
@@ -326,18 +345,19 @@ msmrtc_timeremote_read_time(struct device *dev, struct rtc_time *tm)
 static int
 msmrtc_virtual_alarm_set(struct device *dev, struct rtc_wkalrm *a)
 {
+	struct msm_rtc *rtc_pdata = dev_get_drvdata(dev);
 	unsigned long now = get_seconds();
 
 	if (!a->enabled) {
-		rtcalarm_time = 0;
+		rtc_pdata->rtcalarm_time = 0;
 		return 0;
 	} else
-		rtc_tm_to_time(&a->time, &rtcalarm_time);
+		rtc_tm_to_time(&a->time, &(rtc_pdata->rtcalarm_time));
 
-	if (now > rtcalarm_time) {
-		printk(KERN_ERR "%s: Attempt to set alarm in the past\n",
+	if (now > rtc_pdata->rtcalarm_time) {
+		dev_err(dev, "%s: Attempt to set alarm in the past\n",
 		       __func__);
-		rtcalarm_time = 0;
+		rtc_pdata->rtcalarm_time = 0;
 		return -EINVAL;
 	}
 
@@ -356,29 +376,28 @@ msmrtc_timeremote_set_time_secure(struct device *dev, struct rtc_time *tm)
 {
 	int rc;
 	struct rtc_tod_args rtc_args;
-	struct rtc_time tm_req;
+	struct msm_rtc *rtc_pdata = dev_get_drvdata(dev);
 
-	memcpy(&tm_req, tm, sizeof(struct rtc_time));
+	if (tm->tm_year < 1900)
+		tm->tm_year += 1900;
 
-	if (tm_req.tm_year < 1900)
-		tm_req.tm_year += 1900;
-
-	if ((tm_req.tm_year < 1980) || (tm_req.tm_year > 2037))
+	if (tm->tm_year < 1970)
 		return -EINVAL;
 
-	pr_debug("%s: %.2u/%.2u/%.4u %.2u:%.2u:%.2u (%.2u)\n",
-	       __func__, tm_req.tm_mon, tm_req.tm_mday, tm_req.tm_year,
-	       tm_req.tm_hour, tm_req.tm_min, tm_req.tm_sec, tm_req.tm_wday);
+	dev_dbg(dev, "%s: %.2u/%.2u/%.4u %.2u:%.2u:%.2u (%.2u)\n",
+	       __func__, tm->tm_mon, tm->tm_mday, tm->tm_year,
+	       tm->tm_hour, tm->tm_min, tm->tm_sec, tm->tm_wday);
 
 	rtc_args.proc = TIMEREMOTE_PROCEEDURE_SET_SECURE_JULIAN;
-	rtc_args.tm = &tm_req;
+	rtc_args.tm = tm;
 
-	rc = msm_rpc_client_req(rpc_client,
+	rc = msm_rpc_client_req(rtc_pdata->rpc_client,
 			TIMEREMOTE_PROCEEDURE_SET_SECURE_JULIAN,
 				msmrtc_tod_proc_args, &rtc_args,
 				NULL, NULL, -1);
 	if (rc) {
-		pr_err("%s: rtc secure time could not be set\n", __func__);
+		dev_err(dev,
+			"%s: rtc secure time could not be set\n", __func__);
 		return rc;
 	}
 
@@ -390,42 +409,18 @@ msmrtc_timeremote_read_time_secure(struct device *dev, struct rtc_time *tm)
 {
 	int rc;
 	struct rtc_tod_args rtc_args;
-
+	struct msm_rtc *rtc_pdata = dev_get_drvdata(dev);
 	rtc_args.proc = TIMEREMOTE_PROCEEDURE_GET_SECURE_JULIAN;
 	rtc_args.tm = tm;
 
-	rc = msm_rpc_client_req(rpc_client,
+	rc = msm_rpc_client_req(rtc_pdata->rpc_client,
 		TIMEREMOTE_PROCEEDURE_GET_SECURE_JULIAN, msmrtc_tod_proc_args,
 		&rtc_args, msmrtc_tod_proc_result, &rtc_args, -1);
 
 	if (rc) {
-		pr_err("%s: Error retrieving secure rtc time\n", __func__);
+		dev_err(dev,
+			"%s: Error retrieving secure rtc time\n", __func__);
 		return rc;
-	}
-
-	if ((tm->tm_year < 80) ||
-		 (tm->tm_year > 137)) {
-		int rc;
-
-		tm->tm_year = 110;
-		tm->tm_mon = 0;
-		tm->tm_mday = 1;
-		tm->tm_hour = 0;
-		tm->tm_min = 0;
-		tm->tm_sec = 0;
-		tm->tm_wday = 5;
-
-		rc = msmrtc_timeremote_set_time(dev, tm);
-		if (rc < 0) {
-			pr_err("%s: Failed to set default "
-				"time and date.\n", __func__);
-			return rc;
-		}
-
-		if (msmrtc_valid_tm(tm) < 0) {
-			pr_err("%s: Retrived data/time not valid \n", __func__);
-			rtc_time_to_tm(0, tm);
-		}
 	}
 
 	return 0;
@@ -437,19 +432,10 @@ static struct rtc_class_ops msm_rtc_ops_secure = {
 };
 #endif
 
-static void
-msmrtc_alarmtimer_expired(unsigned long _data)
-{
-	pr_debug("%s: Generating alarm event (src %lu)\n",
-	       rtc->name, _data);
-
-	rtc_update_irq(rtc, 1, RTC_IRQF | RTC_AF);
-	rtcalarm_time = 0;
-}
-
 static void process_cb_request(void *buffer)
 {
 	struct rtc_cb_recv *rtc_cb = buffer;
+	struct timespec ts, tv;
 
 	rtc_cb->client_cb_id = be32_to_cpu(rtc_cb->client_cb_id);
 	rtc_cb->event = be32_to_cpu(rtc_cb->event);
@@ -463,13 +449,19 @@ static void process_cb_request(void *buffer)
 			be64_to_cpu(rtc_cb->cb_info_data.tod_update.stamp);
 		rtc_cb->cb_info_data.tod_update.freq =
 			be32_to_cpu(rtc_cb->cb_info_data.tod_update.freq);
-		printk(KERN_INFO "RPC CALL -- TOD TIME UPDATE: ttick = %d\n"
+		pr_info("RPC CALL -- TOD TIME UPDATE: ttick = %d\n"
 			"stamp=%lld, freq = %d\n",
 			rtc_cb->cb_info_data.tod_update.tick,
 			rtc_cb->cb_info_data.tod_update.stamp,
 			rtc_cb->cb_info_data.tod_update.freq);
-		/* Do an update of xtime */
+
+		getnstimeofday(&ts);
+		msmrtc_updateatsuspend(&ts);
 		rtc_hctosys();
+		getnstimeofday(&tv);
+		/* Update the alarm information with the new time info. */
+		alarm_update_timedelta(ts, tv);
+
 	} else
 		pr_err("%s: Unknown event EVENT=%x\n",
 					__func__, rtc_cb->event);
@@ -505,7 +497,9 @@ static int msmrtc_cb_func(struct msm_rpc_client *client, void *buffer, int size)
 static int msmrtc_rpc_proc_args(struct msm_rpc_client *client, void *buff,
 							void *data)
 {
-	if (*(uint32_t *)data == RTC_CLIENT_INIT_PROC) {
+	struct msm_rtc *rtc_pdata = data;
+
+	if (rtc_pdata->proc == RTC_CLIENT_INIT_PROC) {
 		/* arguments passed to the client_init function */
 		struct rtc_client_init_req {
 			enum client_type client;
@@ -522,7 +516,7 @@ static int msmrtc_rpc_proc_args(struct msm_rpc_client *client, void *buff,
 
 		return sizeof(*req_1);
 
-	} else if (*(uint32_t *)data == RTC_REQUEST_CB_PROC) {
+	} else if (rtc_pdata->proc == RTC_REQUEST_CB_PROC) {
 		/* arguments passed to the request_cb function */
 		struct rtc_event_req {
 			u8 client_id;
@@ -530,7 +524,7 @@ static int msmrtc_rpc_proc_args(struct msm_rpc_client *client, void *buff,
 		};
 		struct rtc_event_req *req_2 = buff;
 
-		req_2->client_id =  (u8) cpu_to_be32(client_id);
+		req_2->client_id =  (u8) cpu_to_be32(rtc_pdata->client_id);
 		req_2->rtc_cb_id = cpu_to_be32(RTC_CB_ID);
 
 		return sizeof(*req_2);
@@ -542,8 +536,9 @@ static int msmrtc_rpc_proc_result(struct msm_rpc_client *client, void *buff,
 							void *data)
 {
 	uint32_t result = -EINVAL;
+	struct msm_rtc *rtc_pdata = data;
 
-	if (*(uint32_t *)data == RTC_CLIENT_INIT_PROC) {
+	if (rtc_pdata->proc == RTC_CLIENT_INIT_PROC) {
 		/* process reply received from client_init function */
 		uint32_t client_id_ptr;
 		result = be32_to_cpu(*(uint32_t *)buff);
@@ -551,20 +546,21 @@ static int msmrtc_rpc_proc_result(struct msm_rpc_client *client, void *buff,
 		client_id_ptr = be32_to_cpu(*(uint32_t *)(buff));
 		buff += sizeof(uint32_t);
 		if (client_id_ptr == 1)
-			client_id = (u8) be32_to_cpu(*(uint32_t *)(buff));
+			rtc_pdata->client_id = (u8)
+					be32_to_cpu(*(uint32_t *)(buff));
 		else {
 			pr_debug("%s: Client-id not received from Modem\n",
 								__func__);
 			return -EINVAL;
 		}
-	} else if (*(uint32_t *)data == RTC_REQUEST_CB_PROC) {
+	} else if (rtc_pdata->proc == RTC_REQUEST_CB_PROC) {
 		/* process reply received from request_cb function */
 		result = be32_to_cpu(*(uint32_t *)buff);
 	}
 
 	if (result == ERR_NONE) {
 		pr_debug("%s: RPC client reply for PROC=%x success\n",
-					 __func__, *(uint32_t *)data);
+					 __func__, rtc_pdata->proc);
 		return 0;
 	}
 
@@ -573,15 +569,15 @@ static int msmrtc_rpc_proc_result(struct msm_rpc_client *client, void *buff,
 	return -EINVAL;
 }
 
-static int msmrtc_setup_cb(void)
+static int msmrtc_setup_cb(struct msm_rtc *rtc_pdata)
 {
-	int rc, proc;
+	int rc;
 
 	/* Register with the server with client specific info */
-	proc = RTC_CLIENT_INIT_PROC;
-	rc = msm_rpc_client_req(rpc_client, RTC_CLIENT_INIT_PROC,
-				msmrtc_rpc_proc_args, &proc,
-				msmrtc_rpc_proc_result, &proc, -1);
+	rtc_pdata->proc = RTC_CLIENT_INIT_PROC;
+	rc = msm_rpc_client_req(rtc_pdata->rpc_client, RTC_CLIENT_INIT_PROC,
+				msmrtc_rpc_proc_args, rtc_pdata,
+				msmrtc_rpc_proc_result, rtc_pdata, -1);
 	if (rc) {
 		pr_debug("%s: RPC client registration for PROC:%x failed\n",
 					__func__, RTC_CLIENT_INIT_PROC);
@@ -589,10 +585,10 @@ static int msmrtc_setup_cb(void)
 	}
 
 	/* Register with server for the callback event */
-	proc = RTC_REQUEST_CB_PROC;
-	rc = msm_rpc_client_req(rpc_client, RTC_REQUEST_CB_PROC,
-				msmrtc_rpc_proc_args, &proc,
-				msmrtc_rpc_proc_result, &proc, -1);
+	rtc_pdata->proc = RTC_REQUEST_CB_PROC;
+	rc = msm_rpc_client_req(rtc_pdata->rpc_client, RTC_REQUEST_CB_PROC,
+				msmrtc_rpc_proc_args, rtc_pdata,
+				msmrtc_rpc_proc_result, rtc_pdata, -1);
 	if (rc) {
 		pr_debug("%s: RPC client registration for PROC:%x failed\n",
 					__func__, RTC_REQUEST_CB_PROC);
@@ -601,13 +597,15 @@ static int msmrtc_setup_cb(void)
 	return rc;
 }
 
-static int
+static int __devinit
 msmrtc_probe(struct platform_device *pdev)
 {
 	int rc;
+	struct msm_rtc *rtc_pdata = NULL;
 	struct rpcsvr_platform_device *rdev =
 		container_of(pdev, struct rpcsvr_platform_device, base);
 	uint32_t prog_version;
+
 
 	if (pdev->id == (TIMEREMOTE_PROG_VER_1 & RPC_VERSION_MAJOR_MASK))
 		prog_version = TIMEREMOTE_PROG_VER_1;
@@ -617,54 +615,86 @@ msmrtc_probe(struct platform_device *pdev)
 	else
 		return -EINVAL;
 
-	rpc_client = msm_rpc_register_client("rtc", rdev->prog,
+	rtc_pdata = kzalloc(sizeof(*rtc_pdata), GFP_KERNEL);
+	if (rtc_pdata == NULL) {
+		dev_err(&pdev->dev,
+			"%s: Unable to allocate memory\n", __func__);
+		return -ENOMEM;
+	}
+	rtc_pdata->rpc_client = msm_rpc_register_client("rtc", rdev->prog,
 				prog_version, 1, msmrtc_cb_func);
-	if (IS_ERR(rpc_client)) {
-		pr_err("%s: init RPC failed! VERS = %x\n", __func__,
+	if (IS_ERR(rtc_pdata->rpc_client)) {
+		dev_err(&pdev->dev,
+			 "%s: init RPC failed! VERS = %x\n", __func__,
 					prog_version);
-		return PTR_ERR(rpc_client);
+		rc = PTR_ERR(rtc_pdata->rpc_client);
+		kfree(rtc_pdata);
+		return rc;
 	}
 
 	/*
 	 * Set up the callback client.
 	 * For older targets this initialization will fail
 	 */
-	rc = msmrtc_setup_cb();
+	rc = msmrtc_setup_cb(rtc_pdata);
 	if (rc)
-		pr_debug("%s: Could not initialize RPC callback\n",
+		dev_dbg(&pdev->dev, "%s: Could not initialize RPC callback\n",
 								__func__);
 
-	rtc = rtc_device_register("msm_rtc",
+	rtc_pdata->rtcalarm_time = 0;
+	platform_set_drvdata(pdev, rtc_pdata);
+
+	rtc_pdata->rtc = rtc_device_register("msm_rtc",
 				  &pdev->dev,
 				  &msm_rtc_ops,
 				  THIS_MODULE);
-	if (IS_ERR(rtc)) {
-		printk(KERN_ERR "%s: Can't register RTC device (%ld)\n",
-		       pdev->name, PTR_ERR(rtc));
-		rc = PTR_ERR(rtc);
+	if (IS_ERR(rtc_pdata->rtc)) {
+		dev_err(&pdev->dev, "%s: Can't register RTC device (%ld)\n",
+		       pdev->name, PTR_ERR(rtc_pdata->rtc));
+		rc = PTR_ERR(rtc_pdata->rtc);
 		goto fail_cb_setup;
 	}
 
 #ifdef CONFIG_RTC_SECURE_TIME_SUPPORT
-	rtcsecure = rtc_device_register("msm_rtc_secure",
+	rtc_pdata->rtcsecure = rtc_device_register("msm_rtc_secure",
 				  &pdev->dev,
 				  &msm_rtc_ops_secure,
 				  THIS_MODULE);
 
-	if (IS_ERR(rtcsecure)) {
-		printk(KERN_ERR "%s: Can't register RTC Secure device (%ld)\n",
-		       pdev->name, PTR_ERR(rtcsecure));
-		rtc_device_unregister(rtc);
-		rc = PTR_ERR(rtcsecure);
+	if (IS_ERR(rtc_pdata->rtcsecure)) {
+		dev_err(&pdev->dev,
+			"%s: Can't register RTC Secure device (%ld)\n",
+		       pdev->name, PTR_ERR(rtc_pdata->rtcsecure));
+		rtc_device_unregister(rtc_pdata->rtc);
+		rc = PTR_ERR(rtc_pdata->rtcsecure);
 		goto fail_cb_setup;
 	}
+#endif
+
+#ifdef CONFIG_RTC_ASYNC_MODEM_SUPPORT
+	rtc_hctosys();
 #endif
 
 	return 0;
 
 fail_cb_setup:
-	msm_rpc_unregister_client(rpc_client);
+	msm_rpc_unregister_client(rtc_pdata->rpc_client);
+	kfree(rtc_pdata);
 	return rc;
+}
+
+
+#ifdef CONFIG_PM
+
+static void
+msmrtc_alarmtimer_expired(unsigned long _data,
+				struct msm_rtc *rtc_pdata)
+{
+	pr_debug("%s: Generating alarm event (src %lu)\n",
+	       rtc_pdata->rtc->name, _data);
+
+	rtc_update_irq(rtc_pdata->rtc, 1, RTC_IRQF | RTC_AF);
+	rtc_pdata->rtcalarm_time = 0;
 }
 
 static int
@@ -673,23 +703,29 @@ msmrtc_suspend(struct platform_device *dev, pm_message_t state)
 	int rc, diff;
 	struct rtc_time tm;
 	unsigned long now;
+	struct msm_rtc *rtc_pdata = platform_get_drvdata(dev);
 
-	if (rtcalarm_time) {
-		rc = msmrtc_timeremote_read_time(NULL, &tm);
+	suspend_state.tick_at_suspend = msm_timer_get_sclk_time(NULL);
+	if (rtc_pdata->rtcalarm_time) {
+		rc = msmrtc_timeremote_read_time(&dev->dev, &tm);
 		if (rc) {
-			pr_err("%s: Unable to read from RTC\n", __func__);
+			dev_err(&dev->dev,
+				"%s: Unable to read from RTC\n", __func__);
 			return rc;
 		}
 		rtc_tm_to_time(&tm, &now);
-		diff = rtcalarm_time - now;
+		diff = rtc_pdata->rtcalarm_time - now;
 		if (diff <= 0) {
-			msmrtc_alarmtimer_expired(1);
+			msmrtc_alarmtimer_expired(1 , rtc_pdata);
 			msm_pm_set_max_sleep_time(0);
+			atomic_inc(&suspend_state.state);
 			return 0;
 		}
-		msm_pm_set_max_sleep_time((int64_t) ((int64_t) diff * NSEC_PER_SEC));
+		msm_pm_set_max_sleep_time((int64_t)
+			((int64_t) diff * NSEC_PER_SEC));
 	} else
 		msm_pm_set_max_sleep_time(0);
+	atomic_inc(&suspend_state.state);
 	return 0;
 }
 
@@ -699,18 +735,40 @@ msmrtc_resume(struct platform_device *dev)
 	int rc, diff;
 	struct rtc_time tm;
 	unsigned long now;
+	struct msm_rtc *rtc_pdata = platform_get_drvdata(dev);
 
-	if (rtcalarm_time) {
-		rc = msmrtc_timeremote_read_time(NULL, &tm);
+	if (rtc_pdata->rtcalarm_time) {
+		rc = msmrtc_timeremote_read_time(&dev->dev, &tm);
 		if (rc) {
-			pr_err("%s: Unable to read from RTC\n", __func__);
+			dev_err(&dev->dev,
+				"%s: Unable to read from RTC\n", __func__);
 			return rc;
 		}
 		rtc_tm_to_time(&tm, &now);
-		diff = rtcalarm_time - now;
+		diff = rtc_pdata->rtcalarm_time - now;
 		if (diff <= 0)
-			msmrtc_alarmtimer_expired(2);
+			msmrtc_alarmtimer_expired(2 , rtc_pdata);
 	}
+	suspend_state.tick_at_suspend = 0;
+	atomic_dec(&suspend_state.state);
+	return 0;
+}
+#else
+#define msmrtc_suspend NULL
+#define msmrtc_resume  NULL
+#endif
+
+static int __devexit msmrtc_remove(struct platform_device *pdev)
+{
+	struct msm_rtc *rtc_pdata = platform_get_drvdata(pdev);
+
+	rtc_device_unregister(rtc_pdata->rtc);
+#ifdef CONFIG_RTC_SECURE_TIME_SUPPORT
+	rtc_device_unregister(rtc_pdata->rtcsecure);
+#endif
+	msm_rpc_unregister_client(rtc_pdata->rpc_client);
+	kfree(rtc_pdata);
+
 	return 0;
 }
 
@@ -718,6 +776,7 @@ static struct platform_driver msmrtc_driver = {
 	.probe		= msmrtc_probe,
 	.suspend	= msmrtc_suspend,
 	.resume		= msmrtc_resume,
+	.remove		= __devexit_p(msmrtc_remove),
 	.driver	= {
 		.name	= APP_TIMEREMOTE_PDEV_NAME,
 		.owner	= THIS_MODULE,
@@ -727,7 +786,6 @@ static struct platform_driver msmrtc_driver = {
 static int __init msmrtc_init(void)
 {
 	int rc;
-	rtcalarm_time = 0;
 
 	/*
 	 * For backward compatibility, register multiple platform
@@ -739,19 +797,22 @@ static int __init msmrtc_init(void)
 	snprintf((char *)msmrtc_driver.driver.name,
 		 strlen(msmrtc_driver.driver.name)+1,
 		 "rs%08x", TIMEREMOTE_PROG_NUMBER);
-	printk(KERN_DEBUG "RTC Registering with %s\n",
-		msmrtc_driver.driver.name);
+	pr_debug("RTC Registering with %s\n", msmrtc_driver.driver.name);
 
 	rc = platform_driver_register(&msmrtc_driver);
-	if (rc) {
-		printk(KERN_ERR "%s: platfrom_driver_register failed\n",
-								__func__);
-	}
+	if (rc)
+		pr_err("%s: platfrom_driver_register failed\n", __func__);
 
 	return rc;
 }
 
+static void __exit msmrtc_exit(void)
+{
+	platform_driver_unregister(&msmrtc_driver);
+}
+
 module_init(msmrtc_init);
+module_exit(msmrtc_exit);
 
 MODULE_DESCRIPTION("RTC driver for Qualcomm MSM7x00a chipsets");
 MODULE_AUTHOR("San Mehat <san@android.com>");

@@ -1,4 +1,4 @@
-/* Copyright (c) 2010, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2011, Code Aurora Forum. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -37,5 +37,12 @@
  * from MODEM.
  */
 int rtc_hctosys(void);
+
+extern void msm_pm_set_max_sleep_time(int64_t sleep_time_ns);
+void msmrtc_updateatsuspend(struct timespec *ts);
+
+#ifdef CONFIG_PM
+int64_t msm_timer_get_sclk_time(int64_t *period);
+#endif /* CONFIG_PM */
 
 #endif  /* __RTC_MSM_H__ */
