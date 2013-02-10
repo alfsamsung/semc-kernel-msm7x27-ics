@@ -1162,9 +1162,9 @@ static int nf_conntrack_init_init_net(void)
 	 * machine has 512 buckets. >= 1GB machines have 16384 buckets. */
 	if (!nf_conntrack_htable_size) {
 		nf_conntrack_htable_size
-			= (((num_physpages << PAGE_SHIFT) / 16384)
+			= (((totalram_pages << PAGE_SHIFT) / 16384)
 			   / sizeof(struct hlist_head));
-		if (num_physpages > (1024 * 1024 * 1024 / PAGE_SIZE))
+		if (totalram_pages > (1024 * 1024 * 1024 / PAGE_SIZE))
 			nf_conntrack_htable_size = 16384;
 		if (nf_conntrack_htable_size < 32)
 			nf_conntrack_htable_size = 32;
@@ -1173,7 +1173,7 @@ static int nf_conntrack_init_init_net(void)
 		 * with the old struct list_heads. When a table size is given
 		 * we use the old value of 8 to avoid reducing the max.
 		 * entries. */
-		max_factor = 4;
+		max_factor = 6; //ALFS org 4 (X8 is low on memory)
 	}
 	nf_conntrack_max = max_factor * nf_conntrack_htable_size;
 
