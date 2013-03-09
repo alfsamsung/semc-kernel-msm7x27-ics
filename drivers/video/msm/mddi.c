@@ -235,7 +235,13 @@ static int mddi_on(struct platform_device *pdev)
 	pmdh_clk_enable();
 
 	clk_rate = mfd->fbi->var.pixclock;
+	//ALFS TEST
+//	pr_info("mddi_on: mfd->fbi->var.pixclock is %d\n",
+//			clk_rate);
 	clk_rate = min(clk_rate, mfd->panel_info.clk_max);
+	//ALFS TEST
+//	pr_info("mddi_on: mfd->panel_info.clk_max is %d\n",
+//			clk_rate);
 
 	if (mddi_pdata &&
 	    mddi_pdata->mddi_sel_clk &&
@@ -244,11 +250,20 @@ static int mddi_on(struct platform_device *pdev)
 			  "%s: can't select mddi io clk targate rate = %d\n",
 			  __func__, clk_rate);
 
+/*ALFS attempt to fix clk_set_rate failed*/
+#if defined(CONFIG_FB_MSM_MDDI_TOSHIBA_HVGA_LCD) || defined(CONFIG_FB_MSM_MDDI_HITACHI_HVGA_LCD)
+	clk_rate = clk_round_rate(mddi_clk, 160000000);
+#else
 	clk_rate = clk_round_rate(mddi_clk, clk_rate);
+#endif
 	if (clk_set_rate(mddi_clk, clk_rate) < 0)
 		printk(KERN_ERR "%s: clk_set_rate failed\n",
 			__func__);
-
+		
+	//ALFS TEST
+	pr_info("mddi_on: mddi_clk rate is %lu\n",
+			clk_get_rate(mddi_clk));
+	
 	if (mfd->ebi1_clk)
 		clk_enable(mfd->ebi1_clk);
 
@@ -281,6 +296,7 @@ static int mddi_probe(struct platform_device *pdev)
 			return PTR_ERR(mddi_clk);
 		}
 		rate = clk_round_rate(mddi_clk, 49000000);
+
 		ret = clk_set_rate(mddi_clk, rate);
 		if (ret)
 			pr_err("Can't set mddi_clk min rate to %lu\n",
