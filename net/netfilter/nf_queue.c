@@ -204,10 +204,10 @@ int nf_queue(struct sk_buff *skb,
 				  queuenum);
 
 	switch (pf) {
-	case AF_INET:
+	case NFPROTO_IPV4:
 		skb->protocol = htons(ETH_P_IP);
 		break;
-	case AF_INET6:
+	case NFPROTO_IPV6:
 		skb->protocol = htons(ETH_P_IPV6);
 		break;
 	}
@@ -265,7 +265,6 @@ void nf_reinject(struct nf_queue_entry *entry, unsigned int verdict)
 		local_bh_disable();
 		entry->okfn(skb);
 		local_bh_enable();
-	case NF_STOLEN:
 		break;
 	case NF_QUEUE:
 		if (!__nf_queue(skb, elem, entry->pf, entry->hook,
@@ -273,12 +272,12 @@ void nf_reinject(struct nf_queue_entry *entry, unsigned int verdict)
 				verdict >> NF_VERDICT_BITS))
 			goto next_hook;
 		break;
+	case NF_STOLEN:
 	default:
 		kfree_skb(skb);
 	}
 	rcu_read_unlock();
 	kfree(entry);
-	return;
 }
 EXPORT_SYMBOL(nf_reinject);
 

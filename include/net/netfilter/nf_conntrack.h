@@ -201,7 +201,7 @@ __nf_conntrack_find(struct net *net, const struct nf_conntrack_tuple *tuple);
 
 extern void nf_conntrack_hash_insert(struct nf_conn *ct);
 
-extern void nf_conntrack_flush(struct net *net, u32 pid, int report);
+extern void nf_conntrack_flush_report(struct net *net, u32 pid, int report);
 
 extern bool nf_ct_get_tuplepr(const struct sk_buff *skb,
 			      unsigned int nhoff, u_int16_t l3num,
@@ -253,10 +253,9 @@ static inline bool nf_ct_kill(struct nf_conn *ct)
 
 /* These are for NAT.  Icky. */
 /* Update TCP window tracking data when NAT mangles the packet */
-extern void nf_conntrack_tcp_update(const struct sk_buff *skb,
-				    unsigned int dataoff,
-				    struct nf_conn *ct,
-				    int dir);
+extern s16 (*nf_ct_nat_offset)(const struct nf_conn *ct,
+				enum ip_conntrack_dir dir,
+				u32 seq);
 
 /* Fake conntrack entry for untracked connections */
 extern struct nf_conn nf_conntrack_untracked;
@@ -289,7 +288,7 @@ static inline int nf_ct_is_untracked(const struct sk_buff *skb)
 
 extern int nf_conntrack_set_hashsize(const char *val, struct kernel_param *kp);
 extern unsigned int nf_conntrack_htable_size;
-extern int nf_conntrack_max;
+extern unsigned int nf_conntrack_max;
 
 #define NF_CT_STAT_INC(net, count)	\
 	(per_cpu_ptr((net)->ct.stat, raw_smp_processor_id())->count++)

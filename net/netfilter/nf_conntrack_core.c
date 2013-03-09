@@ -55,7 +55,7 @@ EXPORT_SYMBOL_GPL(nf_conntrack_lock);
 unsigned int nf_conntrack_htable_size __read_mostly;
 EXPORT_SYMBOL_GPL(nf_conntrack_htable_size);
 
-int nf_conntrack_max __read_mostly;
+unsigned int nf_conntrack_max __read_mostly;
 EXPORT_SYMBOL_GPL(nf_conntrack_max);
 
 struct nf_conn nf_conntrack_untracked __read_mostly;
@@ -495,7 +495,8 @@ struct nf_conn *nf_conntrack_alloc(struct net *net,
 	struct nf_conn *ct;
 
 	if (unlikely(!nf_conntrack_hash_rnd_initted)) {
-		get_random_bytes(&nf_conntrack_hash_rnd, 4);
+		get_random_bytes(&nf_conntrack_hash_rnd,
+				sizeof(nf_conntrack_hash_rnd));
 		nf_conntrack_hash_rnd_initted = 1;
 	}
 
@@ -537,7 +538,10 @@ EXPORT_SYMBOL_GPL(nf_conntrack_alloc);
 
 void nf_conntrack_free(struct nf_conn *ct)
 {
+	struct net *net = nf_ct_net(ct);
+	
 	nf_ct_ext_destroy(ct);
+	atomic_dec(&net->ct.count);
 	nf_ct_ext_free(ct);
 	kmem_cache_free(nf_conntrack_cachep, ct);
 }
@@ -746,6 +750,8 @@ nf_conntrack_in(struct net *net, u_int8_t pf, unsigned int hooknum,
 		nf_conntrack_put(skb->nfct);
 		skb->nfct = NULL;
 		NF_CT_STAT_INC_ATOMIC(net, invalid);
+		if (ret == -NF_DROP)
+			NF_CT_STAT_INC_ATOMIC(net, drop);
 		return -ret;
 	}
 
@@ -989,7 +995,7 @@ struct __nf_ct_flush_report {
 	int report;
 };
 
-static int kill_all(struct nf_conn *i, void *data)
+static int kill_report(struct nf_conn *i, void *data)
 {
 	struct __nf_ct_flush_report *fr = (struct __nf_ct_flush_report *)data;
 
@@ -998,6 +1004,11 @@ static int kill_all(struct nf_conn *i, void *data)
 				  i,
 				  fr->pid,
 				  fr->report);
+	return 1;
+}
+
+static int kill_all(struct nf_conn *i, void *data)
+{
 	return 1;
 }
 
@@ -1011,15 +1022,15 @@ void nf_ct_free_hashtable(void *hash, int vmalloced, unsigned int size)
 }
 EXPORT_SYMBOL_GPL(nf_ct_free_hashtable);
 
-void nf_conntrack_flush(struct net *net, u32 pid, int report)
+void nf_conntrack_flush_report(struct net *net, u32 pid, int report)
 {
 	struct __nf_ct_flush_report fr = {
 		.pid 	= pid,
 		.report = report,
 	};
-	nf_ct_iterate_cleanup(net, kill_all, &fr);
+	nf_ct_iterate_cleanup(net, kill_report, &fr);
 }
-EXPORT_SYMBOL_GPL(nf_conntrack_flush);
+EXPORT_SYMBOL_GPL(nf_conntrack_flush_report);
 
 static void nf_conntrack_cleanup_init_net(void)
 {
@@ -1033,7 +1044,7 @@ static void nf_conntrack_cleanup_net(struct net *net)
 	nf_ct_event_cache_flush(net);
 	nf_conntrack_ecache_fini(net);
  i_see_dead_people:
-	nf_conntrack_flush(net, 0, 0);
+	nf_ct_iterate_cleanup(net, kill_all, NULL);
 	if (atomic_read(&net->ct.count) != 0) {
 		schedule();
 		goto i_see_dead_people;
@@ -1118,7 +1129,7 @@ int nf_conntrack_set_hashsize(const char *val, struct kernel_param *kp)
 
 	/* We have to rehahs for the new table anyway, so we also can
 	 * use a newrandom seed */
-	get_random_bytes(&rnd, 4);
+	get_random_bytes(&rnd, sizeof(rnd));
 
 	/* Lookups in the old hash might happen in parallel, which means we
 	 * might get false negatives during connection lookup. New connections
@@ -1173,7 +1184,7 @@ static int nf_conntrack_init_init_net(void)
 		 * with the old struct list_heads. When a table size is given
 		 * we use the old value of 8 to avoid reducing the max.
 		 * entries. */
-		max_factor = 6; //ALFS org 4 (X8 is low on memory)
+		max_factor = 4;
 	}
 	nf_conntrack_max = max_factor * nf_conntrack_htable_size;
 
@@ -1260,6 +1271,11 @@ err_stat:
 	return ret;
 }
 
+s16 (*nf_ct_nat_offset)(const struct nf_conn *ct,
+			enum ip_conntrack_dir dir,
+			u32 seq);
+EXPORT_SYMBOL_GPL(nf_ct_nat_offset);
+
 int nf_conntrack_init(struct net *net)
 {
 	int ret;
@@ -1277,6 +1293,9 @@ int nf_conntrack_init(struct net *net)
 		/* For use by REJECT target */
 		rcu_assign_pointer(ip_ct_attach, nf_conntrack_attach);
 		rcu_assign_pointer(nf_ct_destroy, destroy_conntrack);
+		
+		/* Howto get NAT offsets */
+		rcu_assign_pointer(nf_ct_nat_offset, NULL);
 	}
 	return 0;
 
