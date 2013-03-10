@@ -223,9 +223,6 @@ config HAS_DMA
 config CHECK_SIGNATURE
 	bool
 
-config HAVE_LMB
-	boolean
-
 config CPUMASK_OFFSTACK
 	bool "Force CPU masks off stack" if DEBUG_PER_CPU_MAPS
 	help
@@ -242,5 +239,15 @@ config SNAPPY
        help
           Add the snappy compressor. This is a reasonable compressor that
 	  compresses and decompresses extremly fast.
+	  
+config FRANDOM_DEV
+       tristate "Fast pseudo-random generator"
+       help
+          Frandom is a Linux kernel random number generator, which is 
+          10-50 times faster than what you get from Linux' 
+          built-in /dev/urandom. And it uses very little (/dev/frandom)
+          or none (/dev/erandom) of the kernel's entropy pool, so it 
+          is very useful for applications that require a handy 
+          source for lots of random data. http://billauer.co.il/frandom.html
 
 endmenu
