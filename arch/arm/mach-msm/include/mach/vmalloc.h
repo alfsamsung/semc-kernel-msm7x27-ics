@@ -20,7 +20,11 @@
 #ifdef CONFIG_VMSPLIT_2G
 #define VMALLOC_END	  (PAGE_OFFSET + 0x60000000)
 #else
+#ifdef CONFIG_MACH_MSM7X27_SHAKIRA
+#define VMALLOC_END	  0xDD000000	//->vmalloc : 0xcd800000 - 0xdd000000   ( 248 MB)
+#else
 #define VMALLOC_END	  0xF8000000
+#endif
 #endif
 
 #endif
