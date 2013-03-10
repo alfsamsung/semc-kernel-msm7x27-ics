@@ -262,7 +262,7 @@ struct tvenc_platform_data {
 };
 
 struct mddi_platform_data {
-	void (*mddi_power_save)(int on);		//void
+	int (*mddi_power_save)(int on);		//void
 	int (*mddi_sel_clk)(u32 *clk_rate);
 //	int (*mddi_power_on)(int);
 	int (*mddi_client_power)(u32 client_id);

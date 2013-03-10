@@ -22,6 +22,7 @@
 #include <linux/kernel.h>
 #include <linux/kprobes.h>
 #include <linux/module.h>
+#include <linux/slab.h>
 #include <linux/stringify.h>
 #include <asm/traps.h>
 #include <asm/cacheflush.h>

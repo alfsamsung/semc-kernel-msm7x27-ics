@@ -33,8 +33,8 @@ USER(	ldrbt	r3, [r0], #1)
 	mov	pc, lr
 ENDPROC(__strnlen_user)
 
-	.section .fixup,"ax"
+	.pushsection .fixup,"ax"
 	.align	0
 9001:	mov	r0, #0
 	mov	pc, lr
-	.previous
+	.popsection

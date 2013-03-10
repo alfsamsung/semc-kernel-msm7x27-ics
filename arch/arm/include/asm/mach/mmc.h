@@ -27,6 +27,10 @@ struct mmc_platform_data {
 	unsigned long mmc_bus_width;
 	int (*wpswitch) (struct device *);
 	int dummy52_required;
+	unsigned int msmsdcc_fmin;
+	unsigned int msmsdcc_fmid;
+	unsigned int msmsdcc_fmax;
+	bool nonremovable;
 };
 
 #endif

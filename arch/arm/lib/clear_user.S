@@ -18,7 +18,8 @@
  *          : sz   - number of bytes to clear
  * Returns  : number of bytes NOT cleared
  */
-ENTRY(__clear_user)
+ENTRY(__clear_user_std)
+WEAK(__clear_user)
 		stmfd	sp!, {r1, lr}
 		mov	r2, #0
 		cmp	r1, #4
@@ -46,8 +47,8 @@ USER(		strnebt	r2, [r0])
 		ldmfd	sp!, {r1, pc}
 ENDPROC(__clear_user)
 
-		.section .fixup,"ax"
+		.pushsection .fixup,"ax"
 		.align	0
 9001:		ldmfd	sp!, {r0, pc}
-		.previous
+		.popsection
 

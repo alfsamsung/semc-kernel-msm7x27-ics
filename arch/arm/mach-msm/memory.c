@@ -18,18 +18,26 @@
 #include <linux/mm_types.h>
 #include <linux/bootmem.h>
 #include <linux/module.h>
+//#include <linux/memory_alloc.h>
+//#include <linux/memblock.h>
 #include <asm/pgtable.h>
 #include <asm/io.h>
 #include <asm/mach/map.h>
 #include <linux/memory_alloc.h>
 #include <mach/msm_memtypes.h>
 #include <asm/cacheflush.h>
+//#include <asm/setup.h>
+//#include <asm/mach-types.h>
+//#include <mach/msm_memtypes.h>
 #include <linux/hardirq.h>
 #if defined(CONFIG_MSM_NPA_REMOTE)
 #include "npa_remote.h"
 #include <linux/completion.h>
 #include <linux/err.h>
 #endif
+//#include <linux/android_pmem.h>
+
+#include <linux/fmem.h>
 
 int arch_io_remap_pfn_range(struct vm_area_struct *vma, unsigned long addr,
 			    unsigned long pfn, unsigned long size, pgprot_t prot)
@@ -37,23 +45,13 @@ int arch_io_remap_pfn_range(struct vm_area_struct *vma, unsigned long addr,
 	unsigned long pfn_addr = pfn << PAGE_SHIFT;
 	if ((pfn_addr >= 0x88000000) && (pfn_addr < 0xD0000000)) {
 		prot = pgprot_device(prot);
-		printk("remapping device %lx\n", prot);
+		pr_debug("remapping device %lx\n", prot);
 	}
 	return remap_pfn_range(vma, addr, pfn, size, prot);
 }
 
 void *strongly_ordered_page;
 
-/*
- * The trick of making the zero page strongly ordered no longer
- * works. We no longer want to make a second alias to the zero
- * page that is strongly ordered. Manually changing the bits
- * in the page table for the zero page would have side effects
- * elsewhere that aren't necessary. The result is that we need
- * to get a page from else where. Given when the first call
- * to write_to_strongly_ordered_memory occurs, using bootmem
- * to get a page makes the most sense.
- */
 void map_page_strongly_ordered(void)
 {
 #if defined(CONFIG_ARCH_MSM7X27)
@@ -181,69 +179,30 @@ void *alloc_bootmem_aligned(unsigned long size, unsigned long alignment)
 	return (void *)addr;
 }
 
-#if defined(CONFIG_NPA_REMOTE)
-struct npa_client *npa_memory_client;
-#endif
-
-static int change_memory_power_state(unsigned long start_pfn,
-	unsigned long nr_pages, int state)
-{
-#if defined(CONFIG_NPA_REMOTE)
-	static atomic_t node_created_flag = ATOMIC_INIT(1);
-#else
-	unsigned long start;
-	unsigned long size;
-	unsigned long virtual;
-#endif
-	int rc = 0;
-
-#if defined(CONFIG_NPA_REMOTE)
-	if (atomic_dec_and_test(&node_created_flag)) {
-		/* Create NPA 'required' client. */
-		npa_memory_client = npa_create_sync_client(NPA_MEMORY_NODE_NAME,
-			"memory node", NPA_CLIENT_REQUIRED);
-		if (IS_ERR(npa_memory_client)) {
-			rc = PTR_ERR(npa_memory_client);
-			return rc;
-		}
-	}
-
-	rc = npa_issue_required_request(npa_memory_client, state);
-#else
-	if (state == MEMORY_DEEP_POWERDOWN) {
-		/* simulate turning off memory by writing bit pattern into it */
-		start = start_pfn << PAGE_SHIFT;
-		size = nr_pages << PAGE_SHIFT;
-		virtual = __phys_to_virt(start);
-		memset((void *)virtual, 0x27, size);
-	}
-#endif
-	return rc;
-}
-
 int platform_physical_remove_pages(unsigned long start_pfn,
 	unsigned long nr_pages)
 {
-	return change_memory_power_state(start_pfn, nr_pages,
-		MEMORY_DEEP_POWERDOWN);
+	return 1;
 }
 
-int platform_physical_add_pages(unsigned long start_pfn,
+int platform_physical_active_pages(unsigned long start_pfn,
 	unsigned long nr_pages)
 {
-	return change_memory_power_state(start_pfn, nr_pages, MEMORY_ACTIVE);
+	return 1;
 }
 
 int platform_physical_low_power_pages(unsigned long start_pfn,
 	unsigned long nr_pages)
 {
-	return change_memory_power_state(start_pfn, nr_pages,
-		MEMORY_SELF_REFRESH);
+	return 1;
 }
 
-unsigned long allocate_contiguous_ebi_nomap(unsigned long size,unsigned long align)
+int request_fmem_c_region(void *unused)
 {
-	return _allocate_contiguous_memory_nomap(size, MEMTYPE_EBI0,align, 
-						 __builtin_return_address(0));
+	return fmem_set_state(FMEM_C_STATE);
 }
-EXPORT_SYMBOL(allocate_contiguous_ebi_nomap);
+
+int release_fmem_c_region(void *unused)
+{
+	return fmem_set_state(FMEM_T_STATE);
+}

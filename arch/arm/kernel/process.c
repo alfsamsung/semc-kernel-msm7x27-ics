@@ -16,7 +16,6 @@
 #include <linux/mm.h>
 #include <linux/stddef.h>
 #include <linux/unistd.h>
-#include <linux/slab.h>
 #include <linux/user.h>
 #include <linux/delay.h>
 #include <linux/reboot.h>
@@ -35,6 +34,7 @@
 #include <asm/processor.h>
 #include <asm/system.h>
 #include <asm/thread_notify.h>
+#include <asm/stacktrace.h>
 #include <asm/mach/time.h>
 
 static const char *processor_modes[] = {
@@ -83,7 +83,7 @@ static int __init hlt_setup(char *__unused)
 __setup("nohlt", nohlt_setup);
 __setup("hlt", hlt_setup);
 
-void arm_machine_restart(char mode)
+void arm_machine_restart(char mode, const char *cmd)
 {
 	/* Disable interrupts first */
 	local_irq_disable();
@@ -108,7 +108,7 @@ void arm_machine_restart(char mode)
 	/*
 	 * Now call the architecture specific reboot code.
 	 */
-	arch_reset(mode);
+	arch_reset(mode, cmd);
 
 	/*
 	 * Whoops - the architecture was unable to reboot.
@@ -125,9 +125,28 @@ void arm_machine_restart(char mode)
 void (*pm_power_off)(void);
 EXPORT_SYMBOL(pm_power_off);
 
-void (*arm_pm_restart)(char str) = arm_machine_restart;
+void (*arm_pm_restart)(char str, const char *cmd) = arm_machine_restart;
 EXPORT_SYMBOL_GPL(arm_pm_restart);
 
+static void do_nothing(void *unused)
+{
+}
+
+/*
+ * cpu_idle_wait - Used to ensure that all the CPUs discard old value of
+ * pm_idle and update to new pm_idle value. Required while changing pm_idle
+ * handler on SMP systems.
+ *
+ * Caller must have changed pm_idle to the new value before the call. Old
+ * pm_idle value will not be used by any CPU after the return of this function.
+ */
+void cpu_idle_wait(void)
+{
+	smp_mb();
+	/* kick all the CPUs so that they exit out of pm_idle */
+	smp_call_function(do_nothing, NULL, 1);
+}
+EXPORT_SYMBOL_GPL(cpu_idle_wait);
 
 /*
  * This is our default idle handler.  We need to disable
@@ -209,9 +228,9 @@ void machine_power_off(void)
 		pm_power_off();
 }
 
-void machine_restart(char * __unused)
+void machine_restart(char *cmd)
 {
-	arm_pm_restart(reboot_mode);
+	arm_pm_restart(reboot_mode, cmd);
 }
 
 /*
@@ -291,7 +310,8 @@ void __show_regs(struct pt_regs *regs)
 	char buf[64];
 
 	printk("CPU: %d    %s  (%s %.*s)\n",
-		smp_processor_id(), print_tainted(), init_utsname()->release,
+		raw_smp_processor_id(), print_tainted(),
+		init_utsname()->release,
 		(int)strcspn(init_utsname()->version, " "),
 		init_utsname()->version);
 	print_symbol("PC is at %s\n", instruction_pointer(regs));
@@ -355,16 +375,17 @@ void show_regs(struct pt_regs * regs)
 	__backtrace();
 }
 
+ATOMIC_NOTIFIER_HEAD(thread_notify_head);
+
+EXPORT_SYMBOL_GPL(thread_notify_head);
+
 /*
  * Free current thread data structures etc..
  */
 void exit_thread(void)
 {
+	thread_notify(THREAD_NOTIFY_EXIT, current_thread_info());
 }
-
-ATOMIC_NOTIFIER_HEAD(thread_notify_head);
-
-EXPORT_SYMBOL_GPL(thread_notify_head);
 
 void flush_thread(void)
 {
@@ -380,15 +401,12 @@ void flush_thread(void)
 
 void release_thread(struct task_struct *dead_task)
 {
-	struct thread_info *thread = task_thread_info(dead_task);
-
-	thread_notify(THREAD_NOTIFY_RELEASE, thread);
 }
 
 asmlinkage void ret_from_fork(void) __asm__("ret_from_fork");
 
 int
-copy_thread(int nr, unsigned long clone_flags, unsigned long stack_start,
+copy_thread(unsigned long clone_flags, unsigned long stack_start,
 	    unsigned long stk_sz, struct task_struct *p, struct pt_regs *regs)
 {
 	struct thread_info *thread = task_thread_info(p);
@@ -435,19 +453,40 @@ int dump_task_regs(struct task_struct *tsk, elf_gregset_t *regs)
 
 /*
  * Shuffle the argument into the correct register before calling the
- * thread function.  r1 is the thread argument, r2 is the pointer to
- * the thread function, and r3 points to the exit function.
+ * thread function.  r4 is the thread argument, r5 is the pointer to
+ * the thread function, and r6 points to the exit function.
  */
 extern void kernel_thread_helper(void);
-asm(	".section .text\n"
+asm(	".pushsection .text\n"
 "	.align\n"
 "	.type	kernel_thread_helper, #function\n"
 "kernel_thread_helper:\n"
-"	mov	r0, r1\n"
-"	mov	lr, r3\n"
-"	mov	pc, r2\n"
+#ifdef CONFIG_TRACE_IRQFLAGS
+"	bl      trace_hardirqs_on\n"
+#endif
+"	msr     cpsr_c, r7\n"
+"	mov     r0, r4\n"
+"	mov     lr, r6\n"
+"	mov     pc, r5\n"
 "	.size	kernel_thread_helper, . - kernel_thread_helper\n"
-"	.previous");
+"	.popsection");
+
+#ifdef CONFIG_ARM_UNWIND
+extern void kernel_thread_exit(long code);
+asm(   ".pushsection .text\n"
+"      .align\n"
+"      .type   kernel_thread_exit, #function\n"
+"kernel_thread_exit:\n"
+"      .fnstart\n"
+"      .cantunwind\n"
+"      bl      do_exit\n"
+"      nop\n"
+"      .fnend\n"
+"      .size   kernel_thread_exit, . - kernel_thread_exit\n"
+"      .popsection");
+#else
+#define kernel_thread_exit     do_exit
+#endif
 
 /*
  * Create a kernel thread.
@@ -458,11 +497,12 @@ pid_t kernel_thread(int (*fn)(void *), void *arg, unsigned long flags)
 
 	memset(&regs, 0, sizeof(regs));
 
-	regs.ARM_r1 = (unsigned long)arg;
-	regs.ARM_r2 = (unsigned long)fn;
-	regs.ARM_r3 = (unsigned long)do_exit;
+	regs.ARM_r4 = (unsigned long)arg;
+	regs.ARM_r5 = (unsigned long)fn;
+	regs.ARM_r6 = (unsigned long)kernel_thread_exit;
+	regs.ARM_r7 = SVC_MODE;
 	regs.ARM_pc = (unsigned long)kernel_thread_helper;
-	regs.ARM_cpsr = SVC_MODE;
+	regs.ARM_cpsr = regs.ARM_r7 | PSR_I_BIT;
 
 	return do_fork(flags|CLONE_VM|CLONE_UNTRACED, 0, &regs, 0, NULL, NULL);
 }
@@ -470,23 +510,21 @@ EXPORT_SYMBOL(kernel_thread);
 
 unsigned long get_wchan(struct task_struct *p)
 {
-	unsigned long fp, lr;
-	unsigned long stack_start, stack_end;
+	struct stackframe frame;
 	int count = 0;
 	if (!p || p == current || p->state == TASK_RUNNING)
 		return 0;
 
-	stack_start = (unsigned long)end_of_stack(p);
-	stack_end = (unsigned long)task_stack_page(p) + THREAD_SIZE;
-
-	fp = thread_saved_fp(p);
+	frame.fp = thread_saved_fp(p);
+	frame.sp = thread_saved_sp(p);
+	frame.lr = 0;                   /* recovered from the stack */
+	frame.pc = thread_saved_pc(p);
 	do {
-		if (fp < stack_start || fp > stack_end)
+		int ret = unwind_frame(&frame);
+		if (ret < 0)
 			return 0;
-		lr = ((unsigned long *)fp)[-1];
-		if (!in_sched_functions(lr))
-			return lr;
-		fp = *(unsigned long *) (fp - 12);
+		if (!in_sched_functions(frame.pc))
+			return frame.pc;
 	} while (count ++ < 16);
 	return 0;
 }

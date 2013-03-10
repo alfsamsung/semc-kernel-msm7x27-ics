@@ -241,13 +241,13 @@ int release_resource(struct resource *old)
 
 EXPORT_SYMBOL(release_resource);
 
-#if defined(CONFIG_MEMORY_HOTPLUG) && !defined(CONFIG_ARCH_HAS_WALK_MEMORY)
+#if !defined(CONFIG_ARCH_HAS_WALK_MEMORY)
 /*
  * Finds the lowest memory reosurce exists within [res->start.res->end)
- * the caller must specify res->start, res->end, res->flags.
+ * the caller must specify res->start, res->end, res->flags and "name".
  * If found, returns 0, res is overwritten, if not found, returns -1.
  */
-static int find_next_system_ram(struct resource *res)
+static int find_next_system_ram(struct resource *res, char *name)
 {
 	resource_size_t start, end;
 	struct resource *p;
@@ -262,6 +262,8 @@ static int find_next_system_ram(struct resource *res)
 	for (p = iomem_resource.child; p ; p = p->sibling) {
 		/* system ram is just marked as IORESOURCE_MEM */
 		if (p->flags != res->flags)
+			continue;
+		if (name && strcmp(p->name, name))
 			continue;
 		if (p->start > end) {
 			p = NULL;
@@ -280,9 +282,14 @@ static int find_next_system_ram(struct resource *res)
 		res->end = p->end;
 	return 0;
 }
-int
-walk_memory_resource(unsigned long start_pfn, unsigned long nr_pages, void *arg,
-			int (*func)(unsigned long, unsigned long, void *))
+
+/*
+ * This function calls callback against all memory range of "System RAM"
+ * which are marked as IORESOURCE_MEM and IORESOUCE_BUSY.
+ * Now, this function is only for "System RAM".
+ */
+int walk_system_ram_range(unsigned long start_pfn, unsigned long nr_pages,
+		void *arg, int (*func)(unsigned long, unsigned long, void *))
 {
 	struct resource res;
 	unsigned long pfn, len;
@@ -292,7 +299,8 @@ walk_memory_resource(unsigned long start_pfn, unsigned long nr_pages, void *arg,
 	res.end = ((u64)(start_pfn + nr_pages) << PAGE_SHIFT) - 1;
 	res.flags = IORESOURCE_MEM | IORESOURCE_BUSY;
 	orig_end = res.end;
-	while ((res.start < res.end) && (find_next_system_ram(&res) >= 0)) {
+	while ((res.start < res.end) &&
+		(find_next_system_ram(&res, "System RAM") >= 0)) {
 		pfn = (unsigned long)(res.start >> PAGE_SHIFT);
 		len = (unsigned long)((res.end + 1 - res.start) >> PAGE_SHIFT);
 		ret = (*func)(pfn, len, arg);
@@ -305,6 +313,19 @@ walk_memory_resource(unsigned long start_pfn, unsigned long nr_pages, void *arg,
 }
 
 #endif
+
+static int __is_ram(unsigned long pfn, unsigned long nr_pages, void *arg)
+{
+       return 1;
+}
+/*
+ * This generic page_is_ram() returns true if specified address is
+ * registered as "System RAM" in iomem_resource list.
+ */
+int __attribute__((weak)) page_is_ram(unsigned long pfn)
+{
+       return walk_system_ram_range(pfn, 1, NULL, __is_ram) == 1;
+}
 
 /*
  * Find empty slot in the resource tree given range and alignment.

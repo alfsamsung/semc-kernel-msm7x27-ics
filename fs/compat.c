@@ -1196,6 +1196,24 @@ out:
 }
 
 asmlinkage ssize_t
++compat_sys_preadv(unsigned long fd, const struct compat_iovec __user *vec,
+		  unsigned long vlen, u32 pos_high, u32 pos_low)
+{
+	loff_t pos = ((loff_t)pos_high << 32) | pos_low;
+	struct file *file;
+	ssize_t ret;
+
+	if (pos < 0)
+		return -EINVAL;
+	file = fget(fd);
+	if (!file)
+		return -EBADF;
+	ret = compat_readv(file, vec, vlen, &pos);
+	fput(file);
+	return ret;
+}
+
+asmlinkage ssize_t
 compat_sys_writev(unsigned long fd, const struct compat_iovec __user *vec, unsigned long vlen)
 {
 	struct file *file;
@@ -1219,6 +1237,24 @@ out:
 	inc_syscw(current);
 	fput(file);
 	return ret;
+}
+
+asmlinkage ssize_t
+compat_sys_pwritev(unsigned long fd, const struct compat_iovec __user *vec,
+		    unsigned long vlen, u32 pos_high, u32 pos_low)
+{
+       loff_t pos = ((loff_t)pos_high << 32) | pos_low;
+       struct file *file;
+       ssize_t ret;
+
+       if (pos < 0)
+               return -EINVAL;
+       file = fget(fd);
+       if (!file)
+               return -EBADF;
+       ret = compat_writev(file, vec, vlen, &pos);
+       fput(file);
+       return ret;
 }
 
 asmlinkage long
@@ -1727,6 +1763,24 @@ asmlinkage long compat_sys_select(int n, compat_ulong_t __user *inp,
 	ret = poll_select_copy_remaining(&end_time, tvp, 1, ret);
 
 	return ret;
+}
+
+struct compat_sel_arg_struct {
+	compat_ulong_t n;
+	compat_uptr_t inp;
+	compat_uptr_t outp;
+	compat_uptr_t exp;
+	compat_uptr_t tvp;
+};
+
+asmlinkage long compat_sys_old_select(struct compat_sel_arg_struct __user *arg)
+{
+	struct compat_sel_arg_struct a;
+
+	if (copy_from_user(&a, arg, sizeof(a)))
+		return -EFAULT;
+	return compat_sys_select(a.n, compat_ptr(a.inp), compat_ptr(a.outp),
+				  compat_ptr(a.exp), compat_ptr(a.tvp));
 }
 
 #ifdef HAVE_SET_RESTORE_SIGMASK

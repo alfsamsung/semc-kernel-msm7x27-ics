@@ -3,6 +3,7 @@ config RAMZSWAP
 	depends on SWAP
 	select SNAPPY_COMPRESS
 	select SNAPPY_DECOMPRESS
+	select XVMALLOC
 	default n
 	help
 	  Creates virtual block devices which can (only) be used as swap

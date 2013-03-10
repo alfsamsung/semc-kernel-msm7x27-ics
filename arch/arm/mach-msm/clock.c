@@ -60,7 +60,10 @@ EXPORT_SYMBOL(clk_get_rate);
 
 int clk_set_rate(struct clk *clk, unsigned long rate)
 {
-	return clk->ops->set_rate(clk->id, rate);
+	if (clk->flags & CLKFLAG_MIN)
+		return clk->ops->set_min_rate(clk->id, rate);
+	else
+		return clk->ops->set_rate(clk->id, rate);
 }
 EXPORT_SYMBOL(clk_set_rate);
 

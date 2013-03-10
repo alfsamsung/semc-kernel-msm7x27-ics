@@ -89,7 +89,7 @@ ENTRY(__copy_from_user)
 
 ENDPROC(__copy_from_user)
 
-	.section .fixup,"ax"
+	.pushsection .fixup,"ax"
 	.align 0
 	copy_abort_preamble
 	ldmfd	sp!, {r1, r2}
@@ -99,5 +99,5 @@ ENDPROC(__copy_from_user)
 	bl	__memzero
 	ldr	r0, [sp], #4
 	copy_abort_end
-	.previous
+	.popsection
 

@@ -43,16 +43,20 @@ struct regulator;
 /**
  * struct regulator_state - regulator state during low power syatem states
  *
- * This describes a regulators state during a system wide low power state.
+ * This describes a regulators state during a system wide low power
+ * state.  One of enabled or disabled must be set for the
+ * configuration to be applied.
  *
  * @uV: Operating voltage during suspend.
  * @mode: Operating mode during suspend.
  * @enabled: Enabled during suspend.
+ * @disabled: Disabled during suspend.
  */
 struct regulator_state {
 	int uV;	/* suspend voltage */
 	unsigned int mode; /* suspend regulator operating mode */
 	int enabled; /* is regulator enabled in this suspend state */
+	int disabled; /* is the regulator disbled in this suspend state */
 };
 
 /**
@@ -83,6 +87,7 @@ struct regulator_state {
  * @state_standby: State for regulator when system is suspended in standby
  *                 mode.
  * @initial_state: Suspend state to set by default.
+ * @initial_mode: Mode to set at startup.
  */
 struct regulation_constraints {
 
@@ -111,6 +116,9 @@ struct regulation_constraints {
 	struct regulator_state state_standby;
 	suspend_state_t initial_state; /* suspend state to set at init */
 
+	/* mode to set on startup */
+	unsigned int initial_mode;
+
 	/* constriant flags */
 	unsigned always_on:1;	/* regulator never off when system is on */
 	unsigned boot_on:1;	/* bootloader/firmware enabled regulator */
@@ -120,15 +128,27 @@ struct regulation_constraints {
 /**
  * struct regulator_consumer_supply - supply -> device mapping
  *
- * This maps a supply name to a device.
+ * This maps a supply name to a device.  Only one of dev or dev_name
+ * can be specified.  Use of dev_name allows support for buses which
+ * make struct device available late such as I2C and is the preferred
+ * form.
  *
  * @dev: Device structure for the consumer.
+ * @dev_name: Result of dev_name() for the consumer.
  * @supply: Name for the supply.
  */
 struct regulator_consumer_supply {
 	struct device *dev;	/* consumer */
+	const char *dev_name;   /* dev_name() for consumer */
 	const char *supply;	/* consumer supply - e.g. "vcc" */
 };
+
+/* Initialize struct regulator_consumer_supply */
+#define REGULATOR_SUPPLY(_name, _dev_name)                     \
+{                                                              \
+	.supply         = _name,                                \
+	.dev_name       = _dev_name,                            \
+}
 
 /**
  * struct regulator_init_data - regulator platform initialisation data.
@@ -159,5 +179,13 @@ struct regulator_init_data {
 };
 
 int regulator_suspend_prepare(suspend_state_t state);
+
+#ifdef CONFIG_REGULATOR
+void regulator_has_full_constraints(void);
+#else
+static inline void regulator_has_full_constraints(void)
+{
+}
+#endif
 
 #endif

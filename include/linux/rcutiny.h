@@ -32,29 +32,6 @@ static inline void rcu_init(void)
 }
 
 #ifdef CONFIG_TINY_RCU
-#define __rcu_read_lock()	preempt_disable()
-#define __rcu_read_unlock()	preempt_enable()
-#else /* #ifdef CONFIG_TINY_RCU */
-void __rcu_read_lock(void);
-void __rcu_read_unlock(void);
-#endif /* #else #ifdef CONFIG_TINY_RCU */
-#define __rcu_read_lock_bh()	local_bh_disable()
-#define __rcu_read_unlock_bh()	local_bh_enable()
-extern void call_rcu_sched(struct rcu_head *head,
-			   void (*func)(struct rcu_head *rcu));
-
-#define rcu_init_sched()	do { } while (0)
-
-extern void synchronize_sched(void);
-
-#ifdef CONFIG_TINY_RCU
-
-#define call_rcu		call_rcu_sched
-
-static inline void synchronize_rcu(void)
-{
-	synchronize_sched();
-}
 
 static inline void synchronize_rcu_expedited(void)
 {
@@ -68,7 +45,6 @@ static inline void rcu_barrier(void)
 
 #else /* #ifdef CONFIG_TINY_RCU */
 
-void synchronize_rcu(void);
 void rcu_barrier(void);
 void synchronize_rcu_expedited(void);
 
@@ -84,24 +60,10 @@ static inline void synchronize_rcu_bh_expedited(void)
 	synchronize_sched();
 }
 
-struct notifier_block;
-
-#ifdef CONFIG_NO_HZ
-
-extern void rcu_enter_nohz(void);
-extern void rcu_exit_nohz(void);
-
-#else /* #ifdef CONFIG_NO_HZ */
-
-static inline void rcu_enter_nohz(void)
+static inline void synchronize_sched_expedited(void)
 {
+       synchronize_sched();
 }
-
-static inline void rcu_exit_nohz(void)
-{
-}
-
-#endif /* #else #ifdef CONFIG_NO_HZ */
 
 #ifdef CONFIG_TINY_RCU
 
@@ -118,11 +80,6 @@ static inline int rcu_needs_cpu(int cpu)
 	return 0;
 }
 
-static inline int rcu_preempt_depth(void)
-{
-	return 0;
-}
-
 #else /* #ifdef CONFIG_TINY_RCU */
 
 void rcu_preempt_note_context_switch(void);
@@ -134,13 +91,6 @@ static inline int rcu_needs_cpu(int cpu)
 	return rcu_preempt_needs_cpu();
 }
 
-/*
- * Defined as macro as it is a very low level header
- * included from areas that don't even know about current
- * FIXME: combine with include/linux/rcutree.h into rcupdate.h.
- */
-#define rcu_preempt_depth() (current->rcu_read_lock_nesting)
-
 #endif /* #else #ifdef CONFIG_TINY_RCU */
 
 static inline void rcu_note_context_switch(int cpu)
@@ -148,8 +98,6 @@ static inline void rcu_note_context_switch(int cpu)
 	rcu_sched_qs(cpu);
 	rcu_preempt_note_context_switch();
 }
-
-extern void rcu_check_callbacks(int cpu, int user);
 
 /*
  * Return the number of grace periods.

@@ -7,7 +7,6 @@
 
 #include <linux/gfp.h>
 #include <linux/list.h>
-#include <linux/mmdebug.h>
 #include <linux/mmzone.h>
 #include <linux/rbtree.h>
 #include <linux/prio_tree.h>
@@ -276,6 +275,8 @@ static inline int get_page_unless_zero(struct page *page)
 {
 	return atomic_inc_not_zero(&page->_count);
 }
+
+extern int page_is_ram(unsigned long pfn);
 
 /* Support for virtually mapped pages */
 struct page *vmalloc_to_page(const void *addr);
@@ -820,6 +821,8 @@ int copy_page_range(struct mm_struct *dst, struct mm_struct *src,
 			struct vm_area_struct *vma);
 void unmap_mapping_range(struct address_space *mapping,
 		loff_t const holebegin, loff_t const holelen, int even_cows);
+int follow_pfn(struct vm_area_struct *vma, unsigned long address,
+	unsigned long *pfn);
 int follow_phys(struct vm_area_struct *vma, unsigned long address,
 		unsigned int flags, unsigned long *prot, resource_size_t *phys);
 int generic_access_phys(struct vm_area_struct *vma, unsigned long addr,
@@ -843,11 +846,11 @@ int invalidate_inode_page(struct page *page);
 
 #ifdef CONFIG_MMU
 extern int handle_mm_fault(struct mm_struct *mm, struct vm_area_struct *vma,
-			unsigned long address, int write_access);
+			unsigned long address, unsigned int flags);
 #else
 static inline int handle_mm_fault(struct mm_struct *mm,
 			struct vm_area_struct *vma, unsigned long address,
-			int write_access)
+			unsigned int flags)
 {
 	/* should never happen if there's no MMU */
 	BUG();
@@ -858,8 +861,10 @@ static inline int handle_mm_fault(struct mm_struct *mm,
 extern int make_pages_present(unsigned long addr, unsigned long end);
 extern int access_process_vm(struct task_struct *tsk, unsigned long addr, void *buf, int len, int write);
 
-int get_user_pages(struct task_struct *tsk, struct mm_struct *mm, unsigned long start,
-		int len, int write, int force, struct page **pages, struct vm_area_struct **vmas);
+int get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
+		   unsigned long start, int nr_pages, int write, int force,
+		   struct page **pages, struct vm_area_struct **vmas);
+struct page *get_dump_page(unsigned long addr);
 
 extern int try_to_release_page(struct page * page, gfp_t gfp_mask);
 extern void do_invalidatepage(struct page *page, unsigned long offset);
@@ -1396,7 +1401,8 @@ struct page *follow_page(struct vm_area_struct *, unsigned long address,
 #define FOLL_WRITE	0x01	/* check pte is writable */
 #define FOLL_TOUCH	0x02	/* mark page accessed */
 #define FOLL_GET	0x04	/* do get_page on page */
-#define FOLL_ANON	0x08	/* give ZERO_PAGE if no pgtable */
+#define FOLL_DUMP      0x08    /* give error on hole if it would be zero */
+#define FOLL_FORCE     0x10    /* get_user_pages read/write w/o permission */
 
 typedef int (*pte_fn_t)(pte_t *pte, pgtable_t token, unsigned long addr,
 			void *data);

@@ -10,6 +10,7 @@
 #include <linux/init.h>
 #include <linux/sched.h>
 #include <linux/mm.h>
+#include <linux/percpu.h>
 
 #include <asm/mmu_context.h>
 #include <asm/tlbflush.h>
@@ -26,6 +27,25 @@ unsigned int cpu_last_asid = ASID_FIRST_VERSION;
 void __init_new_context(struct task_struct *tsk, struct mm_struct *mm)
 {
 	mm->context.id = 0;
+	spin_lock_init(&mm->context.id_lock);
+}
+
+static void flush_context(void)
+{
+	/* set the reserved ASID before flushing the TLB */
+	asm("mcr        p15, 0, %0, c13, c0, 1\n" : : "r" (0));
+	isb();
+	local_flush_tlb_all();
+	if (icache_is_vivt_asid_tagged()) {
+		__flush_icache_all();
+		dsb();
+	}
+}
+
+static inline void set_mm_context(struct mm_struct *mm, unsigned int asid)
+{
+	mm->context.id = asid;
+	cpumask_copy(mm_cpumask(mm), cpumask_of(smp_processor_id()));
 }
 
 void __new_context(struct mm_struct *mm)
@@ -33,6 +53,11 @@ void __new_context(struct mm_struct *mm)
 	unsigned int asid;
 
 	spin_lock(&cpu_asid_lock);
+	/*
+	 * At this point, it is guaranteed that the current mm (with
+	 * an old ASID) isn't active on any other CPU since the ASIDs
+	 * are changed simultaneously via IPI.
+	 */
 	asid = ++cpu_last_asid;
 	if (asid == 0)
 		asid = cpu_last_asid = ASID_FIRST_VERSION;
@@ -42,23 +67,11 @@ void __new_context(struct mm_struct *mm)
 	 * to start a new version and flush the TLB.
 	 */
 	if (unlikely((asid & ~ASID_MASK) == 0)) {
-		asid = ++cpu_last_asid;
-		/* set the reserved ASID before flushing the TLB */
-		asm("mcr	p15, 0, %0, c13, c0, 1	@ set reserved context ID\n"
-		    :
-		    : "r" (0));
-		isb();
-		flush_tlb_all();
-		if (icache_is_vivt_asid_tagged()) {
-			asm("mcr	p15, 0, %0, c7, c5, 0	@ invalidate I-cache\n"
-			    "mcr	p15, 0, %0, c7, c5, 6	@ flush BTAC/BTB\n"
-			    :
-			    : "r" (0));
-			dsb();
-		}
-	}
-	spin_unlock(&cpu_asid_lock);
+		asid = cpu_last_asid + smp_processor_id() + 1;
+		flush_context();
 
-	mm->cpu_vm_mask = cpumask_of_cpu(smp_processor_id());
-	mm->context.id = asid;
+		cpu_last_asid += NR_CPUS;
+	}
+	set_mm_context(mm, asid);
+	spin_unlock(&cpu_asid_lock);
 }

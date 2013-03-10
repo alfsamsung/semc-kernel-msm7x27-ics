@@ -90,7 +90,7 @@
  * so properly, we would have to add in whatever registers were loaded before
  * the fault, which, with the current asm above is not predictable.
  */
-		.section .fixup,"ax"
+		.pushsection .fixup,"ax"
 		.align	4
 6001:		mov	r4, #-EFAULT
 		ldr	r5, [fp, #4]		@ *err_ptr
@@ -102,4 +102,4 @@
 		strneb	r0, [r1], #1
 		bne	6002b
 		load_regs
-		.previous
+		.popsection

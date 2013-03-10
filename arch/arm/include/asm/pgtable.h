@@ -10,6 +10,7 @@
 #ifndef _ASMARM_PGTABLE_H
 #define _ASMARM_PGTABLE_H
 
+#include <linux/const.h>
 #include <asm-generic/4level-fixup.h>
 #include <asm/proc-fns.h>
 
@@ -163,32 +164,34 @@ extern void __pgd_error(const char *file, int line, unsigned long val);
  * The PTE table pointer refers to the hardware entries; the "Linux"
  * entries are stored 1024 bytes below.
  */
-#define L_PTE_PRESENT		(1 << 0)
-#define L_PTE_FILE		(1 << 1)	/* only when !PRESENT */
-#define L_PTE_YOUNG		(1 << 1)
-#define L_PTE_BUFFERABLE	(1 << 2)	/* obsolete, matches PTE */
-#define L_PTE_CACHEABLE		(1 << 3)	/* obsolete, matches PTE */
-#define L_PTE_DIRTY		(1 << 6)
-#define L_PTE_WRITE		(1 << 7)
-#define L_PTE_USER		(1 << 8)
-#define L_PTE_EXEC		(1 << 9)
-#define L_PTE_SHARED		(1 << 10)	/* shared(v6), coherent(xsc3) */
+
+//#define L_PTE_FILE		(1 << 1)	/* only when !PRESENT */
+//#define L_PTE_YOUNG		(1 << 1)
+#define L_PTE_PRESENT		(_AT(pteval_t, 1) << 0)
+#define L_PTE_YOUNG		(_AT(pteval_t, 1) << 1)
+#define L_PTE_FILE		(_AT(pteval_t, 1) << 2)		/* only when !PRESENT */
+#define L_PTE_DIRTY		(_AT(pteval_t, 1) << 6)
+#define L_PTE_WRITE		(_AT(pteval_t, 1) << 7)
+#define L_PTE_USER		(_AT(pteval_t, 1) << 8)
+#define L_PTE_EXEC		(_AT(pteval_t, 1) << 9)
+#define L_PTE_SHARED		(_AT(pteval_t, 1) << 10)	/* shared(v6), coherent(xsc3) */
+
 
 /*
  * These are the memory types, defined to be compatible with
  * pre-ARMv6 CPUs cacheable and bufferable bits:   XXCB
  */
-#define L_PTE_MT_UNCACHED	(0x00 << 2)	/* 0000 */
-#define L_PTE_MT_BUFFERABLE	(0x01 << 2)	/* 0001 */
-#define L_PTE_MT_WRITETHROUGH	(0x02 << 2)	/* 0010 */
-#define L_PTE_MT_WRITEBACK	(0x03 << 2)	/* 0011 */
-#define L_PTE_MT_MINICACHE	(0x06 << 2)	/* 0110 (sa1100, xscale) */
-#define L_PTE_MT_WRITEALLOC	(0x07 << 2)	/* 0111 */
-#define L_PTE_MT_DEV_SHARED	(0x04 << 2)	/* 0100 */
-#define L_PTE_MT_DEV_NONSHARED	(0x0c << 2)	/* 1100 */
-#define L_PTE_MT_DEV_WC		(0x09 << 2)	/* 1001 */
-#define L_PTE_MT_DEV_CACHED	(0x0b << 2)	/* 1011 */
-#define L_PTE_MT_MASK		(0x0f << 2)
+#define L_PTE_MT_UNCACHED      (_AT(pteval_t, 0x00) << 2)      /* 0000 */
+#define L_PTE_MT_BUFFERABLE    (_AT(pteval_t, 0x01) << 2)      /* 0001 */
+#define L_PTE_MT_WRITETHROUGH  (_AT(pteval_t, 0x02) << 2)      /* 0010 */
+#define L_PTE_MT_WRITEBACK     (_AT(pteval_t, 0x03) << 2)      /* 0011 */
+#define L_PTE_MT_MINICACHE     (_AT(pteval_t, 0x06) << 2)      /* 0110 (sa1100, xscale) */
+#define L_PTE_MT_WRITEALLOC    (_AT(pteval_t, 0x07) << 2)      /* 0111 */
+#define L_PTE_MT_DEV_SHARED    (_AT(pteval_t, 0x04) << 2)      /* 0100 */
+#define L_PTE_MT_DEV_NONSHARED (_AT(pteval_t, 0x0c) << 2)      /* 1100 */
+#define L_PTE_MT_DEV_WC        (_AT(pteval_t, 0x09) << 2)      /* 1001 */
+#define L_PTE_MT_DEV_CACHED    (_AT(pteval_t, 0x0b) << 2)      /* 1011 */
+#define L_PTE_MT_MASK          (_AT(pteval_t, 0x0f) << 2)
 
 #ifndef __ASSEMBLY__
 
@@ -266,16 +269,38 @@ extern struct page *empty_zero_page;
 #define pte_clear(mm,addr,ptep)	set_pte_ext(ptep, __pte(0), 0)
 #define pte_page(pte)		(pfn_to_page(pte_pfn(pte)))
 #define pte_offset_kernel(dir,addr)	(pmd_page_vaddr(*(dir)) + __pte_index(addr))
-#define pte_offset_map(dir,addr)	(pmd_page_vaddr(*(dir)) + __pte_index(addr))
-#define pte_offset_map_nested(dir,addr)	(pmd_page_vaddr(*(dir)) + __pte_index(addr))
-#define pte_unmap(pte)		do { } while (0)
-#define pte_unmap_nested(pte)	do { } while (0)
+
+#define pte_offset_map(dir,addr)       (__pte_map(dir) + __pte_index(addr))
+#define pte_unmap(pte)                 __pte_unmap(pte)
+
+#ifndef CONFIG_HIGHPTE
+#define __pte_map(dir)         pmd_page_vaddr(*(dir))
+#define __pte_unmap(pte)       do { } while (0)
+#else
+#define __pte_map(dir)         ((pte_t *)kmap_atomic(pmd_page(*(dir))) + PTRS_PER_PTE)
+#define __pte_unmap(pte)       kunmap_atomic((pte - PTRS_PER_PTE))
+#endif
 
 #define set_pte_ext(ptep,pte,ext) cpu_set_pte_ext(ptep,pte,ext)
 
-#define set_pte_at(mm,addr,ptep,pteval) do { \
-	set_pte_ext(ptep, pteval, (addr) >= TASK_SIZE ? 0 : PTE_EXT_NG); \
- } while (0)
+#if __LINUX_ARM_ARCH__ < 6
+static inline void __sync_icache_dcache(pte_t pteval)
+{
+}
+#else
+extern void __sync_icache_dcache(pte_t pteval);
+#endif
+
+static inline void set_pte_at(struct mm_struct *mm, unsigned long addr,
+			      pte_t *ptep, pte_t pteval)
+{
+	if (addr >= TASK_SIZE)
+		set_pte_ext(ptep, pteval, 0);
+	else {
+		__sync_icache_dcache(pteval);
+		set_pte_ext(ptep, pteval, PTE_EXT_NG);
+	}
+}
 
 /*
  * The following only work if pte_present() is true.
@@ -285,16 +310,12 @@ extern struct page *empty_zero_page;
 #define pte_write(pte)		(pte_val(pte) & L_PTE_WRITE)
 #define pte_dirty(pte)		(pte_val(pte) & L_PTE_DIRTY)
 #define pte_young(pte)		(pte_val(pte) & L_PTE_YOUNG)
+#define pte_exec(pte)          (pte_val(pte) & L_PTE_EXEC)
 #define pte_special(pte)	(0)
 
-/*
- * The following only works if pte_present() is not true.
- */
-#define pte_file(pte)		(pte_val(pte) & L_PTE_FILE)
-#define pte_to_pgoff(x)		(pte_val(x) >> 2)
-#define pgoff_to_pte(x)		__pte(((x) << 2) | L_PTE_FILE)
-
-#define PTE_FILE_MAX_BITS	30
+#define pte_present_user(pte) \
+	((pte_val(pte) & (L_PTE_PRESENT | L_PTE_USER)) == \
+	  (L_PTE_PRESENT | L_PTE_USER))
 
 #define PTE_BIT_FUNC(fn,op) \
 static inline pte_t pte_##fn(pte_t pte) { pte_val(pte) op; return pte; }
@@ -327,10 +348,14 @@ static inline pte_t pte_mkspecial(pte_t pte) { return pte; }
 #define pgprot_writebackwacache(prot) \
 	__pgprot((pgprot_val(prot) & ~L_PTE_MT_MASK) | L_PTE_MT_WRITEALLOC)
 
-#if __LINUX_ARM_ARCH__ >= 7 || defined(CONFIG_ARCH_MSM)
+#ifdef CONFIG_ARM_DMA_MEM_BUFFERABLE
 #define pgprot_dmacoherent(prot) \
 	__pgprot_modify(prot, L_PTE_MT_MASK|L_PTE_EXEC, L_PTE_MT_BUFFERABLE)
+#define __HAVE_PHYS_MEM_ACCESS_PROT
 #define COHERENT_IS_NORMAL 1
+struct file;
+extern pgprot_t phys_mem_access_prot(struct file *file, unsigned long pfn,
+				      unsigned long size, pgprot_t vma_prot);
 #else
 #define pgprot_dmacoherent(prot) \
 	__pgprot_modify(prot, L_PTE_MT_MASK|L_PTE_EXEC, L_PTE_MT_UNCACHED)
@@ -365,7 +390,10 @@ static inline pte_t *pmd_page_vaddr(pmd_t pmd)
 	return __va(ptr);
 }
 
-#define pmd_page(pmd) virt_to_page(__va(pmd_val(pmd)))
+#define pmd_page(pmd)          pfn_to_page(__phys_to_pfn(pmd_val(pmd)))
+
+/* we don't need complex calculations here as the pmd is folded into the pgd */
+#define pmd_addr_end(addr,end) (end)
 
 /*
  * Conversion functions: convert a page and protection to a page entry,
@@ -400,22 +428,55 @@ static inline pte_t *pmd_page_vaddr(pmd_t pmd)
 
 static inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
 {
-	const unsigned long mask = L_PTE_EXEC | L_PTE_WRITE | L_PTE_USER;
+	const pteval_t mask = L_PTE_EXEC | L_PTE_WRITE | L_PTE_USER;
 	pte_val(pte) = (pte_val(pte) & ~mask) | (pgprot_val(newprot) & mask);
 	return pte;
 }
 
 extern pgd_t swapper_pg_dir[PTRS_PER_PGD];
 
-/* Encode and decode a swap entry.
+/* Encode and decode a swap entry.  Swap entries are stored in the Linux
+ * page tables as follows:
  *
- * We support up to 32GB of swap on 4k machines
+ *   3 3 2 2 2 2 2 2 2 2 2 2 1 1 1 1 1 1 1 1 1 1
+ *   1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
+ *   <--------------- offset --------------------> <--- type --> 0 0
+ *
+ * This gives us up to 127 swap files and 32GB per swap file.  Note that
+ * the offset field is always non-zero.
  */
-#define __swp_type(x)		(((x).val >> 2) & 0x7f)
-#define __swp_offset(x)		((x).val >> 9)
-#define __swp_entry(type,offset) ((swp_entry_t) { ((type) << 2) | ((offset) << 9) })
+#define __SWP_TYPE_SHIFT       2
+#define __SWP_TYPE_BITS                7
+#define __SWP_TYPE_MASK                ((1 << __SWP_TYPE_BITS) - 1)
+#define __SWP_OFFSET_SHIFT     (__SWP_TYPE_BITS + __SWP_TYPE_SHIFT)
+
+#define __swp_type(x)          (((x).val >> __SWP_TYPE_SHIFT) & __SWP_TYPE_MASK)
+#define __swp_offset(x)                ((x).val >> __SWP_OFFSET_SHIFT)
+#define __swp_entry(type,offset) ((swp_entry_t) { ((type) << __SWP_TYPE_SHIFT) | ((offset) << __SWP_OFFSET_SHIFT) })
+
 #define __pte_to_swp_entry(pte)	((swp_entry_t) { pte_val(pte) })
 #define __swp_entry_to_pte(swp)	((pte_t) { (swp).val })
+
+/*
+ * It is an error for the kernel to have more swap files than we can
+ * encode in the PTEs.  This ensures that we know when MAX_SWAPFILES
+ * is increased beyond what we presently support.
+ */
+#define MAX_SWAPFILES_CHECK() BUILD_BUG_ON(MAX_SWAPFILES_SHIFT > __SWP_TYPE_BITS)
+
+/*
+ * Encode and decode a file entry.  File entries are stored in the Linux
+ * page tables as follows:
+ *
+ *   3 3 2 2 2 2 2 2 2 2 2 2 1 1 1 1 1 1 1 1 1 1
+ *   1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
+ *   <------------------------ offset -------------------------> 1 0
+ */
+#define pte_file(pte)          (pte_val(pte) & L_PTE_FILE)
+#define pte_to_pgoff(x)                (pte_val(x) >> 2)
+#define pgoff_to_pte(x)                __pte(((x) << 2) | L_PTE_FILE)
+
+#define PTE_FILE_MAX_BITS      30
 
 /* Needs to be defined here and not in linux/mm.h, as it is arch dependent */
 /* FIXME: this is not correct */

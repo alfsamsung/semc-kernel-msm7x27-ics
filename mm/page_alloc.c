@@ -71,7 +71,6 @@ EXPORT_SYMBOL(node_states);
 
 unsigned long totalram_pages __read_mostly;
 unsigned long totalreserve_pages __read_mostly;
-unsigned long highest_memmap_pfn __read_mostly;
 int percpu_pagelist_fraction;
 gfp_t gfp_allowed_mask __read_mostly = GFP_BOOT_MASK;
 
@@ -161,8 +160,8 @@ static char * const zone_names[MAX_NR_ZONES] = {
 int min_free_kbytes = 4096;
 int min_free_order_shift = 4;
 
-unsigned long __meminitdata nr_kernel_pages;
-unsigned long __meminitdata nr_all_pages;
+static unsigned long __meminitdata nr_kernel_pages;
+static unsigned long __meminitdata nr_all_pages;
 static unsigned long __meminitdata dma_reserve;
 
 #ifdef CONFIG_ARCH_POPULATES_NODE_MAP
@@ -980,12 +979,9 @@ static void drain_pages(unsigned int cpu)
 	unsigned long flags;
 	struct zone *zone;
 
-	for_each_zone(zone) {
+	for_each_populated_zone(zone) {
 		struct per_cpu_pageset *pset;
 		struct per_cpu_pages *pcp;
-
-		if (!populated_zone(zone))
-			continue;
 
 		pset = zone_pcp(zone, cpu);
 
@@ -1051,8 +1047,9 @@ void mark_free_pages(struct zone *zone)
 
 /*
  * Free a 0-order page
+ * cold == 1 ? free a cold page : free a hot page
  */
-static void free_hot_cold_page(struct page *page, int cold)
+void free_hot_cold_page(struct page *page, int cold)
 {
 	struct zone *zone = page_zone(page);
 	struct per_cpu_pages *pcp;
@@ -1085,16 +1082,6 @@ static void free_hot_cold_page(struct page *page, int cold)
 	}
 	local_irq_restore(flags);
 	put_cpu();
-}
-
-void free_hot_page(struct page *page)
-{
-	free_hot_cold_page(page, 0);
-}
-	
-void free_cold_page(struct page *page)
-{
-	free_hot_cold_page(page, 1);
 }
 
 /*
@@ -1935,7 +1922,7 @@ void __free_pages(struct page *page, unsigned int order)
 {
 	if (put_page_testzero(page)) {
 		if (order == 0)
-			free_hot_page(page);
+			free_hot_cold_page(page, 0);
 		else
 			__free_pages_ok(page, order);
 	}
@@ -2093,10 +2080,7 @@ void show_free_areas(void)
 	int cpu;
 	struct zone *zone;
 
-	for_each_zone(zone) {
-		if (!populated_zone(zone))
-			continue;
-
+	for_each_populated_zone(zone) {
 		show_node(zone);
 		printk("%s per-cpu:\n", zone->name);
 
@@ -2140,11 +2124,8 @@ void show_free_areas(void)
 		global_page_state(NR_PAGETABLE),
 		global_page_state(NR_BOUNCE));
 
-	for_each_zone(zone) {
+	for_each_populated_zone(zone) {
 		int i;
-
-		if (!populated_zone(zone))
-			continue;
 
 		show_node(zone);
 		printk("%s"
@@ -2214,11 +2195,8 @@ void show_free_areas(void)
 		printk("\n");
 	}
 
-	for_each_zone(zone) {
+	for_each_populated_zone(zone) {
  		unsigned long nr[MAX_ORDER], flags, order, total = 0;
-
-		if (!populated_zone(zone))
-			continue;
 
 		show_node(zone);
 		printk("%s: ", zone->name);
@@ -3047,11 +3025,7 @@ static int __cpuinit process_zones(int cpu)
 
 	node_set_state(node, N_CPU);	/* this node has a cpu */
 
-	for_each_zone(zone) {
-
-		if (!populated_zone(zone))
-			continue;
-
+	for_each_populated_zone(zone) {
 		zone_pcp(zone, cpu) = kmalloc_node(sizeof(struct per_cpu_pageset),
 					 GFP_KERNEL, node);
 		if (!zone_pcp(zone, cpu))
@@ -4825,7 +4799,14 @@ void *__init alloc_large_system_hash(const char *tablename,
 			numentries <<= (PAGE_SHIFT - scale);
 
 		/* Make sure we've got at least a 0-order allocation.. */
-		if (unlikely((numentries * bucketsize) < PAGE_SIZE))
+		if (unlikely(flags & HASH_SMALL)) {
+			/* Makes no sense without HASH_EARLY */
+			WARN_ON(!(flags & HASH_EARLY));
+			if (!(numentries >> *_hash_shift)) {
+				numentries = 1UL << *_hash_shift;
+				BUG_ON(!numentries);
+			}
+		} else if (unlikely((numentries * bucketsize) < PAGE_SIZE))
 			numentries = PAGE_SIZE / bucketsize;
 	}
 	numentries = roundup_pow_of_two(numentries);

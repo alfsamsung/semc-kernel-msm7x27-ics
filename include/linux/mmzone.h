@@ -15,7 +15,7 @@
 #include <linux/seqlock.h>
 #include <linux/nodemask.h>
 #include <linux/pageblock-flags.h>
-#include <linux/bounds.h>
+#include <generated/bounds.h>
 #include <asm/atomic.h>
 #include <asm/page.h>
 
@@ -794,6 +794,14 @@ extern struct zone *next_zone(struct zone *zone);
 	for (zone = (first_online_pgdat())->node_zones; \
 	     zone;					\
 	     zone = next_zone(zone))
+
+#define for_each_populated_zone(zone)                  \
+	for (zone = (first_online_pgdat())->node_zones; \
+	      zone;                                      \
+	      zone = next_zone(zone))                    \
+		if (!populated_zone(zone))              \
+			; /* do nothing */              \
+		else
 
 static inline struct zone *zonelist_zone(struct zoneref *zoneref)
 {

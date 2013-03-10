@@ -974,7 +974,7 @@ static unsigned long isolate_pages_global(unsigned long nr,
 	if (file)
 		lru += LRU_FILE;
 	return isolate_lru_pages(nr, &z->lru[lru].list, dst, scanned, order,
-								mode, !!file);
+								mode, file);
 }
 
 /*
@@ -1176,7 +1176,7 @@ static unsigned long shrink_inactive_list(unsigned long max_scan,
 			lru = page_lru(page);
 			add_page_to_lru_list(zone, page, lru);
 			if (PageActive(page)) {
-				int file = !!page_is_file_cache(page);
+				int file = page_is_file_cache(page);
 				reclaim_stat->recent_rotated[file]++;
 			}
 			if (!pagevec_add(&pvec, page)) {
@@ -2145,11 +2145,9 @@ static unsigned long shrink_all_zones(unsigned long nr_pages, int prio,
 	struct zone *zone;
 	unsigned long ret = 0;
 
-	for_each_zone(zone) {
+	for_each_populated_zone(zone) {
 		enum lru_list l;
 
-		if (!populated_zone(zone))
-			continue;
 		if (zone_is_all_unreclaimable(zone) && prio != DEF_PRIORITY)
 			continue;
 

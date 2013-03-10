@@ -24,9 +24,7 @@
 #include <linux/interrupt.h>
 #include <linux/smp.h>
 #include <linux/fs.h>
-#ifdef CONFIG_MEMORY_HOTPLUG
-#include <linux/memory_hotplug.h>
-#endif
+#include <linux/proc_fs.h>
 
 #ifdef CONFIG_KEXEC
 #include <linux/kexec.h>
@@ -49,6 +47,7 @@
 #include <asm/mach/irq.h>
 #include <asm/mach/time.h>
 #include <asm/traps.h>
+#include <asm/unwind.h>
 
 #include "compat.h"
 #include "atags.h"
@@ -124,7 +123,7 @@ EXPORT_SYMBOL(elf_platform);
 
 static const char *cpu_name;
 static const char *machine_name;
-static char __initdata command_line[COMMAND_LINE_SIZE];
+static char __initdata cmd_line[COMMAND_LINE_SIZE];
 
 static char default_command_line[COMMAND_LINE_SIZE] __initdata = CONFIG_CMDLINE;
 static union { char c[4]; unsigned long l; } endian_test __initdata = { { 'l', '?', '?', 'b' } };
@@ -394,13 +393,12 @@ static int __init arm_add_memory(unsigned long start, unsigned long size)
 	size -= start & ~PAGE_MASK;
 	bank->start = PAGE_ALIGN(start);
 	bank->size  = size & PAGE_MASK;
-	bank->node  = PHYS_TO_NID(start);
 
 	/*
 	 * Check whether this memory region has non-zero size or
 	 * invalid node number.
 	 */
-	if (bank->size == 0 || bank->node >= MAX_NUMNODES)
+	if (bank->size == 0)
 		return -EINVAL;
 
 	meminfo.nr_banks++;
@@ -411,10 +409,11 @@ static int __init arm_add_memory(unsigned long start, unsigned long size)
  * Pick out the memory size.  We look for mem=size@start,
  * where start and size are "size[KkMm]"
  */
-static void __init early_mem(char **p)
+static int __init early_mem(char *p)
 {
 	static int usermem __initdata = 0;
 	unsigned long size, start;
+	char *endp;
 
 	/*
 	 * If the user specifies memory size, we
@@ -427,80 +426,15 @@ static void __init early_mem(char **p)
 	}
 
 	start = PHYS_OFFSET;
-	size  = memparse(*p, p);
-	if (**p == '@')
-		start = memparse(*p + 1, p);
+	size  = memparse(p, &endp);
+	if (*endp == '@')
+		start = memparse(endp + 1, NULL);
 
 	arm_add_memory(start, size);
+	
+	return 0;
 }
-__early_param("mem=", early_mem);
-
-#ifdef CONFIG_MEMORY_HOTPLUG
-static void __init early_mem_reserved(char **p)
-{
-	unsigned int start;
-	unsigned int size;
-	unsigned int end;
-	unsigned int h_end;
-
-	start = PHYS_OFFSET;
-	size  = memparse(*p, p);
-	if (**p == '@')
-		start = memparse(*p + 1, p);
-
-	if (movable_reserved_start) {
-		end = start + size;
-		h_end = movable_reserved_start + movable_reserved_size;
-		end = max(end, h_end);
-		movable_reserved_start = min(movable_reserved_start,
-			(unsigned long)start);
-		movable_reserved_size = end - movable_reserved_start;
-	} else {
-		movable_reserved_start = start;
-		movable_reserved_size = size;
-	}
-}
-__early_param("mem_reserved=", early_mem_reserved);
-#endif
-
-/*
- * Initial parsing of the command line.
- */
-static void __init parse_cmdline(char **cmdline_p, char *from)
-{
-	char c = ' ', *to = command_line;
-	int len = 0;
-
-	for (;;) {
-		if (c == ' ') {
-			extern struct early_params __early_begin, __early_end;
-			struct early_params *p;
-
-			for (p = &__early_begin; p < &__early_end; p++) {
-				int arglen = strlen(p->arg);
-
-				if (memcmp(from, p->arg, arglen) == 0) {
-					if (to != command_line)
-						to -= 1;
-					from += arglen;
-					p->fn(&from);
-
-					while (*from != ' ' && *from != '\0')
-						from++;
-					break;
-				}
-			}
-		}
-		c = *from++;
-		if (!c)
-			break;
-		if (COMMAND_LINE_SIZE <= ++len)
-			break;
-		*to++ = c;
-	}
-	*to = '\0';
-	*cmdline_p = command_line;
-}
+early_param("mem", early_mem);
 
 static void __init
 setup_ramdisk(int doload, int prompt, int image_start, unsigned int rd_sz)
@@ -634,37 +568,6 @@ static int __init parse_tag_mem32(const struct tag *tag)
 }
 
 __tagtable(ATAG_MEM, parse_tag_mem32);
-
-#ifdef CONFIG_MEMORY_HOTPLUG
-static int __init parse_tag_mem32_reserved(const struct tag *tag)
-{
-	unsigned int start;
-	unsigned int size;
-	unsigned int end;
-	unsigned int h_end;
-
-	start = tag->u.mem.start;
-	size = tag->u.mem.size;
-
-	if (movable_reserved_start) {
-		end = start + size;
-		h_end = movable_reserved_start + movable_reserved_size;
-		end = max(end, h_end);
-		movable_reserved_start = min(movable_reserved_start,
-			(unsigned long)start);
-		movable_reserved_size = end - movable_reserved_start;
-	} else {
-		movable_reserved_start = tag->u.mem.start;
-		movable_reserved_size = tag->u.mem.size;
-	}
-	printk(KERN_ALERT "reserved %lx at %lx for hotplug\n",
-		movable_reserved_size, movable_reserved_start);
-
-	return 0;
-}
-
-__tagtable(ATAG_MEM_RESERVED, parse_tag_mem32_reserved);
-#endif
 
 #if defined(CONFIG_VGA_CONSOLE) || defined(CONFIG_DUMMY_CONSOLE)
 struct screen_info screen_info = {
@@ -812,6 +715,8 @@ void __init setup_arch(char **cmdline_p)
 	struct tag *tags = (struct tag *)&init_tags;
 	struct machine_desc *mdesc;
 	char *from = default_command_line;
+	
+	unwind_init();
 
 	setup_processor();
 	mdesc = setup_machine(machine_arch_type);
@@ -849,9 +754,15 @@ void __init setup_arch(char **cmdline_p)
 	init_mm.end_data   = (unsigned long) _edata;
 	init_mm.brk	   = (unsigned long) _end;
 
-	memcpy(boot_command_line, from, COMMAND_LINE_SIZE);
-	boot_command_line[COMMAND_LINE_SIZE-1] = '\0';
-	parse_cmdline(cmdline_p, from);
+	/* parse_early_param needs a boot_command_line */
+	strlcpy(boot_command_line, from, COMMAND_LINE_SIZE);
+
+	/* populate cmd_line too for later use, preserving boot_command_line */
+	strlcpy(cmd_line, boot_command_line, COMMAND_LINE_SIZE);
+	*cmdline_p = cmd_line;
+
+	parse_early_param();
+
 	paging_init(mdesc);
 	request_standard_resources(&meminfo, mdesc);
 
@@ -891,8 +802,20 @@ static int __init topology_init(void)
 
 	return 0;
 }
-
 subsys_initcall(topology_init);
+
+#ifdef CONFIG_HAVE_PROC_CPU
+static int __init proc_cpu_init(void)
+{
+	struct proc_dir_entry *res;
+
+	res = proc_mkdir("cpu", NULL);
+	if (!res)
+		return -ENOMEM;
+	return 0;
+}
+fs_initcall(proc_cpu_init);
+#endif
 
 static const char *hwcap_str[] = {
 	"swp",

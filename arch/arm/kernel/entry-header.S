@@ -35,10 +35,10 @@
 	mov	fp, #0
 #endif
 	.endm
-
-	.macro	get_thread_info, rd
-	mov	\rd, sp, lsr #13
-	mov	\rd, \rd, lsl #13
+	
+	.macro  get_thread_info, rd
+	mov     \rd, sp, lsr #13
+	mov     \rd, \rd, lsl #13
 	.endm
 
 	.macro	alignment_trap, rtemp
@@ -48,7 +48,6 @@
 	mcr	p15, 0, \rtemp, c1, c0
 #endif
 	.endm
-
 
 /*
  * These are the registers used in the syscall handler, and allow us to

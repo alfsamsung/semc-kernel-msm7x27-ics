@@ -329,12 +329,9 @@ static int create_mem_extents(struct list_head *list, gfp_t gfp_mask)
 
 	INIT_LIST_HEAD(list);
 
-	for_each_zone(zone) {
+	for_each_populated_zone(zone) {
 		unsigned long zone_start, zone_end;
 		struct mem_extent *ext, *cur, *aux;
-
-		if (!populated_zone(zone))
-			continue;
 
 		zone_start = zone->zone_start_pfn;
 		zone_end = zone->zone_start_pfn + zone->spanned_pages;
@@ -812,8 +809,8 @@ static unsigned int count_free_highmem_pages(void)
 	struct zone *zone;
 	unsigned int cnt = 0;
 
-	for_each_zone(zone)
-		if (populated_zone(zone) && is_highmem(zone))
+	for_each_populated_zone(zone)
+		if (is_highmem(zone))
 			cnt += zone_page_state(zone, NR_FREE_PAGES);
 
 	return cnt;
@@ -981,8 +978,8 @@ static void copy_data_page(unsigned long dst_pfn, unsigned long src_pfn)
 		src = kmap_atomic(s_page, KM_USER0);
 		dst = kmap_atomic(d_page, KM_USER1);
 		do_copy_page(dst, src);
-		kunmap_atomic(src, KM_USER0);
 		kunmap_atomic(dst, KM_USER1);
+		kunmap_atomic(src, KM_USER0);
 	} else {
 		if (PageHighMem(d_page)) {
 			/* Page pointed to by src may contain some kernel
@@ -2042,8 +2039,8 @@ swap_two_pages_data(struct page *p1, struct page *p2, void *buf)
 	memcpy(buf, kaddr1, PAGE_SIZE);
 	memcpy(kaddr1, kaddr2, PAGE_SIZE);
 	memcpy(kaddr2, buf, PAGE_SIZE);
-	kunmap_atomic(kaddr1, KM_USER0);
 	kunmap_atomic(kaddr2, KM_USER1);
+	kunmap_atomic(kaddr1, KM_USER0);
 }
 
 /**

@@ -47,6 +47,8 @@
 extern int rcutorture_runnable; /* for sysctl */
 #endif /* #ifdef CONFIG_RCU_TORTURE_TEST */
 
+#define UINT_CMP_GE(a, b)      (UINT_MAX / 2 >= (a) - (b))
+#define UINT_CMP_LT(a, b)      (UINT_MAX / 2 < (a) - (b))
 #define ULONG_CMP_GE(a, b)	(ULONG_MAX / 2 >= (a) - (b))
 #define ULONG_CMP_LT(a, b)	(ULONG_MAX / 2 < (a) - (b))
 
@@ -58,7 +60,6 @@ extern void call_rcu_sched(struct rcu_head *head,
 extern void synchronize_sched(void);
 extern void rcu_barrier_bh(void);
 extern void rcu_barrier_sched(void);
-extern void synchronize_sched_expedited(void);
 extern int sched_expedited_torture_stats(char *page);
 
 static inline void __rcu_read_lock_bh(void)
@@ -106,7 +107,6 @@ static inline int rcu_preempt_depth(void)
 {
 	return 0;
 }
-
 #endif /* #else #ifdef CONFIG_PREEMPT_RCU */
 
 /* Internal to kernel */

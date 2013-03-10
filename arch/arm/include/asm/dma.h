@@ -24,16 +24,14 @@ typedef unsigned int dmach_t;
 #include <mach/isa-dma.h>
 
 /*
- * DMA modes
+ * The DMA modes reflect the settings for the ISA DMA controller
  */
-typedef unsigned int dmamode_t;
+#define DMA_MODE_MASK   0xcc
 
-#define DMA_MODE_MASK	3
-
-#define DMA_MODE_READ	 0
-#define DMA_MODE_WRITE	 1
-#define DMA_MODE_CASCADE 2
-#define DMA_AUTOINIT	 4
+#define DMA_MODE_READ   0x44
+#define DMA_MODE_WRITE  0x48
+#define DMA_MODE_CASCADE 0xc0
+#define DMA_AUTOINIT    0x10
 
 extern spinlock_t  dma_spin_lock;
 
@@ -124,7 +122,7 @@ extern void set_dma_count(dmach_t channel, unsigned long count);
  * DMA transfer direction immediately, but defer it to the
  * enable_dma().
  */
-extern void set_dma_mode(dmach_t channel, dmamode_t mode);
+extern void set_dma_mode(unsigned int chan, unsigned int mode);
 
 /* Set the transfer speed for this channel
  */
@@ -142,12 +140,12 @@ extern int  get_dma_residue(dmach_t channel);
 #define NO_DMA	255
 #endif
 
+#endif /* CONFIG_ISA_DMA_API */
+
 #ifdef CONFIG_PCI
 extern int isa_dma_bridge_buggy;
 #else
 #define isa_dma_bridge_buggy    (0)
 #endif
-
-#endif /* CONFIG_ISA_DMA_API */
 
 #endif /* __ASM_ARM_DMA_H */

@@ -11,6 +11,7 @@
 #include <asm/unistd.h>
 #include <asm/ftrace.h>
 #include <mach/entry-macro.S>
+#include <asm/unwind.h>
 
 #include "entry-header.S"
 
@@ -22,6 +23,8 @@
  * stack.
  */
 ret_fast_syscall:
+ UNWIND(.fnstart       )
+ UNWIND(.cantunwind    )
 	disable_irq				@ disable interrupts
 	ldr	r1, [tsk, #TI_FLAGS]
 	tst	r1, #_TIF_WORK_MASK
@@ -38,6 +41,7 @@ ret_fast_syscall:
 	mov	r0, r0
 	add	sp, sp, #S_FRAME_SIZE - S_PC
 	movs	pc, lr				@ return & move spsr_svc into cpsr
+ UNWIND(.fnend         )
 
 /*
  * Ok, we need to do extra processing, enter the slow path.
@@ -366,16 +370,6 @@ sys_clone_wrapper:
 		b	sys_clone
 ENDPROC(sys_clone_wrapper)
 
-sys_sigsuspend_wrapper:
-		add	r3, sp, #S_OFF
-		b	sys_sigsuspend
-ENDPROC(sys_sigsuspend_wrapper)
-
-sys_rt_sigsuspend_wrapper:
-		add	r2, sp, #S_OFF
-		b	sys_rt_sigsuspend
-ENDPROC(sys_rt_sigsuspend_wrapper)
-
 sys_sigreturn_wrapper:
 		add	r0, sp, #S_OFF
 		b	sys_sigreturn
@@ -412,21 +406,14 @@ sys_mmap2:
 		tst	r5, #PGOFF_MASK
 		moveq	r5, r5, lsr #PAGE_SHIFT - 12
 		streq	r5, [sp, #4]
-		beq	do_mmap2
+		beq     sys_mmap_pgoff
 		mov	r0, #-EINVAL
 		mov	pc, lr
 #else
 		str	r5, [sp, #4]
-		b	do_mmap2
+		b       sys_mmap_pgoff
 #endif
 ENDPROC(sys_mmap2)
-
-ENTRY(pabort_ifar)
-		mrc	p15, 0, r0, cr6, cr0, 2
-ENTRY(pabort_noifar)
-		mov	pc, lr
-ENDPROC(pabort_ifar)
-ENDPROC(pabort_noifar)
 
 #ifdef CONFIG_OABI_COMPAT
 

@@ -74,7 +74,7 @@ static int voter_clk_set_rate(unsigned id, unsigned rate)
 		new_rate = max(other_rate, rate);
 
 		if (new_rate != cur_rate) {
-			ret = clk_set_min_rate(parent, new_rate);
+			ret = clk_set_rate(parent, new_rate);
 			if (ret)
 				goto unlock;
 		}
@@ -103,7 +103,7 @@ static int voter_clk_enable(unsigned id)
 		 */
 		cur_rate = voter_clk_aggregate_rate(parent);
 		if (clk->rate > cur_rate) {
-			ret = clk_set_min_rate(parent, clk->rate);
+			ret = clk_set_rate(parent, clk->rate);
 			if (ret)
 				goto out;
 		}
@@ -139,7 +139,7 @@ static void voter_clk_disable(unsigned id)
 		cur_rate = max(new_rate, clk->rate);
 
 		if (new_rate < cur_rate)
-			clk_set_min_rate(parent, new_rate);
+			clk_set_rate(parent, new_rate);
 
 		clk_disable(clk->aggregator_clk);
 	}

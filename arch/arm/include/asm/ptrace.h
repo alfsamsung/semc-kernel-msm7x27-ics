@@ -65,6 +65,14 @@
 #define PSR_x		0x0000ff00	/* Extension		*/
 #define PSR_c		0x000000ff	/* Control		*/
 
+/* 
+ * These are 'magic' values for PTRACE_PEEKUSR that return info about where a
+ * process is located in memory.
+ */
+#define PT_TEXT_ADDR           0x10000
+#define PT_DATA_ADDR           0x10004
+#define PT_TEXT_END_ADDR       0x10008
+
 #ifndef __ASSEMBLY__
 
 /*
@@ -96,6 +104,8 @@ struct pt_regs {
 #define ARM_ORIG_r0	uregs[17]
 
 #ifdef __KERNEL__
+
+#define arch_has_single_step() (1)
 
 #define user_mode(regs)	\
 	(((regs)->ARM_cpsr & 0xf) == 0)

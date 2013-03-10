@@ -28,8 +28,8 @@ extern struct platform_device msm_device_uart_dm2;
 
 extern struct platform_device msm_device_sdc1;
 extern struct platform_device msm_device_sdc2;
-extern struct platform_device msm_device_sdc3;
-extern struct platform_device msm_device_sdc4;
+//extern struct platform_device msm_device_sdc3;
+//extern struct platform_device msm_device_sdc4;
 
 extern struct platform_device msm_device_hsusb_otg;
 extern struct platform_device msm_device_hsusb_peripheral;
@@ -47,6 +47,8 @@ extern struct platform_device qup_device_i2c;
 
 extern struct platform_device msm_device_smd;
 extern struct platform_device msm_device_dmov;
+extern struct platform_device msm_device_dmov_adm0;
+extern struct platform_device msm_device_dmov_adm1;
 
 extern struct platform_device msm_device_nand;
 
@@ -64,6 +66,10 @@ extern struct platform_device msm_device_ssbi7;
 #if defined(CONFIG_ARCH_MSM7X30)
 extern struct platform_device msm_device_vidc_720p;
 #endif
+
+extern struct platform_device *msm_footswitch_devices[];
+extern unsigned msm_num_footswitch_devices;
+
 /*
 extern struct clk msm_clocks_7x01a[];
 extern unsigned msm_num_clocks_7x01a;

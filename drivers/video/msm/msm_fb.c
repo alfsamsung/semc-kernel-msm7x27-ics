@@ -2787,6 +2787,12 @@ struct platform_device *msm_fb_add_device(struct platform_device *pdev)
 	if (!pdata)
 		return NULL;
 	type = pdata->panel_info.type;
+	
+	/* print info about 2/3 frame buffers
+	 * panel_info.fb_num is set in board.delta */
+	MSM_FB_INFO("msm_fb: using %d. framebuffers type: %d\n",
+			pdata->panel_info.fb_num, type);
+
 	fb_num = pdata->panel_info.fb_num;
 
 	if (fb_num <= 0)

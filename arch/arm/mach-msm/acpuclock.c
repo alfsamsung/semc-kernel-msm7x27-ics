@@ -36,7 +36,6 @@
 
 #include "proc_comm.h"
 #include "smd_private.h"
-#include "clock.h"
 #include "acpuclock.h"
 
 #define A11S_CLK_CNTL_ADDR (MSM_CSR_BASE + 0x100)
@@ -47,6 +46,9 @@
 
 #define dprintk(msg...) \
 	cpufreq_debug_printk(CPUFREQ_DEBUG_DRIVER, "cpufreq-msm", msg)
+	
+/* Max CPU frequency allowed by hardware while in standby waiting for an irq. */
+#define MAX_WAIT_FOR_IRQ_KHZ 128000
 
 enum {
 	ACPU_PLL_TCXO	= -1,
@@ -57,6 +59,16 @@ enum {
 	ACPU_PLL_END,
 };
 
+static const struct pll {
+	void __iomem *mod_reg;
+	const uint32_t l_val_mask;
+} soc_pll[ACPU_PLL_END] = {
+	[ACPU_PLL_0] = {PLLn_MODE(ACPU_PLL_0), 0x3f},
+	[ACPU_PLL_1] = {PLLn_MODE(ACPU_PLL_1), 0x3f},
+	[ACPU_PLL_2] = {PLLn_MODE(ACPU_PLL_2), 0x3f},
+	[ACPU_PLL_3] = {PLLn_MODE(ACPU_PLL_3), 0x3f},
+};
+
 struct clock_state {
 	struct clkctl_acpu_speed	*current_speed;
 	struct mutex			lock;
@@ -64,7 +76,8 @@ struct clock_state {
 	uint32_t			max_speed_delta_khz;
 	uint32_t			vdd_switch_time_us;
 	unsigned long			max_axi_khz;
-	struct clk                      *ebi1_clk;
+	unsigned long			wait_for_irq_khz;
+	struct clk			*ebi1_clk;
 };
 
 #define PLL_BASE	7
@@ -335,12 +348,20 @@ static void __init cpufreq_table_init(void)
 }
 #endif
 
-unsigned long clk_get_max_axi_khz(void)
+static void pll_enable(void __iomem *addr, unsigned on)
 {
-       return drv_state.max_axi_khz;
+	if (on) {
+		writel_relaxed(2, addr);
+		mb();
+		udelay(5);
+		writel_relaxed(6, addr);
+		mb();
+		udelay(50);
+		writel_relaxed(7, addr);
+	} else {
+		writel_relaxed(0, addr);
+	}
 }
-EXPORT_SYMBOL(clk_get_max_axi_khz);
-
 
 static int pc_pll_request(unsigned id, unsigned on)
 {
@@ -360,17 +381,14 @@ static int pc_pll_request(unsigned id, unsigned on)
 		if (on) {
 			pll_control->pll[PLL_BASE + id].votes |= 2;
 			if (!pll_control->pll[PLL_BASE + id].on) {
-				writel(6, PLLn_MODE(id));
-				udelay(50);
-				mb();
-				writel(7, PLLn_MODE(id));
+				pll_enable(soc_pll[id].mod_reg, 1);
 				pll_control->pll[PLL_BASE + id].on = 1;
 			}
 		} else {
 			pll_control->pll[PLL_BASE + id].votes &= ~2;
 			if (pll_control->pll[PLL_BASE + id].on
 			    && !pll_control->pll[PLL_BASE + id].votes) {
-				writel(0, PLLn_MODE(id));
+				 pll_enable(soc_pll[id].mod_reg, 0);
 				pll_control->pll[PLL_BASE + id].on = 0;
 			}
 		}
@@ -404,27 +422,28 @@ unsigned long acpuclk_power_collapse(void)
 	return ret;
 }
 
-#define WAIT_FOR_IRQ_KHZ 128000
 unsigned long acpuclk_wait_for_irq(void)
 {
-	int ret = acpuclk_get_rate(smp_processor_id());
-	acpuclk_set_rate(smp_processor_id(), WAIT_FOR_IRQ_KHZ, SETRATE_SWFI);
-	return ret;
+	int rate = acpuclk_get_rate(smp_processor_id());
+	if (rate > MAX_WAIT_FOR_IRQ_KHZ)
+		acpuclk_set_rate(smp_processor_id(), drv_state.wait_for_irq_khz,
+				  SETRATE_SWFI);
+	return rate;
 }
 
 static int acpuclk_set_vdd_level(int vdd)
 {
 	uint32_t current_vdd;
 
-	current_vdd = readl(A11S_VDD_SVS_PLEVEL_ADDR) & 0x07;
+	current_vdd = readl_relaxed(A11S_VDD_SVS_PLEVEL_ADDR) & 0x07;
 
 	dprintk("Switching VDD from %u mV -> %d mV\n",
 	       current_vdd, vdd);
 
-	writel((1 << 7) | (vdd << 3), A11S_VDD_SVS_PLEVEL_ADDR);
+	writel_relaxed((1 << 7) | (vdd << 3), A11S_VDD_SVS_PLEVEL_ADDR);
 	mb();
 	udelay(drv_state.vdd_switch_time_us);
-	if ((readl(A11S_VDD_SVS_PLEVEL_ADDR) & 0x7) != vdd) {
+	if ((readl_relaxed(A11S_VDD_SVS_PLEVEL_ADDR) & 0x7) != vdd) {
 		pr_err("VDD set failed\n");
 		return -EIO;
 	}
@@ -438,7 +457,8 @@ static int acpuclk_set_vdd_level(int vdd)
 static void acpuclk_set_div(const struct clkctl_acpu_speed *hunt_s)
 {
 	uint32_t reg_clkctl, reg_clksel, clk_div, src_sel, a11_div;
-	reg_clksel = readl(A11S_CLK_SEL_ADDR);
+	
+	reg_clksel = readl_relaxed(A11S_CLK_SEL_ADDR);
 
 	/* AHB_CLK_DIV */
 	clk_div = (reg_clksel >> 1) & 0x03;
@@ -446,7 +466,7 @@ static void acpuclk_set_div(const struct clkctl_acpu_speed *hunt_s)
 
 	if (hunt_s->a11clk_khz > 600000) {
 		a11_div=0;
-		writel(hunt_s->a11clk_khz/19200, PLLn_L_VAL(0));
+		writel_relaxed(hunt_s->a11clk_khz/19200, PLLn_L_VAL(0));
 		cpu_relax();
 		udelay(50);
 	}
@@ -460,24 +480,24 @@ static void acpuclk_set_div(const struct clkctl_acpu_speed *hunt_s)
 	if (hunt_s->ahbclk_div > clk_div) {
 		reg_clksel &= ~(0x3 << 1);
 		reg_clksel |= (hunt_s->ahbclk_div << 1);
-		writel(reg_clksel, A11S_CLK_SEL_ADDR);
+		writel_relaxed(reg_clksel, A11S_CLK_SEL_ADDR);
 	}
 
 	/* Program clock source and divider */
-	reg_clkctl = readl(A11S_CLK_CNTL_ADDR);
+	reg_clkctl = readl_relaxed(A11S_CLK_CNTL_ADDR);
 	reg_clkctl &= ~(0xFF << (8 * src_sel));
 	reg_clkctl |= hunt_s->a11clk_src_sel << (4 + 8 * src_sel);
 	reg_clkctl |= a11_div << (0 + 8 * src_sel);
-	writel(reg_clkctl, A11S_CLK_CNTL_ADDR);
+	writel_relaxed(reg_clkctl, A11S_CLK_CNTL_ADDR);
 
 	/* Program clock source selection */
 	reg_clksel ^= 1;
-	writel(reg_clksel, A11S_CLK_SEL_ADDR);
+	writel_relaxed(reg_clksel, A11S_CLK_SEL_ADDR);
 
         if (hunt_s->pll == ACPU_PLL_0 && hunt_s->a11clk_khz <= 600000) {
-		if ((readl(PLLn_L_VAL(0)) & 0x3f) != PLL_960_MHZ) {
+		if ((readl_relaxed(PLLn_L_VAL(0)) & 0x3f) != PLL_960_MHZ) {
 			/* Restore PLL0 to standard config */
-			writel(PLL_960_MHZ, PLLn_L_VAL(0));
+			writel_relaxed(PLL_960_MHZ, PLLn_L_VAL(0));
 		}
 		cpu_relax();
 		udelay(50);
@@ -489,7 +509,7 @@ static void acpuclk_set_div(const struct clkctl_acpu_speed *hunt_s)
 	if (hunt_s->ahbclk_div < clk_div) {
 		reg_clksel &= ~(0x3 << 1);
 		reg_clksel |= (hunt_s->ahbclk_div << 1);
-		writel(reg_clksel, A11S_CLK_SEL_ADDR);
+		writel_relaxed(reg_clksel, A11S_CLK_SEL_ADDR);
 	}
 }
 
@@ -560,9 +580,9 @@ int acpuclk_set_rate(int cpu, unsigned long rate, enum setrate_reason reason)
 	}
 
 	/* Set wait states for CPU inbetween frequency changes */
-	reg_clkctl = readl(A11S_CLK_CNTL_ADDR);
+	reg_clkctl = readl_relaxed(A11S_CLK_CNTL_ADDR);
 	reg_clkctl |= (100 << 16); /* set WT_ST_CNT */
-	writel(reg_clkctl, A11S_CLK_CNTL_ADDR);
+	writel_relaxed(reg_clkctl, A11S_CLK_CNTL_ADDR);
 
 	dprintk("Switching from ACPU rate %u KHz -> %u KHz\n",
 		       strt_s->a11clk_khz, tgt_s->a11clk_khz);
@@ -640,14 +660,10 @@ int acpuclk_set_rate(int cpu, unsigned long rate, enum setrate_reason reason)
 			pr_warning("Setting AXI min rate failed (%d)\n", res);
 	}
 
-	/* Nothing else to do for power collapse if not 7x27. */
-	if (reason == SETRATE_PC && !cpu_is_msm7x27())
-		goto out;
-
 	/* Disable PLLs we are not using anymore. */
 	if (tgt_s->pll != ACPU_PLL_TCXO)
 		plls_enabled &= ~(1 << tgt_s->pll);
-	for (pll = ACPU_PLL_0; pll <= ACPU_PLL_2; pll++)
+	for (pll = ACPU_PLL_0; pll < ACPU_PLL_END; pll++)
 		if (plls_enabled & (1 << pll)) {
 			res = pc_pll_request(pll, 0);
 			if (res < 0)
@@ -683,16 +699,16 @@ static void __init acpuclk_init(void)
 	 * Determine the rate of ACPU clock
 	 */
 
-	if (!(readl(A11S_CLK_SEL_ADDR) & 0x01)) { /* CLK_SEL_SRC1N0 */
+	if (!(readl_relaxed(A11S_CLK_SEL_ADDR) & 0x01)) { /* CLK_SEL_SRC1N0 */
 		/* CLK_SRC0_SEL */
-		sel = (readl(A11S_CLK_CNTL_ADDR) >> 12) & 0x7;
+		sel = (readl_relaxed(A11S_CLK_CNTL_ADDR) >> 12) & 0x7;
 		/* CLK_SRC0_DIV */
-		div = (readl(A11S_CLK_CNTL_ADDR) >> 8) & 0x0f;
+		div = (readl_relaxed(A11S_CLK_CNTL_ADDR) >> 8) & 0x0f;
 	} else {
 		/* CLK_SRC1_SEL */
-		sel = (readl(A11S_CLK_CNTL_ADDR) >> 4) & 0x07;
+		sel = (readl_relaxed(A11S_CLK_CNTL_ADDR) >> 4) & 0x07;
 		/* CLK_SRC1_DIV */
-		div = readl(A11S_CLK_CNTL_ADDR) & 0x0f;
+		div = readl_relaxed(A11S_CLK_CNTL_ADDR) & 0x0f;
 	}
 
 	/* Accomodate bootloaders that might not be implementing the
@@ -759,23 +775,26 @@ static void __init acpu_freq_tbl_fixup(void)
 	/* Wait for the PLLs to be initialized and then read their frequency.
 	 */
 	do {
-		pll0_l = readl(PLLn_L_VAL(0)) & 0x3f;
-		cpu_relax();
-		udelay(50);
+		  pll0_l = readl_relaxed(PLLn_L_VAL(0)) &
+				  soc_pll[ACPU_PLL_0].l_val_mask;
+		  cpu_relax();
+		  udelay(50);
 	} while (pll0_l == 0);
 	do {
-		pll1_l = readl(PLLn_L_VAL(1)) & 0x3f;
-		cpu_relax();
-		udelay(50);
+		  pll1_l = readl_relaxed(PLLn_L_VAL(1)) &
+				  soc_pll[ACPU_PLL_1].l_val_mask;
+		  cpu_relax();
+		  udelay(50);
 	} while (pll1_l == 0);
 	do {
-		pll2_l = readl(PLLn_L_VAL(2)) & 0x3f;
-		cpu_relax();
-		udelay(50);
+		  pll2_l = readl_relaxed(PLLn_L_VAL(2)) &
+				  soc_pll[ACPU_PLL_2].l_val_mask;
+		  cpu_relax();
+		  udelay(50);
 	} while (pll2_l == 0);
 
 	pr_info("L val: PLL0: %d, PLL1: %d, PLL2: %d\n",
-			(int)pll0_l, (int)pll1_l, (int)pll2_l);
+			  (int)pll0_l, (int)pll1_l, (int)pll2_l);
 
 	/* Some configurations run PLL0 twice as fast. Instead of having
 	 * separate tables for this case, we simply fix up the ACPU clock
@@ -832,6 +851,22 @@ static void __init acpu_freq_tbl_fixup(void)
 		pr_info("Turbo mode supported and enabled.\n");
 	else
 		pr_info("Turbo mode supported but not enabled.\n");
+}
+
+/*
+ * Hardware requires the CPU to be dropped to less than MAX_WAIT_FOR_IRQ_KHZ
+ * before entering a wait for irq low-power mode. Find a suitable rate.
+ */
+static unsigned long __init find_wait_for_irq_khz(void)
+{
+	unsigned long found_khz = 0;
+	int i;
+
+	for (i = 0; acpu_freq_tbl[i].a11clk_khz &&
+		    acpu_freq_tbl[i].a11clk_khz <= MAX_WAIT_FOR_IRQ_KHZ; i++)
+		found_khz = acpu_freq_tbl[i].a11clk_khz;
+
+	return found_khz;
 }
 
 /* Initalize the lpj field in the acpu_freq_tbl. */
@@ -969,6 +1004,7 @@ void __init msm_acpu_clock_init(struct msm_acpu_clock_platform_data *clkdata)
 	drv_state.vdd_switch_time_us = clkdata->vdd_switch_time_us;
 	drv_state.max_axi_khz = clkdata->max_axi_khz;
 	acpu_freq_tbl_fixup();
+	drv_state.wait_for_irq_khz = find_wait_for_irq_khz();
 	precompute_stepping();
 	if (cpu_is_msm7x25())
 		msm7x25_acpu_pll_hw_bug_fix();

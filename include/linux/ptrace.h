@@ -251,6 +251,9 @@ static inline void user_enable_single_step(struct task_struct *task)
 static inline void user_disable_single_step(struct task_struct *task)
 {
 }
+#else
+extern void user_enable_single_step(struct task_struct *);
+extern void user_disable_single_step(struct task_struct *);
 #endif	/* arch_has_single_step */
 
 #ifndef arch_has_block_step
@@ -278,6 +281,8 @@ static inline void user_enable_block_step(struct task_struct *task)
 {
 	BUG();			/* This can never be called.  */
 }
+#else
+extern void user_enable_block_step(struct task_struct *);
 #endif	/* arch_has_block_step */
 
 #ifndef arch_ptrace_stop_needed

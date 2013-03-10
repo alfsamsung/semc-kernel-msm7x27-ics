@@ -6,6 +6,7 @@ header-y += mman.h
 header-y += poll.h
 header-y += signal.h
 header-y += statfs.h
+header-y += unistd.h
 
 unifdef-y += int-l64.h
 unifdef-y += int-ll64.h

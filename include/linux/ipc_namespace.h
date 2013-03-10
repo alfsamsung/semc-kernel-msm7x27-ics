@@ -50,15 +50,10 @@ extern struct ipc_namespace init_ipc_ns;
 extern atomic_t nr_ipc_ns;
 
 #ifdef CONFIG_SYSVIPC
-#define INIT_IPC_NS(ns)		.ns		= &init_ipc_ns,
-
 extern int register_ipcns_notifier(struct ipc_namespace *);
 extern int cond_register_ipcns_notifier(struct ipc_namespace *);
 extern void unregister_ipcns_notifier(struct ipc_namespace *);
 extern int ipcns_notify(unsigned long);
-
-#else /* CONFIG_SYSVIPC */
-#define INIT_IPC_NS(ns)
 #endif /* CONFIG_SYSVIPC */
 
 #if defined(CONFIG_SYSVIPC) && defined(CONFIG_IPC_NS)

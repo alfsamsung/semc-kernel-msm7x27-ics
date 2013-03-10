@@ -1404,8 +1404,11 @@ static void usb_start(struct usb_info *ui)
 
 static int usb_free(struct usb_info *ui, int ret)
 {	/*ALFS TEST clock fix*/
+	//struct platform_device *pdev;
 	struct msm_hsusb_gadget_platform_data *pdata;
-	struct platform_device *pdev;
+	
+	//struct msm_hsusb_gadget_platform_data *pdata =
+				//the_usb_info->pdev->dev.platform_data;
 	
 	INFO("usb_free(%d)\n", ret);
 
@@ -1422,8 +1425,9 @@ static int usb_free(struct usb_info *ui, int ret)
 		dma_free_coherent(&ui->pdev->dev, 4096, ui->buf, ui->dma);
 	kfree(ui);
 	pm_qos_remove_requirement(PM_QOS_CPU_DMA_LATENCY, DRIVER_NAME);
+	
 	//pm_qos_remove_requirement(PM_QOS_SYSTEM_BUS_FREQ, DRIVER_NAME);
-	pdata = pdev->dev.platform_data;
+	pdata = ui->pdev->dev.platform_data;
 	clk_put(pdata->ebi1_clk);
 	return ret;
 }
@@ -1431,18 +1435,22 @@ static int usb_free(struct usb_info *ui, int ret)
 static void msm72k_pm_qos_update(int vote)
 {
 	struct msm_hsusb_gadget_platform_data *pdata =
-				the_usb_info->pdev->dev.platform_data;
+				the_usb_info->pdev->dev.platform_data; 
 	u32 swfi_latency = pdata->swfi_latency + 1;
 
 	if (vote) {
 		pm_qos_update_requirement(PM_QOS_CPU_DMA_LATENCY,
 				DRIVER_NAME, swfi_latency);
 		if (depends_on_axi_freq(the_usb_info->xceiv))
+//			pm_qos_update_requirement(PM_QOS_SYSTEM_BUS_FREQ,
+//				DRIVER_NAME, MSM_AXI_MAX_FREQ);
 			clk_enable(pdata->ebi1_clk); /*ALFS TEST clock fix*/
 	} else {
 		pm_qos_update_requirement(PM_QOS_CPU_DMA_LATENCY,
 				DRIVER_NAME, PM_QOS_DEFAULT_VALUE);
 		if (depends_on_axi_freq(the_usb_info->xceiv))
+//			pm_qos_update_requirement(PM_QOS_SYSTEM_BUS_FREQ,
+//				DRIVER_NAME, PM_QOS_DEFAULT_VALUE);
 			clk_disable(pdata->ebi1_clk);   /*ALFS TEST clock fix*/
 	}
 }
@@ -2434,17 +2442,26 @@ static int msm72k_probe(struct platform_device *pdev)
 					PM_QOS_DEFAULT_VALUE);
 	
 	/*ALFS TEST clock fix*/
+//	pm_qos_add_requirement(PM_QOS_SYSTEM_BUS_FREQ, DRIVER_NAME,
+//					PM_QOS_DEFAULT_VALUE);
+	//pdata = pdev->dev.platform_data;
+	//pdata->ebi1_clk = clk_get(NULL, "ebi1_usb_clk");
+	//if (IS_ERR(pdata->ebi1_clk))
+		//pdata->ebi1_clk = NULL;
+//		clk_put(pdata->ebi1_clk);
+
+	//clk_set_rate(pdata->ebi1_clk, INT_MAX);
 	pdata = pdev->dev.platform_data;
 	pdata->ebi1_clk = clk_get(NULL, "ebi1_usb_clk");
-       if (IS_ERR(pdata->ebi1_clk))
-               pdata->ebi1_clk = NULL;
-       else
-               clk_set_rate(pdata->ebi1_clk, INT_MAX);
+	if (IS_ERR(pdata->ebi1_clk))
+		pdata->ebi1_clk = NULL;
+	else
+		clk_set_rate(pdata->ebi1_clk, INT_MAX);
        
+ /*ALFS END */
 	usb_debugfs_init(ui);
 
 	usb_prepare(ui);
- /*ALFS END */
 
 	retval = otg_set_peripheral(ui->xceiv, &ui->gadget);
 	if (retval) {
@@ -2456,9 +2473,6 @@ static int msm72k_probe(struct platform_device *pdev)
 	}
 
 	return 0;
-	
-//put_ebi_clk:
-  //     clk_put(dev->pdata->ebi1_clk);
 }
 
 int usb_gadget_register_driver(struct usb_gadget_driver *driver)

@@ -34,6 +34,7 @@
 #include <linux/uaccess.h>
 #include <linux/wait.h>
 #include <linux/wakelock.h>
+#include <linux/slab.h>
 
 static struct wake_lock adsp_wake_lock;
 static inline void prevent_suspend(void)

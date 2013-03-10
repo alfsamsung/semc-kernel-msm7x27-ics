@@ -30,18 +30,13 @@
  *	EXCEPTION_TABLE(...)
  *	NOTES
  *
- *	__bss_start = .;
- *	BSS_SECTION(0, 0)
- *	__bss_stop = .;
+ *	BSS_SECTION(0, 0, 0)
  *	_end = .;
  *
- *	/DISCARD/ : {
- *		EXIT_TEXT
- *		EXIT_DATA
- *		EXIT_CALL
- *	}
  *	STABS_DEBUG
  *	DWARF_DEBUG
+ * 
+ * 	DISCARDS                // must be the last
  * }
  *
  * [__init_begin, __init_end] is the init section that may be freed after init
@@ -191,7 +186,7 @@
 	. = ALIGN(align);						\
 	*(.data.cacheline_aligned)
 
-#define INIT_TASK(align)						\
+#define INIT_TASK_DATA(align)						\
 	. = ALIGN(align);						\
 	*(.data.init_task)
 
@@ -415,7 +410,7 @@
 /* Section used for early init (in .S files) */
 #define HEAD_TEXT  *(.head.text)
 
-#define HEAD_TEXT_SECTION							\
+#define HEAD_TEXT_SECTION						\
 	.head.text : AT(ADDR(.head.text) - LOAD_OFFSET) {		\
 		HEAD_TEXT						\
 	}
@@ -434,10 +429,10 @@
 /*
  * Init task
  */
-#define INIT_TASK_DATA(align)						\
+#define INIT_TASK_DATA_SECTION(align)					\
 	. = ALIGN(align);						\
 	.data.init_task : {						\
-		INIT_TASK						\
+		INIT_TASK_DATA(align)					\
 	}
 
 /* init and exit section handling */
@@ -479,7 +474,8 @@
  * bss (Block Started by Symbol) - uninitialized data
  * zeroed during startup
  */
-#define SBSS								\
+#define SBSS(sbss_align)						\
+	. = ALIGN(sbss_align);						\
 	.sbss : AT(ADDR(.sbss) - LOAD_OFFSET) {				\
 		*(.sbss)						\
 		*(.scommon)						\
@@ -488,12 +484,10 @@
 #define BSS(bss_align)							\
 	. = ALIGN(bss_align);						\
 	.bss : AT(ADDR(.bss) - LOAD_OFFSET) {				\
-		VMLINUX_SYMBOL(__bss_start) = .;			\
 		*(.bss.page_aligned)					\
 		*(.dynbss)						\
 		*(.bss)							\
 		*(COMMON)						\
-		VMLINUX_SYMBOL(__bss_stop) = .;				\
 	}
 
 /*
@@ -616,8 +610,25 @@
 	*(.init.ramfs)							\
 	VMLINUX_SYMBOL(__initramfs_end) = .;
 #else
-#define INITRAMFS
+#define INIT_RAM_FS
 #endif
+
+/*
+ * Default discarded sections.
+ *
+ * Some archs want to discard exit text/data at runtime rather than
+ * link time due to cross-section references such as alt instructions,
+ * bug table, eh_frame, etc.  DISCARDS must be the last of output
+ * section definitions so that such archs put those in earlier section
+ * definitions.
+ */
+#define DISCARDS                                                       \
+	/DISCARD/ : {                                                  \
+	EXIT_TEXT                                                      \
+	EXIT_DATA                                                      \
+	EXIT_CALL                                                      \
+	*(.discard)                                                    \
+	}
 
 /**
  * PERCPU_VADDR - define output section for percpu area
@@ -695,15 +706,15 @@
  * matches the requirment of PAGE_ALIGNED_DATA.
  *
  * use 0 as page_align if page_aligned data is not used */
-#define RW_DATA_SECTION(cacheline, nosave, pagealigned, inittask)	\
+#define RW_DATA_SECTION(cacheline, pagealigned, inittask)		\
 	. = ALIGN(PAGE_SIZE);						\
 	.data : AT(ADDR(.data) - LOAD_OFFSET) {				\
-		INIT_TASK(inittask)					\
+		INIT_TASK_DATA(inittask)				\
 		CACHELINE_ALIGNED_DATA(cacheline)			\
 		READ_MOSTLY_DATA(cacheline)				\
 		DATA_DATA						\
 		CONSTRUCTORS						\
-		NOSAVE_DATA(nosave)					\
+		NOSAVE_DATA						\
 		PAGE_ALIGNED_DATA(pagealigned)				\
 	}
 
@@ -725,8 +736,10 @@
 		INIT_RAM_FS						\
 	}
 
-#define BSS_SECTION(sbss_align, bss_align)				\
-	SBSS								\
+#define BSS_SECTION(sbss_align, bss_align, stop_align)			\
+	. = ALIGN(sbss_align);						\
+	VMLINUX_SYMBOL(__bss_start) = .;				\
+	SBSS(sbss_align)						\
 	BSS(bss_align)							\
-	. = ALIGN(4);
-
+	. = ALIGN(stop_align);						\
+	VMLINUX_SYMBOL(__bss_stop) = .;

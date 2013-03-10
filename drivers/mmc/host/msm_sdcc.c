@@ -68,10 +68,6 @@ static int  msmsdcc_dbg_init(void);
 static int msmsdcc_auto_suspend(struct mmc_host *, int);
 #endif
 
-static unsigned int msmsdcc_fmin = 144000;
-static unsigned int msmsdcc_fmid = 24576000;
-static unsigned int msmsdcc_temp = 25000000;
-static unsigned int msmsdcc_fmax = 49152000;
 static unsigned int msmsdcc_pwrsave = 1;
 
 #define DUMMY_52_STATE_NONE		0
@@ -211,7 +207,7 @@ static inline uint32_t msmsdcc_fifo_addr(struct msmsdcc_host *host)
 static inline void msmsdcc_delay(struct msmsdcc_host *host)
 {
 	udelay(1 + ((3 * USEC_PER_SEC) /
-		(host->clk_rate ? host->clk_rate : msmsdcc_fmin)));
+		(host->clk_rate ? host->clk_rate : host->plat->msmsdcc_fmin)));
 }
 
 static inline void
@@ -406,14 +402,30 @@ static int msmsdcc_config_dma(struct msmsdcc_host *host, struct mmc_data *data)
 	/* host->curr.user_pages = (data->flags & MMC_DATA_USERPAGE); */
 	host->curr.user_pages = 0;
 	box = &nc->cmd[0];
-	for (i = 0; i < host->dma.num_ents; i++) {
+
+	/* location of command block must be 64 bit aligned */
+	BUG_ON(host->dma.cmd_busaddr & 0x07);
+
+	nc->cmdptr = (host->dma.cmd_busaddr >> 3) | CMD_PTR_LP;
+	host->dma.hdr.cmdptr = DMOV_CMD_PTR_LIST |
+				DMOV_CMD_ADDR(host->dma.cmdptr_busaddr);
+	host->dma.hdr.complete_func = msmsdcc_dma_complete_func;
+
+	n = dma_map_sg(mmc_dev(host->mmc), host->dma.sg,
+			host->dma.num_ents, host->dma.dir);
+	if (n == 0) {
+		printk(KERN_ERR "%s: Unable to map in all sg elements\n",
+			mmc_hostname(host->mmc));
+		host->dma.sg = NULL;
+		host->dma.num_ents = 0;
+		return -ENOMEM;
+	}
+
+	for_each_sg(host->dma.sg, sg, n, i) {
+
 		box->cmd = CMD_MODE_BOX;
 
-		/* Initialize sg dma address */
-		sg->dma_address = page_to_dma(mmc_dev(host->mmc), sg_page(sg))
-					+ sg->offset;
-
-		if (i == (host->dma.num_ents - 1))
+		if (i == n - 1)
 			box->cmd |= CMD_LC;
 		rows = (sg_dma_len(sg) % MCI_FIFOSIZE) ?
 			(sg_dma_len(sg) / MCI_FIFOSIZE) + 1 :
@@ -441,27 +453,6 @@ static int msmsdcc_config_dma(struct msmsdcc_host *host, struct mmc_data *data)
 			box->cmd |= CMD_DST_CRCI(crci);
 		}
 		box++;
-		sg++;
-	}
-
-	/* location of command block must be 64 bit aligned */
-	BUG_ON(host->dma.cmd_busaddr & 0x07);
-
-	nc->cmdptr = (host->dma.cmd_busaddr >> 3) | CMD_PTR_LP;
-	host->dma.hdr.cmdptr = DMOV_CMD_PTR_LIST |
-			       DMOV_CMD_ADDR(host->dma.cmdptr_busaddr);
-	host->dma.hdr.complete_func = msmsdcc_dma_complete_func;
-
-	n = dma_map_sg(mmc_dev(host->mmc), host->dma.sg,
-			host->dma.num_ents, host->dma.dir);
-	/* dsb inside dma_map_sg will write nc out to mem as well */
-
-	if (n != host->dma.num_ents) {
-		pr_err("%s: Unable to map in all sg elements\n",
-		       mmc_hostname(host->mmc));
-		host->dma.sg = NULL;
-		host->dma.num_ents = 0;
-		return -ENOMEM;
 	}
 
 	return 0;
@@ -1079,17 +1070,14 @@ msmsdcc_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 			host->clks_on = 1;
 		}
 
-		if ((ios->clock < msmsdcc_fmax) && (ios->clock > msmsdcc_fmid))
-			ios->clock = msmsdcc_fmid;
+		if ((ios->clock < host->plat->msmsdcc_fmax) &&
+				(ios->clock > host->plat->msmsdcc_fmid))
+			ios->clock = host->plat->msmsdcc_fmid;
 
 		if (ios->clock != host->clk_rate) {
 			rc = clk_set_rate(host->clk, ios->clock);
-			if (rc < 0) {
-				rc = clk_set_rate(host->clk, msmsdcc_temp);
-				WARN_ON(rc < 0);
-				host->clk_rate = msmsdcc_temp;
-			} else
-				host->clk_rate = ios->clock;
+			WARN_ON(rc < 0);
+			host->clk_rate = ios->clock;
 		}
 		clk |= MCI_CLK_ENABLE;
 	}
@@ -1471,7 +1459,7 @@ msmsdcc_probe(struct platform_device *pdev)
 	if (ret)
 		goto clk_put;
 
-	ret = clk_set_rate(host->clk, msmsdcc_fmin);
+	ret = clk_set_rate(host->clk, plat->msmsdcc_fmin);
 	if (ret) {
 		pr_err("%s: Clock rate set failed (%d)\n", __func__, ret);
 		goto clk_disable;
@@ -1485,12 +1473,15 @@ msmsdcc_probe(struct platform_device *pdev)
 	 * Setup MMC host structure
 	 */
 	mmc->ops = &msmsdcc_ops;
-	mmc->f_min = msmsdcc_fmin;
-	mmc->f_max = msmsdcc_fmax;
+	mmc->f_min = plat->msmsdcc_fmin;
+	mmc->f_max = plat->msmsdcc_fmax;
 	mmc->ocr_avail = plat->ocr_mask;
 	mmc->caps |= plat->mmc_bus_width;
 
 	mmc->caps |= MMC_CAP_MMC_HIGHSPEED | MMC_CAP_SD_HIGHSPEED;
+	
+	if (plat->nonremovable)
+		mmc->caps |= MMC_CAP_NONREMOVABLE;
 #ifdef CONFIG_MMC_MSM_SDIO_SUPPORT
 	mmc->caps |= MMC_CAP_SDIO_IRQ;
 #endif
@@ -1584,7 +1575,8 @@ msmsdcc_probe(struct platform_device *pdev)
 	pr_info("%s: polling status mode %s\n", mmc_hostname(mmc),
 	       (mmc->caps & MMC_CAP_NEEDS_POLL ? "enabled" : "disabled"));
 	pr_info("%s: MMC clock %u -> %u Hz, PCLK %u Hz\n",
-	       mmc_hostname(mmc), msmsdcc_fmin, msmsdcc_fmax, host->pclk_rate);
+	      mmc_hostname(mmc), plat->msmsdcc_fmin, plat->msmsdcc_fmax,
+							host->pclk_rate);
 	pr_info("%s: Slot eject status = %d\n", mmc_hostname(mmc),
 	       host->eject);
 	pr_info("%s: Power save feature enable = %d\n",
@@ -1879,38 +1871,13 @@ static int __init msmsdcc_nopwrsave_setup(char *__unused)
 	msmsdcc_pwrsave = 0;
 	return 1;
 }
-
-
-static int __init msmsdcc_fmin_setup(char *str)
-{
-	unsigned int n;
-
-	if (!get_option(&str, &n))
-		return 0;
-	msmsdcc_fmin = n;
-	return 1;
-}
-
-static int __init msmsdcc_fmax_setup(char *str)
-{
-	unsigned int n;
-
-	if (!get_option(&str, &n))
-		return 0;
-	msmsdcc_fmax = n;
-	return 1;
-}
 #endif
 
 __setup("msmsdcc_pwrsave", msmsdcc_pwrsave_setup);
 __setup("msmsdcc_nopwrsave", msmsdcc_nopwrsave_setup);
-__setup("msmsdcc_fmin=", msmsdcc_fmin_setup);
-__setup("msmsdcc_fmax=", msmsdcc_fmax_setup);
 
 module_init(msmsdcc_init);
 module_exit(msmsdcc_exit);
-module_param(msmsdcc_fmin, uint, 0444);
-module_param(msmsdcc_fmax, uint, 0444);
 
 MODULE_DESCRIPTION("Qualcomm Multimedia Card Interface driver");
 MODULE_LICENSE("GPL");

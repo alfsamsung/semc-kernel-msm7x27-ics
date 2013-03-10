@@ -1,5 +1,12 @@
 
-CROSS_COMPILE=/media/ICS/home-ics/Android/kernel/Toolchain/linaro4.7-2012.09/bin/arm-linux-gnueabihf-
+#Linaro4.7 2012.12
+#CROSS_COMPILE=/media/ICS/home-ics/Android/kernel/Toolchain/linaro4.7-2012.12/bin/arm-linux-gnueabihf-
+
+#Linaro4.7 2013.02-01
+CROSS_COMPILE=/media/ICS/home-ics/Android/kernel/Toolchain/linaro4.7-2013.02-01/bin/arm-linux-gnueabihf-
+
+#Linux 4.4.3
+#CROSS_COMPILE=/media/Alf/home/alf/android/system/prebuilt/linux-x86/toolchain/arm-eabi-4.4.3/bin/arm-eabi-
 
 KERNEL_DIR=/media/ICS/home-ics/Android/kernel/Test-gammel-usb--kernel-new-kgsl-ginger2-6-35
 
@@ -25,6 +32,8 @@ cp ./drivers/net/tun.ko $CP/modules/
 cp ./drivers/staging/zcache/zcache.ko $CP/modules/
 cp ./drivers/staging/ramzswap/ramzswap.ko $CP/modules/
 cp ./fs/cifs/cifs.ko $CP/modules/
+cp ./fs/fuse/fuse.ko $CP/modules/
+cp ./lib/frandom.ko $CP/modules/
 
 #make wifi
 

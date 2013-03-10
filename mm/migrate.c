@@ -136,7 +136,7 @@ static void remove_migration_pte(struct vm_area_struct *vma,
 		page_add_file_rmap(new);
 
 	/* No need to invalidate - it was non-present before */
-	update_mmu_cache(vma, addr, pte);
+	update_mmu_cache(vma, addr, ptep);
 
 out:
 	pte_unmap_unlock(ptep, ptl);
@@ -812,7 +812,7 @@ static struct page *new_page_node(struct page *p, unsigned long private,
 
 	*result = &pm->status;
 
-	return alloc_pages_node(pm->node,
+	return alloc_pages_exact_node(pm->node,
 				GFP_HIGHUSER_MOVABLE | GFP_THISNODE, 0);
 }
 

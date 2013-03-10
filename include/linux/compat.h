@@ -21,6 +21,7 @@
 typedef __compat_uid32_t	compat_uid_t;
 typedef __compat_gid32_t	compat_gid_t;
 
+struct compat_sel_arg_struct;
 struct rusage;
 
 struct compat_itimerspec { 
@@ -183,6 +184,12 @@ asmlinkage ssize_t compat_sys_readv(unsigned long fd,
 		const struct compat_iovec __user *vec, unsigned long vlen);
 asmlinkage ssize_t compat_sys_writev(unsigned long fd,
 		const struct compat_iovec __user *vec, unsigned long vlen);
+asmlinkage ssize_t compat_sys_preadv(unsigned long fd,
+		const struct compat_iovec __user *vec,
+		unsigned long vlen, u32 pos_high, u32 pos_low);
+asmlinkage ssize_t compat_sys_pwritev(unsigned long fd,
+		const struct compat_iovec __user *vec,
+		unsigned long vlen, u32 pos_high, u32 pos_low);
 
 int compat_do_execve(char * filename, compat_uptr_t __user *argv,
 	        compat_uptr_t __user *envp, struct pt_regs * regs);
@@ -190,6 +197,8 @@ int compat_do_execve(char * filename, compat_uptr_t __user *argv,
 asmlinkage long compat_sys_select(int n, compat_ulong_t __user *inp,
 		compat_ulong_t __user *outp, compat_ulong_t __user *exp,
 		struct compat_timeval __user *tvp);
+
+asmlinkage long compat_sys_old_select(struct compat_sel_arg_struct __user *arg);
 
 asmlinkage long compat_sys_wait4(compat_pid_t pid,
 				 compat_uint_t __user *stat_addr, int options,

@@ -162,30 +162,21 @@ static long __mlock_vma_pages_range(struct vm_area_struct *vma,
 	struct page *pages[16]; /* 16 gives a reasonable batch */
 	int nr_pages = (end - start) / PAGE_SIZE;
 	int ret = 0;
-	int gup_flags = 0;
+	int gup_flags;
 
 	VM_BUG_ON(start & ~PAGE_MASK);
 	VM_BUG_ON(end   & ~PAGE_MASK);
 	VM_BUG_ON(start < vma->vm_start);
 	VM_BUG_ON(end   > vma->vm_end);
-	VM_BUG_ON((!rwsem_is_locked(&mm->mmap_sem)) &&
-		  (atomic_read(&mm->mm_users) != 0));
+	VM_BUG_ON(!rwsem_is_locked(&mm->mmap_sem));
 
-	/*
-	 * mlock:   don't page populate if vma has PROT_NONE permission.
-	 * munlock: always do munlock although the vma has PROT_NONE
-	 *          permission, or SIGKILL is pending.
-	 */
-	if (!mlock)
-		gup_flags |= GUP_FLAGS_IGNORE_VMA_PERMISSIONS |
-			     GUP_FLAGS_IGNORE_SIGKILL;
-
+	gup_flags = FOLL_TOUCH | FOLL_GET;
 	if (vma->vm_flags & VM_WRITE)
-		gup_flags |= GUP_FLAGS_WRITE;
-
+		gup_flags |= FOLL_WRITE;
+	
 	while (nr_pages > 0) {
 		int i;
-
+		
 		cond_resched();
 
 		/*
@@ -205,47 +196,32 @@ static long __mlock_vma_pages_range(struct vm_area_struct *vma,
 		 */
 		if (ret < 0)
 			break;
-		if (ret == 0) {
-			/*
-			 * We know the vma is there, so the only time
-			 * we cannot get a single page should be an
-			 * error (ret < 0) case.
-			 */
-			WARN_ON(1);
-			break;
-		}
-
-		lru_add_drain();	/* push cached pages to LRU */
-
+		
+		lru_add_drain();        /* push cached pages to LRU */
+		
 		for (i = 0; i < ret; i++) {
 			struct page *page = pages[i];
 
 			lock_page(page);
 			/*
-			 * Because we lock page here and migration is blocked
-			 * by the elevated reference, we need only check for
-			 * page truncation (file-cache only).
-			 */
-			if (page->mapping) {
-				if (mlock)
-					mlock_vma_page(page);
-				else
-					munlock_vma_page(page);
-			}
+			 *Because we lock page here and migration is blocked
+                        * by the elevated reference, we need only check for
+                        * file-cache page truncation.  This page->mapping
+                        * check also neatly skips over the ZERO_PAGE(),
+                        * though if that's common we'd prefer not to lock it.
+                        */
+			if (page->mapping)
+				mlock_vma_page(page);
 			unlock_page(page);
-			put_page(page);		/* ref from get_user_pages() */
+			put_page(page); /* ref from get_user_pages() */
+		  }
 
-			/*
-			 * here we assume that get_user_pages() has given us
-			 * a list of virtually contiguous pages.
-			 */
-			addr += PAGE_SIZE;	/* for next get_user_pages() */
-			nr_pages--;
-		}
+		addr += ret * PAGE_SIZE;
+		nr_pages -= ret;
 		ret = 0;
 	}
 
-	return ret;	/* count entire vma as locked_vm */
+	return ret;     /* 0 or negative error code */
 }
 
 /*

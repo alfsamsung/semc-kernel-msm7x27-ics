@@ -70,6 +70,7 @@ deps_config := \
 	fs/ext3/Kconfig \
 	fs/ext2/Kconfig \
 	fs/Kconfig \
+	drivers/staging/qcache/Kconfig \
 	drivers/staging/zcache/Kconfig \
 	drivers/staging/zram/Kconfig \
 	drivers/staging/snappy/Kconfig \

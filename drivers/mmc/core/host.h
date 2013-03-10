@@ -15,6 +15,8 @@
 int mmc_register_host_class(void);
 void mmc_unregister_host_class(void);
 
+void mmc_host_deeper_disable(struct work_struct *work);
+
 #ifdef CONFIG_MMC_CLKGATE
 void mmc_host_clk_ungate(struct mmc_host *host);
 void mmc_host_clk_gate(struct mmc_host *host);

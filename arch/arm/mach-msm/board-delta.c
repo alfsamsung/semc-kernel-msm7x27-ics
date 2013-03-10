@@ -112,8 +112,8 @@
 #ifdef CONFIG_SEMC_GPIO_EXTR
 #include  <linux/semc/semc_gpio_extr.h>
 #endif
-#define MSM_PMEM_MDP_SIZE	0xBEC000	//0xb21000(small)	//0xC74000-org
-#define MSM_PMEM_ADSP_SIZE	0x7BA000 	//0x7EA000	//0x900000-org
+#define MSM_PMEM_MDP_SIZE	0xB70000	//OK,0xBAA000	//0xb21000(small)	//0xC74000-org
+#define MSM_PMEM_ADSP_SIZE	0x6A0000 	//0x7EA000	//0x900000-org
 #ifdef CONFIG_CAPTURE_KERNEL
 #include "smd_private.h"
 #endif
@@ -135,13 +135,15 @@
 	defined(CONFIG_MACH_MSM7X27_MIMMI)
 #define MSM_FB_SIZE		0x70000
 #elif	defined(CONFIG_MACH_MSM7X27_SHAKIRA)
+#ifdef CONFIG_FB_MSM_TRIPLE_BUFFER
+#define MSM_FB_SIZE    		0x101000 
+#else
 #define MSM_FB_SIZE		0xB6000
+#endif
 #else
 #warning "Warning, fb size not configured in board config. Assuming HVGA."
 #define MSM_FB_SIZE		0xB6000
 #endif
-
-#define MSM_GPU_PHYS_BASE    SZ_4M
 
 #define PMEM_KERNEL_EBI1_SIZE	0x1C000
 
@@ -875,7 +877,6 @@ static struct android_pmem_platform_data android_pmem_kernel_ebi1_pdata = {
 	.cached = 0,
 };
 
-
 static struct android_pmem_platform_data android_pmem_pdata = {
 	.name = "pmem",
 	.allocator_type = PMEM_ALLOCATORTYPE_BITMAP,
@@ -1054,37 +1055,34 @@ static struct resource kgsl_3d0_resources[] = {
 	},
 };
 
-static struct kgsl_device_platform_data kgsl_3d0_pdata;/* = {
+static struct kgsl_device_platform_data kgsl_3d0_pdata = {
 	.pwr_data = {
-	.pwrlevel = {
-		{
-			.gpu_freq = 0, 		//200000000,
-			.bus_freq = 196800000,
-		},
-		{
-			.gpu_freq = 0, 		//160000000, 
-			.bus_freq = 122880000,
-		},
-		{
-			.gpu_freq = 0,		//122880000,
-			.bus_freq = 61440000,
-		},
-	},
-	.init_level = 0,
-	.num_levels = 3,
-	.set_grp_async = NULL,
-	.idle_timeout = HZ/5, 	//HZ/20,
-	},
-	.clk = {
-		.name = {
-			.clk = "grp_clk",
-			.pclk = "grp_pclk",
-		},
-     },
-	.imem_clk_name = {
+		/* bus_freq has been set to 160000 for power savings.
+		 * OEMs may modify the value at their discretion for performance
+		 * The appropriate maximum replacement for 160000 is:
+		 * msm7x2x_clock_data.max_axi_khz
+		 */
+		.pwrlevel = {
+			  {
+				  .gpu_freq = 0,
+				  .bus_freq = 200000000,
+			  },
+		  },
+		  .init_level = 0,
+		  .num_levels = 1,
+		  .set_grp_async = NULL,
+		  .idle_timeout = HZ/5,
+	  },
+	  .clk = {
+		  .name = {
+			  .clk = "grp_clk",
+			  .pclk = "grp_pclk",
+		  },
+	  },
+	  .imem_clk_name = {
 		.clk = "imem_clk",
 	},
-}; */
+};
 
 static struct platform_device msm_kgsl_3d0 = {
 	.name = "kgsl-3d0",
@@ -1884,11 +1882,14 @@ static void __init msm_mddi_toshiba_hvga_display_device_init(void)
 	panel_data->panel_info.pdest = DISPLAY_1;
 	panel_data->panel_info.wait_cycle = 0;
 	panel_data->panel_info.bpp = 16;
-	panel_data->panel_info.clk_rate = 153600000;
-	panel_data->panel_info.clk_min =  150000000;
+	panel_data->panel_info.clk_rate = 153600000;	//ALFS TEST org 153600000;
+	panel_data->panel_info.clk_min = 122880000;	//150000000;
 	panel_data->panel_info.clk_max = 160000000;
+#ifdef CONFIG_FB_MSM_TRIPLE_BUFFER
+	panel_data->panel_info.fb_num = 3;
+#else
 	panel_data->panel_info.fb_num = 2;
-
+#endif
 	panel_data->panel_info.mddi.vdopkt = MDDI_DEFAULT_PRIM_PIX_ATTR;
 
 #ifdef CONFIG_MSM7X27_VSYNC_ENABLE
@@ -1973,10 +1974,14 @@ static void __init msm_mddi_hitachi_hvga_display_device_init(void)
 	panel_data->panel_info.pdest = DISPLAY_1;
 	panel_data->panel_info.wait_cycle = 0;
 	panel_data->panel_info.bpp = 16;
-	panel_data->panel_info.clk_rate = 153600000;
-	panel_data->panel_info.clk_min = 150000000;
+	panel_data->panel_info.clk_rate = 153600000;	//ALFS TEST org 153600000;
+	panel_data->panel_info.clk_min = 122880000;	//150000000;
 	panel_data->panel_info.clk_max = 160000000;
+#ifdef CONFIG_FB_MSM_TRIPLE_BUFFER
+	panel_data->panel_info.fb_num = 3;
+#else
 	panel_data->panel_info.fb_num = 2;
+#endif
 	
 	panel_data->panel_info.mddi.vdopkt = MDDI_DEFAULT_PRIM_PIX_ATTR;
 
@@ -2171,7 +2176,7 @@ do { \
 } while (0)
 
 static char *msm_fb_vreg[] = {
-	"gp1",
+//	"gp1",
 	"gp2",
 };
 
@@ -2187,19 +2192,17 @@ static int msm_fb_mddi_power_save(int on)
 	mddi_power_save_on = flag_on;
 
 	if (on) {
-		MSM_FB_LCDC_VREG_OP(msm_fb_vreg[0], enable, 1800);
-		MSM_FB_LCDC_VREG_OP(msm_fb_vreg[1], enable, 2800);
+//		MSM_FB_LCDC_VREG_OP(msm_fb_vreg[0], enable, 1800);
+		MSM_FB_LCDC_VREG_OP(msm_fb_vreg[0], enable, 2800);
 	} else{
+//		MSM_FB_LCDC_VREG_OP(msm_fb_vreg[0], disable, 0);
 		MSM_FB_LCDC_VREG_OP(msm_fb_vreg[0], disable, 0);
-		MSM_FB_LCDC_VREG_OP(msm_fb_vreg[1], disable, 0);
 	}
 
 	return 0;
 }
 
-
 /* SEMC:SYS: Added by Qualcomm from 3135Y end */
-
 /*static int msm_fb_mddi_sel_clk(u32 *clk_rate)
 {
 	*clk_rate *= 2;
@@ -2208,7 +2211,7 @@ static int msm_fb_mddi_power_save(int on)
 
 static struct mddi_platform_data mddi_pdata = {
 	.mddi_power_save = msm_fb_mddi_power_save,
-//	.mddi_sel_clk = msm_fb_mddi_sel_clk,		// ALFS ??
+//	.mddi_sel_clk = msm_fb_mddi_sel_clk,
 };
 
 static struct msm_panel_common_pdata mdp_pdata = {
@@ -2219,7 +2222,7 @@ static struct msm_panel_common_pdata mdp_pdata = {
 static void __init msm_fb_add_devices(void)
 {
 	msm_fb_register_device("mdp", &mdp_pdata);
-	msm_fb_register_device("pmdh", &mddi_pdata); 	//0);
+	msm_fb_register_device("pmdh", &mddi_pdata);
 }
 
 
@@ -2232,7 +2235,7 @@ static void __init msm7x2x_init_irq(void)
 
 static struct msm_acpu_clock_platform_data msm7x27_clock_data = {
 	.acpu_switch_time_us = 50,
-	.max_speed_delta_khz = 400000,	//256000 alf ny 400000
+	.max_speed_delta_khz = 400000,
 	.vdd_switch_time_us = 62,
 	.max_axi_khz = 200000,
 //org	.max_axi_khz = 160000,
@@ -2241,114 +2244,91 @@ static struct msm_acpu_clock_platform_data msm7x27_clock_data = {
 void msm_serial_debug_init(unsigned int base, int irq,
 			   struct device *clk_device, int signal_irq);
 
-static void sdcc_gpio_init(void)
-{
-	/* SD Card detection */
-	if (gpio_request(49, "CARD_INS_N"))
-		pr_err("failed to request gpio CARD_INS_N\n");
+#if (defined(CONFIG_MMC_MSM_SDC1_SUPPORT)\
+	|| defined(CONFIG_MMC_MSM_SDC2_SUPPORT))
+	
+static unsigned long vreg_sts, gpio_sts;
+static struct vreg *vreg_mmc;
 
-	/* SDC1 GPIOs */
-#ifdef CONFIG_MMC_MSM_SDC1_SUPPORT
-	if (gpio_request(51, "sdc1_data_3"))
-		pr_err("failed to request gpio sdc1_data_3\n");
-	if (gpio_request(52, "sdc1_data_2"))
-		pr_err("failed to request gpio sdc1_data_2\n");
-	if (gpio_request(53, "sdc1_data_1"))
-		pr_err("failed to request gpio sdc1_data_1\n");
-	if (gpio_request(54, "sdc1_data_0"))
-		pr_err("failed to request gpio sdc1_data_0\n");
-	if (gpio_request(55, "sdc1_cmd"))
-		pr_err("failed to request gpio sdc1_cmd\n");
-	if (gpio_request(56, "sdc_clk"))
-		pr_err("failed to request gpio sdc_clk\n");
-#endif
-
-	/* SDC2 GPIOs */
-#ifdef CONFIG_MMC_MSM_SDC2_SUPPORT
-	if (gpio_request(62, "sdc2_clk"))
-		pr_err("failed to request gpio sdc2_clk\n");
-	if (gpio_request(63, "sdc2_cmd"))
-		pr_err("failed to request gpio sdc2_cmd\n");
-	if (gpio_request(64, "sdc2_data_3"))
-		pr_err("failed to request gpio sdc2_data_3\n");
-	if (gpio_request(65, "sdc2_data_2"))
-		pr_err("failed to request gpio sdc2_data_2\n");
-	if (gpio_request(66, "sdc2_data_1"))
-		pr_err("failed to request gpio sdc2_data_1\n");
-	if (gpio_request(67, "sdc2_data_0"))
-		pr_err("failed to request gpio sdc2_data_0\n");
-#endif
-}
-
-struct sdc_cfg_data {
-	unsigned cfg_size;
-	unsigned *cfg_data;
+struct sdcc_gpio {
+	struct msm_gpio *cfg_data;
+	uint32_t size;
+	struct msm_gpio *sleep_cfg_data;
 };
 
-static unsigned sdcc1_on_cfg_data[] = {
-	GPIO_CFG(51, 1, GPIO_OUTPUT, GPIO_PULL_UP, GPIO_4MA),
-	GPIO_CFG(52, 1, GPIO_OUTPUT, GPIO_PULL_UP, GPIO_4MA),
-	GPIO_CFG(53, 1, GPIO_OUTPUT, GPIO_PULL_UP, GPIO_4MA),
-	GPIO_CFG(54, 1, GPIO_OUTPUT, GPIO_PULL_UP, GPIO_4MA),
-	GPIO_CFG(55, 1, GPIO_OUTPUT, GPIO_PULL_UP, GPIO_4MA),
+static struct msm_gpio sdc1_cfg_data[] = {
+	/* SD Card detection 
+		pr_err("failed to request gpio CARD_INS_N\n");*/
+	{GPIO_CFG(49, 1, GPIO_OUTPUT, GPIO_PULL_UP, GPIO_8MA), "CARD_INS_N"},
+	{GPIO_CFG(51, 1, GPIO_OUTPUT, GPIO_PULL_UP, GPIO_8MA), "sdc1_dat_3"},
+	{GPIO_CFG(52, 1, GPIO_OUTPUT, GPIO_PULL_UP, GPIO_8MA), "sdc1_dat_2"},
+	{GPIO_CFG(53, 1, GPIO_OUTPUT, GPIO_PULL_UP, GPIO_8MA), "sdc1_dat_1"},
+	{GPIO_CFG(54, 1, GPIO_OUTPUT, GPIO_PULL_UP, GPIO_8MA), "sdc1_dat_0"},
+	{GPIO_CFG(55, 1, GPIO_OUTPUT, GPIO_PULL_UP, GPIO_8MA), "sdc1_cmd"},
+	{GPIO_CFG(56, 1, GPIO_OUTPUT, GPIO_NO_PULL, GPIO_8MA), "sdc1_clk"},
 };
 
-static unsigned sdcc2_on_cfg_data[] = {
-	GPIO_CFG(62, 2, GPIO_OUTPUT, GPIO_NO_PULL, GPIO_4MA),
-	GPIO_CFG(63, 2, GPIO_OUTPUT, GPIO_PULL_UP, GPIO_4MA),
-	GPIO_CFG(64, 2, GPIO_OUTPUT, GPIO_PULL_UP, GPIO_4MA),
-	GPIO_CFG(65, 2, GPIO_OUTPUT, GPIO_PULL_UP, GPIO_4MA),
-	GPIO_CFG(66, 2, GPIO_OUTPUT, GPIO_PULL_UP, GPIO_4MA),
-	GPIO_CFG(67, 2, GPIO_OUTPUT, GPIO_PULL_UP, GPIO_4MA),
+static struct msm_gpio sdc2_cfg_data[] = {
+	{GPIO_CFG(62, 2, GPIO_OUTPUT, GPIO_NO_PULL, GPIO_8MA), "sdc2_clk"},
+	{GPIO_CFG(63, 2, GPIO_OUTPUT, GPIO_PULL_UP, GPIO_8MA), "sdc2_cmd"},
+	{GPIO_CFG(64, 2, GPIO_OUTPUT, GPIO_PULL_UP, GPIO_8MA), "sdc2_dat_3"},
+	{GPIO_CFG(65, 2, GPIO_OUTPUT, GPIO_PULL_UP, GPIO_8MA), "sdc2_dat_2"},
+	{GPIO_CFG(66, 2, GPIO_OUTPUT, GPIO_PULL_UP, GPIO_8MA), "sdc2_dat_1"},
+	{GPIO_CFG(67, 2, GPIO_OUTPUT, GPIO_PULL_UP, GPIO_8MA), "sdc2_dat_0"},
 };
 
-static struct sdc_cfg_data sdcc_on_cfg_data[] = {
-	/* SDC1 configs */
-	{
-		.cfg_size = ARRAY_SIZE(sdcc1_on_cfg_data),
-		.cfg_data = sdcc1_on_cfg_data,
-	},
-	/* SDC2 configs (WLAN) */
-	{
-		.cfg_size = ARRAY_SIZE(sdcc2_on_cfg_data),
-		.cfg_data = sdcc2_on_cfg_data,
-	},
+static struct msm_gpio sdc2_sleep_cfg_data[] = {
+	{GPIO_CFG(62, 0, GPIO_INPUT, GPIO_PULL_DOWN, GPIO_2MA), "sdc2_clk"},
+	{GPIO_CFG(63, 0, GPIO_INPUT, GPIO_PULL_DOWN, GPIO_2MA), "sdc2_cmd"},
+	{GPIO_CFG(64, 0, GPIO_INPUT, GPIO_PULL_DOWN, GPIO_2MA), "sdc2_dat_3"},
+	{GPIO_CFG(65, 0, GPIO_INPUT, GPIO_PULL_DOWN, GPIO_2MA), "sdc2_dat_2"},
+	{GPIO_CFG(66, 0, GPIO_INPUT, GPIO_PULL_DOWN, GPIO_2MA), "sdc2_dat_1"},
+	{GPIO_CFG(67, 0, GPIO_INPUT, GPIO_PULL_DOWN, GPIO_2MA), "sdc2_dat_0"},
+};
+/*
+static struct msm_gpio sdc3_cfg_data[] = {
+	{GPIO_CFG(88, 1, GPIO_OUTPUT, GPIO_NO_PULL, GPIO_8MA), "sdc3_clk"},
+	{GPIO_CFG(89, 1, GPIO_OUTPUT, GPIO_PULL_UP, GPIO_8MA), "sdc3_cmd"},
+	{GPIO_CFG(90, 1, GPIO_OUTPUT, GPIO_PULL_UP, GPIO_8MA), "sdc3_dat_3"},
+	{GPIO_CFG(91, 1, GPIO_OUTPUT, GPIO_PULL_UP, GPIO_8MA), "sdc3_dat_2"},
+	{GPIO_CFG(92, 1, GPIO_OUTPUT, GPIO_PULL_UP, GPIO_8MA), "sdc3_dat_1"},
+	{GPIO_CFG(93, 1, GPIO_OUTPUT, GPIO_PULL_UP, GPIO_8MA), "sdc3_dat_0"},
 };
 
-static unsigned sdcc1_off_cfg_data[] = {
-	GPIO_CFG(51, 1, GPIO_OUTPUT, GPIO_PULL_DOWN, GPIO_2MA),
-	GPIO_CFG(52, 1, GPIO_OUTPUT, GPIO_PULL_DOWN, GPIO_2MA),
-	GPIO_CFG(53, 1, GPIO_OUTPUT, GPIO_PULL_DOWN, GPIO_2MA),
-	GPIO_CFG(54, 1, GPIO_OUTPUT, GPIO_PULL_DOWN, GPIO_2MA),
-	GPIO_CFG(55, 1, GPIO_OUTPUT, GPIO_PULL_DOWN, GPIO_2MA),
-};
+static struct msm_gpio sdc4_cfg_data[] = {
+	{GPIO_CFG(19, 3, GPIO_OUTPUT, GPIO_PULL_UP, GPIO_8MA), "sdc4_dat_3"},
+	{GPIO_CFG(20, 3, GPIO_OUTPUT, GPIO_PULL_UP, GPIO_8MA), "sdc4_dat_2"},
+	{GPIO_CFG(21, 4, GPIO_OUTPUT, GPIO_PULL_UP, GPIO_8MA), "sdc4_dat_1"},
+	{GPIO_CFG(107, 1, GPIO_OUTPUT, GPIO_PULL_UP, GPIO_8MA), "sdc4_cmd"},
+	{GPIO_CFG(108, 1, GPIO_OUTPUT, GPIO_PULL_UP, GPIO_8MA), "sdc4_dat_0"},
+	{GPIO_CFG(109, 1, GPIO_OUTPUT, GPIO_NO_PULL, GPIO_8MA), "sdc4_clk"},
+};	*/
 
-static unsigned sdcc2_off_cfg_data[] = {
-	GPIO_CFG(62, 2, GPIO_OUTPUT, GPIO_NO_PULL, GPIO_4MA),
-	GPIO_CFG(63, 0, GPIO_INPUT, GPIO_PULL_UP, GPIO_4MA),
-	GPIO_CFG(64, 0, GPIO_INPUT, GPIO_PULL_UP, GPIO_4MA),
-	GPIO_CFG(65, 0, GPIO_INPUT, GPIO_PULL_UP, GPIO_4MA),
-	GPIO_CFG(66, 0, GPIO_INPUT, GPIO_PULL_UP, GPIO_4MA),
-	GPIO_CFG(67, 0, GPIO_INPUT, GPIO_PULL_UP, GPIO_4MA),
-};
-
-static struct sdc_cfg_data sdcc_off_cfg_data[] = {
-	/* SDC1 configs off */
-	{
-		.cfg_size = ARRAY_SIZE(sdcc1_off_cfg_data),
-		.cfg_data = sdcc1_off_cfg_data,
-	},
-	{
-	/* SDC2 configs (WLAN) off */
-		.cfg_size = ARRAY_SIZE(sdcc2_off_cfg_data),
-		.cfg_data = sdcc2_off_cfg_data,
-	}
+static struct sdcc_gpio sdcc_cfg_data[] = {
+	  {
+		.cfg_data = sdc1_cfg_data,
+		.size = ARRAY_SIZE(sdc1_cfg_data),
+		.sleep_cfg_data = NULL,
+	  },
+	  {
+		.cfg_data = sdc2_cfg_data,
+		.size = ARRAY_SIZE(sdc2_cfg_data),
+		.sleep_cfg_data = sdc2_sleep_cfg_data,
+	  },
+/*	  {
+		.cfg_data = sdc3_cfg_data,
+		.size = ARRAY_SIZE(sdc3_cfg_data),
+		.sleep_cfg_data = NULL,
+	  },
+	  {
+		.cfg_data = sdc4_cfg_data,
+		.size = ARRAY_SIZE(sdc4_cfg_data),
+		.sleep_cfg_data = NULL,
+	}, */
 };
 
 static unsigned wifi_init_gpio_en[] = {
-
 	GPIO_CFG(93, 0, GPIO_OUTPUT, GPIO_NO_PULL, GPIO_2MA),  /* WLAN EN */
-
 };
 
 static void wlan_init_seq(void)
@@ -2374,7 +2354,6 @@ static void wlan_init_seq(void)
 
 }
 
-
 static unsigned long vreg_sts, gpio_sts;
 static struct vreg *vreg_mmc;
 enum {
@@ -2386,42 +2365,27 @@ enum {
 };
 static void msm_sdcc_setup_gpio(int dev_id, unsigned int enable)
 {
-	int i, rc;
+	int rc = 0;
+	struct sdcc_gpio *curr;
+ 
+	curr = &sdcc_cfg_data[dev_id - 1];
 	if (!(test_bit(dev_id, &gpio_sts)^enable))
 		return;
 
-	if (enable)
+	if (enable) {
 		set_bit(dev_id, &gpio_sts);
-	else
+		rc = msm_gpios_request_enable(curr->cfg_data, curr->size);
+		if (rc)
+			printk(KERN_ERR "%s: Failed to turn on GPIOs for slot %d\n",
+				__func__,  dev_id);
+	} else {
 		clear_bit(dev_id, &gpio_sts);
-
-	if (!enable) {
-		int idx = dev_id - 1;
-		for (i = 0; i < sdcc_off_cfg_data[idx].cfg_size; i++) {
-			rc = gpio_tlmm_config(
-				sdcc_off_cfg_data[idx].cfg_data[i],
-				GPIO_ENABLE);
-			if (rc)
-				printk(KERN_ERR
-					"%s: gpio_tlmm_config(%#x)=%d\n",
-					__func__,
-					sdcc_off_cfg_data[idx].cfg_data[i],
-					rc);
+		if (curr->sleep_cfg_data) {
+			msm_gpios_enable(curr->sleep_cfg_data, curr->size);
+			msm_gpios_free(curr->sleep_cfg_data, curr->size);
+			return;
 		}
-	}
-	else {
-		int idx = dev_id - 1;
-		for (i = 0; i < sdcc_on_cfg_data[idx].cfg_size; i++) {
-			rc = gpio_tlmm_config(
-				sdcc_on_cfg_data[idx].cfg_data[i],
-				GPIO_ENABLE);
-			if (rc)
-				printk(KERN_ERR
-					"%s: gpio_tlmm_config(%#x)=%d\n",
-					__func__,
-					sdcc_on_cfg_data[idx].cfg_data[i],
-					rc);
-		}
+		msm_gpios_disable_free(curr->cfg_data, curr->size);
 	}
 }
 
@@ -2451,9 +2415,7 @@ static uint32_t msm_sdcc_setup_power(struct device *dv, unsigned int vdd)
 		else if ((vreg_sts & STS_WLAN) && (pdev->id == 2)) {
 			msm_sdcc_setup_gpio(pdev->id, !!vdd);
 		}
-		else {
 		/* SDCC 3 and SDCC 4 are not used in delta do nothing. */
-		}
 
 		clear_bit(pdev->id, &vreg_sts);
 		return 0;
@@ -2477,9 +2439,7 @@ static uint32_t msm_sdcc_setup_power(struct device *dv, unsigned int vdd)
 	else if (((vreg_sts & STS_WLAN) == 0) && (pdev->id == 2)) {
 			msm_sdcc_setup_gpio(pdev->id, !!vdd);
 	}
-	else {
 	/* SDCC 3 and SDCC 4 are not used in delta do nothing. */
-	}
 
 	set_bit(pdev->id, &vreg_sts);
 	return 0;
@@ -2502,11 +2462,19 @@ static struct mmc_platform_data msm7x27_sdcc_data1 = {
 	.status_irq	= MSM_GPIO_TO_INT(49),
 	.irq_flags = IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING,
 	.mmc_bus_width = MMC_CAP_4_BIT_DATA,
+	.msmsdcc_fmin   = 144000,
+	.msmsdcc_fmid   = 24576000,
+	.msmsdcc_fmax   = 49152000,
+	.nonremovable   = 0,
 };
 
 static struct mmc_platform_data msm7x27_sdcc_data2 = {
 	.ocr_mask	= MMC_VDD_28_29,
 	.translate_vdd	= msm_sdcc_setup_power,
+	.msmsdcc_fmin   = 144000,
+	.msmsdcc_fmid   = 24576000,
+	.msmsdcc_fmax   = 49152000,
+	.nonremovable   = 0,
 };
 
 static void __init msm7x2x_init_mmc(void)
@@ -2521,15 +2489,18 @@ static void __init msm7x2x_init_mmc(void)
 		return;
 	}
 
-	sdcc_gpio_init();
 #ifdef CONFIG_MMC_MSM_SDC1_SUPPORT
 	msm_add_sdcc(1, &msm7x27_sdcc_data1);
 #endif
 
 #ifdef CONFIG_MMC_MSM_SDC2_SUPPORT
+	//msm_device_sdc2.name = "TIWLAN_SDIO";
+	msm_sdcc_setup_gpio(2, 1);
 	msm_add_sdcc(2, &msm7x27_sdcc_data2);
+
 #endif
 }
+#endif
 
 static struct msm_pm_platform_data msm7x27_pm_data[MSM_PM_SLEEP_MODE_NR] = {
 	[MSM_PM_SLEEP_MODE_POWER_COLLAPSE] = {
@@ -2628,6 +2599,7 @@ static struct msm_serial_hs_platform_data bt_uart_platform_data_delta = {
 
 static void __init msm7x2x_init(void)
 {
+	msm_clock_init(msm_clocks_7x27, msm_num_clocks_7x27);
 	
 	/* Toggle WLAN ENABLE */
 	wlan_init_seq();
@@ -2635,38 +2607,8 @@ static void __init msm7x2x_init(void)
 	if (cpu_is_msm7x27())
 		msm7x27_clock_data.max_axi_khz = 200000;
 						  
-
 	msm_acpu_clock_init(&msm7x27_clock_data);
-	/*'OLD' kgsl_pdata.high_axi_3d = clk_get_max_axi_khz();*/
-	kgsl_3d0_pdata.pwr_data.pwrlevel[0].bus_freq = (clk_get_max_axi_khz()) * 1000;
-	
-	/* This value has been set to 160000 for power savings. */
-	/* OEMs may modify the value at their discretion for performance */
-	/* The appropriate maximum replacement for 160000 is: */
-	/*  clk_get_max_axi_khz()  */
-	
-	kgsl_3d0_pdata.pwr_data.pwrlevel[0].gpu_freq = 0;
-	////kgsl_3d0_pdata.pwr_data.pwrlevel[0].bus_freq = 160000000;
-	kgsl_3d0_pdata.pwr_data.init_level = 0;
-	kgsl_3d0_pdata.pwr_data.num_levels = 1;
-	/* 7x27 doesn't allow graphics clocks to be run asynchronously to */
-	/* the AXI bus */
-	kgsl_3d0_pdata.pwr_data.set_grp_async = NULL;
-	kgsl_3d0_pdata.pwr_data.idle_timeout = HZ/5;
-	// //kgsl_3d0_pdata.pwr_data.nap_allowed = true;
-	kgsl_3d0_pdata.clk.name.clk = "grp_clk";
-	kgsl_3d0_pdata.clk.name.pclk = "grp_pclk";
-	kgsl_3d0_pdata.imem_clk_name.clk = "imem_clk";
-	
-//#ifdef CONFIG_KGSL_PER_PROCESS_PAGE_TABLE
-	//kgsl_pdata.pt_va_size = SZ_32M;
-	/* Maximum of 32 concurrent processes */
-	//kgsl_pdata.pt_max_count = 32;
-//#else
-	//kgsl_pdata.pt_va_size = SZ_128M;
-	/* We only ever have one pagetable for everybody */
-	//kgsl_pdata.pt_max_count = 1;
-//#endif	
+
         msm_device_hsusb_peripheral.dev.platform_data = &msm_hsusb_pdata;
 	msm_device_otg.dev.platform_data = &msm_otg_pdata;
 
@@ -2676,6 +2618,8 @@ static void __init msm7x2x_init(void)
 	msm_device_gadget_peripheral.dev.platform_data = &msm_gadget_pdata;
 	msm_device_hsusb_host.dev.platform_data = &msm_hsusb_pdata;
 	msm_device_uart_dm1.dev.platform_data = &bt_uart_platform_data_delta;
+	platform_add_devices(msm_footswitch_devices,
+			      msm_num_footswitch_devices);
 	platform_add_devices(devices, ARRAY_SIZE(devices));
 	
 #if defined (CONFIG_DLT001_CAMERA) || defined (CONFIG_DLT002_CAMERA)
@@ -2734,7 +2678,7 @@ static void __init msm_msm7x2x_allocate_memory_regions(void)
 {
 	void *addr;
 	unsigned long size;
-
+	
 	size = pmem_mdp_size;
 	if (size) {
 		addr = alloc_bootmem(size);
@@ -2759,7 +2703,7 @@ static void __init msm_msm7x2x_allocate_memory_regions(void)
 	msm_fb_resources[0].end = msm_fb_resources[0].start + size - 1;
 	pr_info("allocating %lu bytes at %p (%lx physical) for fb\n",
 		size, addr, __pa(addr));
-
+	
 	size = pmem_kernel_ebi1_size;
 	if (size) {
 		addr = alloc_bootmem_aligned(size, 0x100000);
@@ -2768,20 +2712,11 @@ static void __init msm_msm7x2x_allocate_memory_regions(void)
 		pr_info("allocating %lu bytes at %p (%lx physical) for kernel"
 			" ebi1 pmem arena\n", size, addr, __pa(addr));
 	}
-
-	
 }
 
 static void __init msm7x2x_map_io(void)
 {
 	msm_map_common_io();
-	/* Technically dependent on the SoC but using machine_is
-	 * macros since socinfo is not available this early and there
-	 * are plans to restructure the code which will eliminate the
-	 * need for socinfo.
-	 */
-	msm_clock_init(msm_clocks_7x27, msm_num_clocks_7x27);
-
 	msm_msm7x2x_allocate_memory_regions();
 	
 	if (socinfo_init() < 0)
@@ -2792,16 +2727,14 @@ static void __init msm7x2x_map_io(void)
 	    64Kb/Way and 4-Way Associativity;
 	    evmon/parity/share disabled.
 	    Shakira X8= v3, id=43, ver=0.0, raw_id=0, raw_ver=0, hw_plat=0*/
-	//if ((SOCINFO_VERSION_MAJOR(socinfo_get_version()) > 1)
-		//|| ((SOCINFO_VERSION_MAJOR(socinfo_get_version()) == 1)
-		//&& (SOCINFO_VERSION_MINOR(socinfo_get_version()) >= 3)))
-	
-		/* R/W latency: 4 cycles; For version >1 or v1 and minor >= 3*/
-		l2x0_init(MSM_L2CC_BASE, 0x0006801B, 0xfe000000);
-	//else
-		/* R/W latency: 3 cycles; */
-		//l2x0_init(MSM_L2CC_BASE, 0x00068012, 0xfe000000);
-
+	if ((SOCINFO_VERSION_MAJOR(socinfo_get_version()) > 1)
+			|| ((SOCINFO_VERSION_MAJOR(socinfo_get_version()) == 1)
+			&& (SOCINFO_VERSION_MINOR(socinfo_get_version()) >= 3)))
+			/* R/W latency: 4 cycles; */
+			l2x0_init(MSM_L2CC_BASE, 0x0006801B, 0xfe000000);
+		else
+			/* R/W latency: 3 cycles; */
+			l2x0_init(MSM_L2CC_BASE, 0x00068012, 0xfe000000);
 #endif
 }
 

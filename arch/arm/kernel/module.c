@@ -16,12 +16,13 @@
 #include <linux/mm.h>
 #include <linux/elf.h>
 #include <linux/vmalloc.h>
-#include <linux/slab.h>
 #include <linux/fs.h>
 #include <linux/string.h>
+#include <linux/gfp.h>
 
 #include <asm/pgtable.h>
 #include <asm/sections.h>
+#include <asm/unwind.h>
 
 #ifdef CONFIG_XIP_KERNEL
 /*
@@ -96,6 +97,10 @@ apply_relocate(Elf32_Shdr *sechdrs, const char *strtab, unsigned int symindex,
 		loc = dstsec->sh_addr + rel->r_offset;
 
 		switch (ELF32_R_TYPE(rel->r_info)) {
+		case R_ARM_NONE:
+			/* ignore */
+			break;
+
 		case R_ARM_ABS32:
 			*(u32 *)loc += sym->st_value;
 			break;
@@ -124,6 +129,20 @@ apply_relocate(Elf32_Shdr *sechdrs, const char *strtab, unsigned int symindex,
 			*(u32 *)loc |= offset & 0x00ffffff;
 			break;
 
+		case R_ARM_V4BX:
+		       /* Preserve Rm and the condition code. Alter
+			* other bits to re-code instruction as
+			* MOV PC,Rm.
+			*/
+		       *(u32 *)loc &= 0xf000000f;
+		       *(u32 *)loc |= 0x01a0f000;
+		       break;
+		      
+		case R_ARM_PREL31:
+			offset = *(u32 *)loc + sym->st_value - loc;
+			*(u32 *)loc = offset & 0x7fffffff;
+			break;
+		       
 		case R_ARM_MOVW_ABS_NC:
 		case R_ARM_MOVT_ABS:
 			offset = *(u32 *)loc;
@@ -138,15 +157,6 @@ apply_relocate(Elf32_Shdr *sechdrs, const char *strtab, unsigned int symindex,
 			*(u32 *)loc |= ((offset & 0xf000) << 4) |
 					(offset & 0x0fff);
 			break;
-
-	       case R_ARM_V4BX:
-		       /* Preserve Rm and the condition code. Alter
-			* other bits to re-code instruction as
-			* MOV PC,Rm.
-			*/
-		       *(u32 *)loc &= 0xf000000f;
-		       *(u32 *)loc |= 0x01a0f000;
-		       break;
 
 		default:
 			printk(KERN_ERR "%s: unknown relocation: %u\n",
@@ -166,14 +176,67 @@ apply_relocate_add(Elf32_Shdr *sechdrs, const char *strtab,
 	return -ENOEXEC;
 }
 
-int
-module_finalize(const Elf32_Ehdr *hdr, const Elf_Shdr *sechdrs,
-		struct module *module)
+struct mod_unwind_map {
+	const Elf_Shdr *unw_sec;
+	const Elf_Shdr *txt_sec;
+};
+
+int module_finalize(const Elf32_Ehdr *hdr, const Elf_Shdr *sechdrs,
+		    struct module *mod)
 {
+#ifdef CONFIG_ARM_UNWIND
+	const char *secstrs = (void *)hdr + sechdrs[hdr->e_shstrndx].sh_offset;
+	const Elf_Shdr *s, *sechdrs_end = sechdrs + hdr->e_shnum;
+	struct mod_unwind_map maps[ARM_SEC_MAX];
+	int i;
+	memset(maps, 0, sizeof(maps));
+
+	for (s = sechdrs; s < sechdrs_end; s++) {
+		const char *secname = secstrs + s->sh_name;
+		
+		if (!(s->sh_flags & SHF_ALLOC))
+			continue;
+
+		if (strcmp(".ARM.exidx.init.text", secname) == 0)
+			maps[ARM_SEC_INIT].unw_sec = s;
+		else if (strcmp(".ARM.exidx.devinit.text", secname) == 0)
+			maps[ARM_SEC_DEVINIT].unw_sec = s;
+		else if (strcmp(".ARM.exidx", secname) == 0)
+			maps[ARM_SEC_CORE].unw_sec = s;
+		else if (strcmp(".ARM.exidx.exit.text", secname) == 0)
+			maps[ARM_SEC_EXIT].unw_sec = s;
+		else if (strcmp(".ARM.exidx.devexit.text", secname) == 0)
+			maps[ARM_SEC_DEVEXIT].unw_sec = s;
+		else if (strcmp(".init.text", secname) == 0)
+			maps[ARM_SEC_INIT].txt_sec = s;
+		else if (strcmp(".devinit.text", secname) == 0)
+			maps[ARM_SEC_DEVINIT].txt_sec = s;
+		else if (strcmp(".text", secname) == 0)
+			maps[ARM_SEC_CORE].txt_sec = s;
+		else if (strcmp(".exit.text", secname) == 0)
+			maps[ARM_SEC_EXIT].txt_sec = s;
+		else if (strcmp(".devexit.text", secname) == 0)
+			maps[ARM_SEC_DEVEXIT].txt_sec = s;
+	}
+	for (i = 0; i < ARM_SEC_MAX; i++)
+		if (maps[i].unw_sec && maps[i].txt_sec)
+			mod->arch.unwind[i] =
+				unwind_table_add(maps[i].unw_sec->sh_addr,
+						  maps[i].unw_sec->sh_size,
+						  maps[i].txt_sec->sh_addr,
+						  maps[i].txt_sec->sh_size);
+#endif
 	return 0;
 }
 
 void
 module_arch_cleanup(struct module *mod)
 {
+#ifdef CONFIG_ARM_UNWIND
+	int i;
+
+	for (i = 0; i < ARM_SEC_MAX; i++)
+		if (mod->arch.unwind[i])
+			unwind_table_del(mod->arch.unwind[i]);
+#endif
 }

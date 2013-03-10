@@ -630,7 +630,7 @@ static struct page *alloc_fresh_huge_page_node(struct hstate *h, int nid)
 	if (h->order >= MAX_ORDER)
 		return NULL;
 
-	page = alloc_pages_node(nid,
+	page = alloc_pages_exact_node(nid,
 		htlb_alloc_mask|__GFP_COMP|__GFP_THISNODE|
 						__GFP_REPEAT|__GFP_NOWARN,
 		huge_page_order(h));
@@ -649,7 +649,7 @@ static struct page *alloc_fresh_huge_page_node(struct hstate *h, int nid)
  * Use a helper variable to find the next node and then
  * copy it back to hugetlb_next_nid afterwards:
  * otherwise there's a window in which a racer might
- * pass invalid nid MAX_NUMNODES to alloc_pages_node.
+ * pass invalid nid MAX_NUMNODES to alloc_pages_exact_node.
  * But we don't need to use a spin_lock here: it really
  * doesn't matter if occasionally a racer chooses the
  * same nid as we do.  Move nid forward in the mask even
@@ -1691,7 +1691,7 @@ static void set_huge_ptep_writable(struct vm_area_struct *vma,
 
 	entry = pte_mkwrite(pte_mkdirty(huge_ptep_get(ptep)));
 	if (huge_ptep_set_access_flags(vma, address, ptep, entry, 1)) {
-		update_mmu_cache(vma, address, entry);
+		update_mmu_cache(vma, address, ptep);
 	}
 }
 
@@ -1956,6 +1956,23 @@ static struct page *hugetlbfs_pagecache_page(struct hstate *h,
 	return find_lock_page(mapping, idx);
 }
 
+/* Return whether there is a pagecache page to back given address within VMA */
+static bool hugetlbfs_backed(struct hstate *h,
+			struct vm_area_struct *vma, unsigned long address)
+{
+	struct address_space *mapping;
+	pgoff_t idx;
+	struct page *page;
+
+	mapping = vma->vm_file->f_mapping;
+	idx = vma_hugecache_offset(h, vma, address);
+
+	page = find_get_page(mapping, idx);
+	if (page)
+		put_page(page);
+	return page != NULL;
+}
+
 static int hugetlb_no_page(struct mm_struct *mm, struct vm_area_struct *vma,
 			unsigned long address, pte_t *ptep, unsigned int flags)
 {
@@ -2126,7 +2143,7 @@ int hugetlb_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 	entry = pte_mkyoung(entry);
 	if (huge_ptep_set_access_flags(vma, address, ptep, entry,
 						flags & FAULT_FLAG_WRITE))
-		update_mmu_cache(vma, address, entry);
+		update_mmu_cache(vma, address, ptep);
 
 out_page_table_lock:
 	spin_unlock(&mm->page_table_lock);
@@ -2151,54 +2168,53 @@ follow_huge_pud(struct mm_struct *mm, unsigned long address,
 	return NULL;
 }
 
-static int huge_zeropage_ok(pte_t *ptep, int write, int shared)
-{
-	if (!ptep || write || shared)
-		return 0;
-	else
-		return huge_pte_none(huge_ptep_get(ptep));
-}
-
 int follow_hugetlb_page(struct mm_struct *mm, struct vm_area_struct *vma,
 			struct page **pages, struct vm_area_struct **vmas,
 			unsigned long *position, int *length, int i,
-			int write)
+			unsigned int flags)
 {
 	unsigned long pfn_offset;
 	unsigned long vaddr = *position;
 	int remainder = *length;
 	struct hstate *h = hstate_vma(vma);
-	int zeropage_ok = 0;
-	int shared = vma->vm_flags & VM_SHARED;
-
+	
 	spin_lock(&mm->page_table_lock);
 	while (vaddr < vma->vm_end && remainder) {
 		pte_t *pte;
+		int absent;
 		struct page *page;
 
 		/*
 		 * Some archs (sparc64, sh*) have multiple pte_ts to
-		 * each hugepage.  We have to make * sure we get the
+		 * each hugepage.  We have to make sure we get the
 		 * first, for the page indexing below to work.
 		 */
 		pte = huge_pte_offset(mm, vaddr & huge_page_mask(h));
-		if (huge_zeropage_ok(pte, write, shared))
-			zeropage_ok = 1;
+		absent = !pte || huge_pte_none(huge_ptep_get(pte));
 
-		if (!pte ||
-		    (huge_pte_none(huge_ptep_get(pte)) && !zeropage_ok) ||
-		    (write && !pte_write(huge_ptep_get(pte)))) {
+               /*
+                * When coredumping, it suits get_dump_page if we just return
+                * an error if there's a hole and no huge pagecache to back it.
+                */
+		if (absent &&
+		    ((flags & FOLL_DUMP) && !hugetlbfs_backed(h, vma, vaddr))) {
+			remainder = 0;
+			break;
+		}
+
+		if (absent ||
+		    ((flags & FOLL_WRITE) && !pte_write(huge_ptep_get(pte)))) {
 			int ret;
 
 			spin_unlock(&mm->page_table_lock);
-			ret = hugetlb_fault(mm, vma, vaddr, write);
+			ret = hugetlb_fault(mm, vma, vaddr,
+				(flags & FOLL_WRITE) ? FAULT_FLAG_WRITE : 0);
 			spin_lock(&mm->page_table_lock);
 			if (!(ret & VM_FAULT_ERROR))
 				continue;
 
 			remainder = 0;
-			if (!i)
-				i = -EFAULT;
+			
 			break;
 		}
 
@@ -2206,10 +2222,7 @@ int follow_hugetlb_page(struct mm_struct *mm, struct vm_area_struct *vma,
 		page = pte_page(huge_ptep_get(pte));
 same_page:
 		if (pages) {
-			if (zeropage_ok)
-				pages[i] = ZERO_PAGE(0);
-			else
-				pages[i] = mem_map_offset(page, pfn_offset);
+			pages[i] = mem_map_offset(page, pfn_offset);
 			get_page(pages[i]);
 		}
 
@@ -2233,7 +2246,7 @@ same_page:
 	*length = remainder;
 	*position = vaddr;
 
-	return i;
+	return i ? i : -EFAULT;
 }
 
 void hugetlb_change_protection(struct vm_area_struct *vma,

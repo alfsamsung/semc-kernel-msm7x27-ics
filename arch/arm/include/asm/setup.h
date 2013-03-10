@@ -37,10 +37,6 @@ struct tag_core {
 
 /* it is allowed to have multiple ATAG_MEM nodes */
 #define ATAG_MEM	0x54410002
-/* it is allowed to have multiple ATAG_MEM_RESERVED nodes */
-/* these indicate places where hotpluggable memory is present */
-/* which are not active during boot */
-#define ATAG_MEM_RESERVED	0x5441000A
 
 struct tag_mem32 {
 	__u32	size;
@@ -205,7 +201,8 @@ static struct tagtable __tagtable_##fn __tag = { tag, fn }
 struct membank {
 	unsigned long start;
 	unsigned long size;
-	int           node;
+	unsigned int highmem;
+//	int           node;
 };
 
 struct meminfo {
@@ -215,9 +212,8 @@ struct meminfo {
 
 extern struct meminfo meminfo;
 
-#define for_each_nodebank(iter,mi,no)			\
-	for (iter = 0; iter < (mi)->nr_banks; iter++)	\
-		if ((mi)->bank[iter].node == no)
+#define for_each_bank(iter,mi)                         \
+	for (iter = 0; iter < (mi)->nr_banks; iter++)
 
 #define bank_pfn_start(bank)	__phys_to_pfn((bank)->start)
 #define bank_pfn_end(bank)	__phys_to_pfn((bank)->start + (bank)->size)
@@ -225,18 +221,6 @@ extern struct meminfo meminfo;
 #define bank_phys_start(bank)	(bank)->start
 #define bank_phys_end(bank)	((bank)->start + (bank)->size)
 #define bank_phys_size(bank)	(bank)->size
-
-/*
- * Early command line parameters.
- */
-struct early_params {
-	const char *arg;
-	void (*fn)(char **p);
-};
-
-#define __early_param(name,fn)					\
-static struct early_params __early_##fn __used			\
-__attribute__((__section__(".early_param.init"))) = { name, fn }
 
 #endif  /*  __KERNEL__  */
 

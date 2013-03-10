@@ -32,7 +32,7 @@
  * numbers for r1.
  *
  */
-	.section ".text.head", "ax"
+	__HEAD
 ENTRY(stext)
 	msr	cpsr_c, #PSR_F_BIT | PSR_I_BIT | SVC_MODE @ ensure svc mode
 						@ and irqs disabled

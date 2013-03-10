@@ -61,9 +61,6 @@ struct clk {
 };
 
 #define OFF CLKFLAG_AUTO_OFF
-#define CLK_MIN CLKFLAG_MIN
-#define CLK_MAX CLKFLAG_MAX
-#define CLK_MINMAX (CLK_MIN | CLK_MAX)
 #define NR_CLKS	P_NR_CLKS
 
 enum {

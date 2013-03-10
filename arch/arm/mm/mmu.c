@@ -14,9 +14,10 @@
 #include <linux/bootmem.h>
 #include <linux/mman.h>
 #include <linux/nodemask.h>
+#include <linux/sort.h>
+#include <linux/fs.h>
 
 #include <asm/cputype.h>
-#include <asm/mach-types.h>
 #include <asm/sections.h>
 #include <asm/setup.h>
 #include <asm/sizes.h>
@@ -59,7 +60,7 @@ struct cachepolicy {
 	const char	policy[16];
 	unsigned int	cr_mask;
 	unsigned int	pmd;
-	unsigned int	pte;
+	pteval_t	pte;
 };
 
 static struct cachepolicy cache_policies[] __initdata = {
@@ -97,14 +98,14 @@ static struct cachepolicy cache_policies[] __initdata = {
  * writebuffer to be turned off.  (Note: the write
  * buffer should not be on and the cache off).
  */
-static void __init early_cachepolicy(char **p)
+static int __init early_cachepolicy(char *p)
 {
 	int i;
 
 	for (i = 0; i < ARRAY_SIZE(cache_policies); i++) {
 		int len = strlen(cache_policies[i].policy);
 
-		if (memcmp(*p, cache_policies[i].policy, len) == 0) {
+		if (memcmp(p, cache_policies[i].policy, len) == 0) {
 			cachepolicy = i;
 			cr_alignment &= ~cache_policies[i].cr_mask;
 			cr_no_alignment &= ~cache_policies[i].cr_mask;
@@ -120,36 +121,37 @@ static void __init early_cachepolicy(char **p)
 	}
 	flush_cache_all();
 	set_cr(cr_alignment);
+	return 0;
 }
-__early_param("cachepolicy=", early_cachepolicy);
+early_param("cachepolicy", early_cachepolicy);
 
-static void __init early_nocache(char **__unused)
+static int __init early_nocache(char *__unused)
 {
 	char *p = "buffered";
 	printk(KERN_WARNING "nocache is deprecated; use cachepolicy=%s\n", p);
-	early_cachepolicy(&p);
+	early_cachepolicy(p);
+	return 0;
 }
-__early_param("nocache", early_nocache);
+early_param("nocache", early_nocache);
 
-static void __init early_nowrite(char **__unused)
+static int __init early_nowrite(char *__unused)
 {
 	char *p = "uncached";
 	printk(KERN_WARNING "nowb is deprecated; use cachepolicy=%s\n", p);
-	early_cachepolicy(&p);
+	early_cachepolicy(p);
+	return 0;
 }
-__early_param("nowb", early_nowrite);
+early_param("nowb", early_nowrite);
 
-static void __init early_ecc(char **p)
+static int __init early_ecc(char *p)
 {
-	if (memcmp(*p, "on", 2) == 0) {
+	if (memcmp(p, "on", 2) == 0)
 		ecc_mask = PMD_PROTECTION;
-		*p += 2;
-	} else if (memcmp(*p, "off", 3) == 0) {
+	else if (memcmp(p, "off", 3) == 0)
 		ecc_mask = 0;
-		*p += 3;
-	}
+	return 0;
 }
-__early_param("ecc=", early_ecc);
+early_param("ecc", early_ecc);
 
 static int __init noalign_setup(char *__unused)
 {
@@ -428,8 +430,7 @@ static void __init build_mem_type_table(void)
 
 	pgprot_user   = __pgprot(L_PTE_PRESENT | L_PTE_YOUNG | user_pgprot);
 	pgprot_kernel = __pgprot(L_PTE_PRESENT | L_PTE_YOUNG |
-				 L_PTE_DIRTY | L_PTE_WRITE |
-				 L_PTE_EXEC | kern_pgprot);
+				 L_PTE_DIRTY | L_PTE_WRITE | kern_pgprot);
 
 	mem_types[MT_LOW_VECTORS].prot_l1 |= ecc_mask;
 	mem_types[MT_HIGH_VECTORS].prot_l1 |= ecc_mask;
@@ -457,20 +458,41 @@ static void __init build_mem_type_table(void)
 	}
 }
 
+#ifdef CONFIG_ARM_DMA_MEM_BUFFERABLE
+pgprot_t phys_mem_access_prot(struct file *file, unsigned long pfn,
+			      unsigned long size, pgprot_t vma_prot)
+{
+	if (!pfn_valid(pfn))
+		return pgprot_noncached(vma_prot);
+	else if (file->f_flags & O_SYNC)
+		return pgprot_writecombine(vma_prot);
+	return vma_prot;
+}
+EXPORT_SYMBOL(phys_mem_access_prot);
+#endif
+
 #define vectors_base()	(vectors_high() ? 0xffff0000 : 0)
+
+static void __init *early_alloc(unsigned long sz)
+{
+	return alloc_bootmem_low_pages(sz);
+}
+
+static pte_t * __init early_pte_alloc(pmd_t *pmd, unsigned long addr, unsigned long prot)
+{
+	if (pmd_none(*pmd)) {
+		pte_t *pte = early_alloc(2 * PTRS_PER_PTE * sizeof(pte_t));
+		__pmd_populate(pmd, __pa(pte) | prot);
+	}
+	BUG_ON(pmd_bad(*pmd));
+	return pte_offset_kernel(pmd, addr);
+}
 
 static void __init alloc_init_pte(pmd_t *pmd, unsigned long addr,
 				  unsigned long end, unsigned long pfn,
 				  const struct mem_type *type)
 {
-	pte_t *pte;
-
-	if (pmd_none(*pmd)) {
-		pte = alloc_bootmem_low_pages(2 * PTRS_PER_PTE * sizeof(pte_t));
-		__pmd_populate(pmd, __pa(pte) | type->prot_l1);
-	}
-
-	pte = pte_offset_kernel(pmd, addr);
+	pte_t *pte = early_pte_alloc(pmd, addr, type->prot_l1);
 	do {
 		set_pte_ext(pte, pfn_pte(pfn, __pgprot(type->prot_pte)), 0);
 		pfn++;
@@ -575,7 +597,7 @@ static void __init create_36bit_mapping(struct map_desc *md,
  * offsets, and we take full advantage of sections and
  * supersections.
  */
-void __init create_mapping(struct map_desc *md)
+static void __init create_mapping(struct map_desc *md)
 {
 	unsigned long phys, addr, length, end;
 	const struct mem_type *type;
@@ -672,7 +694,7 @@ early_param("vmalloc=", early_vmalloc);
 static void __init sanity_check_meminfo(void)
 {
 	int i, j;
-
+	
 	for (i = 0, j = 0; i < meminfo.nr_banks; i++) {
 		struct membank *bank = &meminfo.bank[j];
 		*bank = meminfo.bank[i];
@@ -757,73 +779,39 @@ static inline void prepare_page_table(void)
 }
 
 /*
- * Reserve the various regions of node 0
+ * Reserve the various regions
  */
-void __init reserve_node_zero(pg_data_t *pgdat)
+void __init reserve_special_regions(void)
 {
-	unsigned long res_size = 0;
-
 	/*
 	 * Register the kernel text and data with bootmem.
 	 * Note that this can only be in node 0.
 	 */
 #ifdef CONFIG_XIP_KERNEL
-	reserve_bootmem_node(pgdat, __pa(_data), _end - _data,
-			BOOTMEM_DEFAULT);
+	reserve_bootmem(__pa(_data), _end - _data, BOOTMEM_DEFAULT);
 #else
-	reserve_bootmem_node(pgdat, __pa(_stext), _end - _stext,
-			BOOTMEM_DEFAULT);
+	reserve_bootmem(__pa(_stext), _end - _stext, BOOTMEM_DEFAULT);
 #endif
 
 	/*
 	 * Reserve the page tables.  These are already in use,
 	 * and can only be in node 0.
 	 */
-	reserve_bootmem_node(pgdat, __pa(swapper_pg_dir),
-			     PTRS_PER_PGD * sizeof(pgd_t), BOOTMEM_DEFAULT);
-
-	/*
-	 * Hmm... This should go elsewhere, but we really really need to
-	 * stop things allocating the low memory; ideally we need a better
-	 * implementation of GFP_DMA which does not assume that DMA-able
-	 * memory starts at zero.
-	 */
-	if (machine_is_integrator() || machine_is_cintegrator())
-		res_size = __pa(swapper_pg_dir) - PHYS_OFFSET;
-
-	/*
-	 * These should likewise go elsewhere.  They pre-reserve the
-	 * screen memory region at the start of main system memory.
-	 */
-	if (machine_is_edb7211())
-		res_size = 0x00020000;
-	if (machine_is_p720t())
-		res_size = 0x00014000;
-
-	/* H1940 and RX3715 need to reserve this for suspend */
-
-	if (machine_is_h1940() || machine_is_rx3715()) {
-		reserve_bootmem_node(pgdat, 0x30003000, 0x1000,
-				BOOTMEM_DEFAULT);
-		reserve_bootmem_node(pgdat, 0x30081000, 0x1000,
-				BOOTMEM_DEFAULT);
-	}
+	reserve_bootmem(__pa(swapper_pg_dir),
+			PTRS_PER_PGD * sizeof(pgd_t), BOOTMEM_DEFAULT);
 
 #ifdef CONFIG_SA1111
 	/*
 	 * Because of the SA1111 DMA bug, we want to preserve our
 	 * precious DMA-able memory...
 	 */
-	res_size = __pa(swapper_pg_dir) - PHYS_OFFSET;
+	reserve_bootmem(PHYS_OFFSET, __pa(swapper_pg_dir) - PHYS_OFFSET,
+			BOOTMEM_DEFAULT);
 #endif
 
 #ifdef CONFIG_ARCH_MSM_SCORPION
 	res_size = PAGE_SIZE;
 #endif
-
-	if (res_size)
-		reserve_bootmem_node(pgdat, PHYS_OFFSET, res_size,
-				BOOTMEM_DEFAULT);
 }
 
 /*
@@ -842,7 +830,7 @@ static void __init devicemaps_init(struct machine_desc *mdesc)
 	/*
 	 * Allocate the vector page early.
 	 */
-	vectors = alloc_bootmem_low_pages(PAGE_SIZE);
+	vectors = early_alloc(PAGE_SIZE);
 
 	for (addr = VMALLOC_END; addr; addr += PGDIR_SIZE)
 		pmd_clear(pmd_off_k(addr));
@@ -910,6 +898,39 @@ static void __init devicemaps_init(struct machine_desc *mdesc)
 	flush_cache_all();
 }
 
+static inline void map_memory_bank(struct membank *bank)
+{
+	struct map_desc map;
+
+	map.pfn = bank_pfn_start(bank);
+	map.virtual = __phys_to_virt(bank_phys_start(bank));
+	map.length = bank_phys_size(bank);
+	map.type = MT_MEMORY;
+
+	create_mapping(&map);
+}
+
+static void __init map_lowmem(void)
+{
+	struct meminfo *mi = &meminfo;
+	int i;
+
+	/* Map all the lowmem memory banks. */
+	for (i = 0; i < mi->nr_banks; i++) {
+		struct membank *bank = &mi->bank[i];
+
+		if (!bank->highmem)
+			map_memory_bank(bank);
+	}
+}
+
+static int __init meminfo_cmp(const void *_a, const void *_b)
+{
+	const struct membank *a = _a, *b = _b;
+	long cmp = bank_pfn_start(a) - bank_pfn_start(b);
+	return cmp < 0 ? -1 : cmp > 0 ? 1 : 0;
+}
+
 /*
  * paging_init() sets up the page tables, initialises the zone memory
  * maps, and sets up the zero page, bad page and bad page tables.
@@ -917,22 +938,22 @@ static void __init devicemaps_init(struct machine_desc *mdesc)
 void __init paging_init(struct machine_desc *mdesc)
 {
 	void *zero_page;
+	
+	sort(&meminfo.bank, meminfo.nr_banks, sizeof(meminfo.bank[0]), meminfo_cmp, NULL);
 
 	build_mem_type_table();
 	sanity_check_meminfo();
 	prepare_page_table();
-	bootmem_init();
+	map_lowmem();
+	bootmem_init(mdesc);
 	devicemaps_init(mdesc);
 
 	top_pmd = pmd_off_k(0xffff0000);
 
-	/*
-	 * allocate the zero page.  Note that this always succeeds and
-	 * returns a zeroed result.
-	 */
-	zero_page = alloc_bootmem_low_pages(PAGE_SIZE);
+	/* allocate the zero page. */
+	zero_page = early_alloc(PAGE_SIZE);
 	empty_zero_page = virt_to_page(zero_page);
-	flush_dcache_page(empty_zero_page);
+	__flush_dcache_page(NULL, empty_zero_page);
 	
 #if defined(CONFIG_ARCH_MSM7X27)
        /*
@@ -976,4 +997,6 @@ void setup_mm_for_reboot(char mode)
 		pmd[1] = __pmd(pmdval + (1 << (PGDIR_SHIFT - 1)));
 		flush_pmd_entry(pmd);
 	}
+	
+	local_flush_tlb_all();
 }

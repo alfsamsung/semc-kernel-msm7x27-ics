@@ -235,13 +235,7 @@ static int mddi_on(struct platform_device *pdev)
 	pmdh_clk_enable();
 
 	clk_rate = mfd->fbi->var.pixclock;
-	//ALFS TEST
-//	pr_info("mddi_on: mfd->fbi->var.pixclock is %d\n",
-//			clk_rate);
 	clk_rate = min(clk_rate, mfd->panel_info.clk_max);
-	//ALFS TEST
-//	pr_info("mddi_on: mfd->panel_info.clk_max is %d\n",
-//			clk_rate);
 
 	if (mddi_pdata &&
 	    mddi_pdata->mddi_sel_clk &&
@@ -260,10 +254,6 @@ static int mddi_on(struct platform_device *pdev)
 		printk(KERN_ERR "%s: clk_set_rate failed\n",
 			__func__);
 		
-	//ALFS TEST
-	pr_info("mddi_on: mddi_clk rate is %lu\n",
-			clk_get_rate(mddi_clk));
-	
 	if (mfd->ebi1_clk)
 		clk_enable(mfd->ebi1_clk);
 

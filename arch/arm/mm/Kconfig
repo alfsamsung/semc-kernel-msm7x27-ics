@@ -365,7 +365,7 @@ config CPU_V6
 	bool "Support ARM V6 processor" if ARCH_INTEGRATOR || MACH_REALVIEW_EB
 	select CPU_32v6
 	select CPU_ABRT_EV6
-	select CPU_PABRT_NOIFAR
+	select CPU_PABRT_V6
 	select CPU_CACHE_V6
 	select CPU_CACHE_VIPT
 	select CPU_CP15_MMU
@@ -392,7 +392,7 @@ config CPU_V7
 	select CPU_32v6K
 	select CPU_32v7
 	select CPU_ABRT_EV7
-	select CPU_PABRT_IFAR
+	select CPU_PABRT_V7
 	select CPU_CACHE_V7
 	select CPU_CACHE_VIPT
 	select CPU_CP15_MMU
@@ -454,10 +454,13 @@ config CPU_ABRT_EV6
 config CPU_ABRT_EV7
 	bool
 
-config CPU_PABRT_IFAR
+config CPU_PABRT_LEGACY
 	bool
 
-config CPU_PABRT_NOIFAR
+config CPU_PABRT_V6
+	bool
+
+config CPU_PABRT_V7
 	bool
 
 # The cache model
@@ -751,3 +754,24 @@ config ARCH_HAS_BARRIERS
 	  This option allows the use of custom mandatory barriers
 	  included via the mach/barriers.h file.
 
+config ARM_DMA_MEM_BUFFERABLE
+	bool "Use non-cacheable memory for DMA" if CPU_V6 && !CPU_V7
+	depends on !(MACH_REALVIEW_PB1176 || REALVIEW_EB_ARM11MP || \
+		      MACH_REALVIEW_PB11MP)
+	default y if CPU_V6 || CPU_V7
+	help
+	  Historically, the kernel has used strongly ordered mappings to
+	  provide DMA coherent memory.  With the advent of ARMv7, mapping
+	  memory with differing types results in unpredictable behaviour,
+	  so on these CPUs, this option is forced on.
+
+	  Multiple mappings with differing attributes is also unpredictable
+	  on ARMv6 CPUs, but since they do not have aggressive speculative
+	  prefetch, no harm appears to occur.
+
+	  However, drivers may be missing the necessary barriers for ARMv6,
+	  and therefore turning this on may result in unpredictable driver
+	  behaviour.  Therefore, we offer this as an option.
+
+	  You are recommended say 'Y' here and debug any affected drivers.
+	  

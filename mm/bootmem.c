@@ -37,6 +37,16 @@ static struct list_head bdata_list __initdata = LIST_HEAD_INIT(bdata_list);
 
 static int bootmem_debug;
 
+/*
+ * If an arch needs to apply workarounds to bootmem allocation, it can
+ * set CONFIG_HAVE_ARCH_BOOTMEM and define a wrapper around
+ * __alloc_bootmem_core().
+ */
+#ifndef CONFIG_HAVE_ARCH_BOOTMEM
+#define alloc_bootmem_core(bdata, size, align, goal, limit)            \
+	__alloc_bootmem_core((bdata), (size), (align), (goal), (limit))
+#endif
+
 static int __init bootmem_debug_setup(char *buf)
 {
 	bootmem_debug = 1;
@@ -141,6 +151,30 @@ unsigned long __init init_bootmem(unsigned long start, unsigned long pages)
 	min_low_pfn = start;
 	return init_bootmem_core(NODE_DATA(0)->bdata, start, 0, pages);
 }
+
+/*
+ * free_bootmem_late - free bootmem pages directly to page allocator
+ * @addr: starting address of the range
+ * @size: size of the range in bytes
+ *
+ * This is only useful when the bootmem allocator has already been torn
+ * down, but we are still initializing the system.  Pages are given directly
+ * to the page allocator, no bootmem metadata is updated because it is gone.
+ */
+/*void __init free_bootmem_late(unsigned long addr, unsigned long size)
+{
+	unsigned long cursor, end;
+
+	kmemleak_free_part(__va(addr), size);
+
+	cursor = PFN_UP(addr);
+	end = PFN_DOWN(addr + size);
+
+	for (; cursor < end; cursor++) {
+		__free_pages_bootmem(pfn_to_page(cursor), 0);
+		totalram_pages++;
+	}
+} */
 
 static unsigned long __init free_all_bootmem_core(bootmem_data_t *bdata)
 {
@@ -382,7 +416,6 @@ int __init reserve_bootmem_node(pg_data_t *pgdat, unsigned long physaddr,
 	return mark_bootmem_node(pgdat->bdata, start, end, 1, flags);
 }
 
-#ifndef CONFIG_HAVE_ARCH_BOOTMEM_NODE
 /**
  * reserve_bootmem - mark a page range as usable
  * @addr: starting address of the range
@@ -403,7 +436,6 @@ int __init reserve_bootmem(unsigned long addr, unsigned long size,
 
 	return mark_bootmem(start, end, 1, flags);
 }
-#endif /* !CONFIG_HAVE_ARCH_BOOTMEM_NODE */
 
 static unsigned long align_idx(struct bootmem_data *bdata, unsigned long idx,
 			unsigned long step)
@@ -428,7 +460,7 @@ static unsigned long align_off(struct bootmem_data *bdata, unsigned long off,
 	return ALIGN(base + off, align) - base;
 }
 
-static void * __init alloc_bootmem_core(struct bootmem_data *bdata,
+static void * __init __alloc_bootmem_core(struct bootmem_data *bdata,
 				unsigned long size, unsigned long align,
 				unsigned long goal, unsigned long limit)
 {

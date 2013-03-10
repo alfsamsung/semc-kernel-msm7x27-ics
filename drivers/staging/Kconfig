@@ -101,5 +101,7 @@ source "drivers/staging/zram/Kconfig"
  
 source "drivers/staging/zcache/Kconfig"
 
+#source "drivers/staging/qcache/Kconfig"
+
 endif # !STAGING_EXCLUDE_BUILD
 endif # STAGING

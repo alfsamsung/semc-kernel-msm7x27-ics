@@ -12,6 +12,7 @@ config ARM
 	select HAVE_IDE
 	select RTC_LIB
 	select SYS_SUPPORTS_APM_EMULATION
+	select GENERIC_ATOMIC64 if (!CPU_32v6K)
 	select HAVE_OPROFILE
 	select HAVE_ARCH_KGDB
 	select HAVE_KPROBES if (!XIP_KERNEL)
@@ -22,6 +23,8 @@ config ARM
 	select HAVE_KERNEL_BZIP2
 	select HAVE_KERNEL_LZMA
 	select HAVE_KERNEL_LZO
+	select HAVE_PERF_EVENTS
+	select PERF_USE_VMALLOC
 	help
 	  The ARM series is a line of low-power-consumption RISC chip designs
 	  licensed by ARM Ltd and targeted at embedded applications and
@@ -56,6 +59,9 @@ config GENERIC_CLOCKEVENTS_BROADCAST
 config MMU
 	bool
 	default y
+
+config HAVE_PROC_CPU
+	bool
 
 config NO_IOPORT
 	bool
@@ -546,7 +552,6 @@ config ARCH_SHARK
 config ARCH_LH7A40X
 	bool "Sharp LH7A40X"
 	select CPU_ARM922T
-	select ARCH_DISCONTIGMEM_ENABLE if !LH7A40X_CONTIGMEM
 	select ARCH_SPARSEMEM_ENABLE if !LH7A40X_CONTIGMEM
 	help
 	  Say Y here for systems based on one of the Sharp LH7A40X
@@ -582,6 +587,7 @@ config ARCH_MSM
 	select HAVE_CLK
 	select GENERIC_TIME
 	select GENERIC_CLOCKEVENTS
+	select ARCH_HAS_BARRIERS
 	select COMMON_CLKDEV
 	help
 	  Support for Qualcomm MSM/QSD based systems.  This runs on the
@@ -933,10 +939,6 @@ config HOLES_IN_ZONE
 	  aligning end addresses to MAX_ORDER_NR_PAGES or changing MAX_ORDER
 	  to compensate for your alignment requirements.
 
-# Discontigmem is deprecated
-config ARCH_DISCONTIGMEM_ENABLE
-	bool
-
 config ARCH_SPARSEMEM_ENABLE
 	bool
 
@@ -944,13 +946,7 @@ config ARCH_SPARSEMEM_DEFAULT
 	def_bool ARCH_SPARSEMEM_ENABLE
 
 config ARCH_SELECT_MEMORY_MODEL
-	def_bool ARCH_DISCONTIGMEM_ENABLE && ARCH_SPARSEMEM_ENABLE
-
-config NODES_SHIFT
-	int
-	default "4" if ARCH_LH7A40X
-	default "2"
-	depends on NEED_MULTIPLE_NODES
+	def_bool ARCH_SPARSEMEM_ENABLE
 
 source "mm/Kconfig"
 
@@ -1019,6 +1015,7 @@ config ALIGNMENT_TRAP
 	bool
 	depends on CPU_CP15_MMU
 	default y if !ARCH_EBSA110
+	select HAVE_PROC_CPU if PROC_FS
 	help
 	  ARM processors cannot fetch/store information which is not
 	  naturally aligned on the bus, i.e., a 4 byte fetch must start at an

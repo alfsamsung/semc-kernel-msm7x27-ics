@@ -34,4 +34,5 @@ obj-$(CONFIG_SNAPPY_DECOMPRESS)	+= snappy/
 obj-$(CONFIG_RAMZSWAP)          += ramzswap/
 obj-$(CONFIG_ZRAM)              += zram/
 obj-$(CONFIG_ZCACHE)            += zcache/
+#obj-$(CONFIG_QCACHE)		+= qcache/
 obj-$(CONFIG_XVMALLOC)          += zram/

@@ -26,7 +26,7 @@ extern int show_fiq_list(struct seq_file *, void *);
  */
 #define do_bad_IRQ(irq,desc)				\
 do {							\
-	spin_lock(&desc->lock);				\
+	spin_lock(&desc->lock);			\
 	handle_bad_irq(irq, desc);			\
 	spin_unlock(&desc->lock);			\
 } while(0)

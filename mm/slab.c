@@ -317,7 +317,7 @@ static int drain_freelist(struct kmem_cache *cache,
 			struct kmem_list3 *l3, int tofree);
 static void free_block(struct kmem_cache *cachep, void **objpp, int len,
 			int node);
-static int enable_cpucache(struct kmem_cache *cachep);
+static int enable_cpucache(struct kmem_cache *cachep, gfp_t gfp);
 static void cache_reap(struct work_struct *unused);
 
 /*
@@ -499,7 +499,7 @@ struct kmem_cache {
 #define	STATS_DEC_ACTIVE(x)	do { } while (0)
 #define	STATS_INC_ALLOCED(x)	do { } while (0)
 #define	STATS_INC_GROWN(x)	do { } while (0)
-#define	STATS_ADD_REAPED(x,y)	do { } while (0)
+#define	STATS_ADD_REAPED(x,y)	do { (void)(y); } while (0)
 #define	STATS_SET_HIGH(x)	do { } while (0)
 #define	STATS_INC_ERR(x)	do { } while (0)
 #define	STATS_INC_NODEALLOCS(x)	do { } while (0)
@@ -952,12 +952,12 @@ static void __cpuinit start_cpu_timer(int cpu)
 }
 
 static struct array_cache *alloc_arraycache(int node, int entries,
-					    int batchcount)
+					    int batchcount, gfp_t gfp)
 {
 	int memsize = sizeof(void *) * entries + sizeof(struct array_cache);
 	struct array_cache *nc = NULL;
 
-	nc = kmalloc_node(memsize, GFP_KERNEL, node);
+	nc = kmalloc_node(memsize, gfp, node);
 	/*
         * The array_cache structures contain pointers to free object.
         * However, when such objects are allocated or transfered to another
@@ -1005,7 +1005,7 @@ static int transfer_objects(struct array_cache *to,
 #define drain_alien_cache(cachep, alien) do { } while (0)
 #define reap_alien(cachep, l3) do { } while (0)
 
-static inline struct array_cache **alloc_alien_cache(int node, int limit)
+static inline struct array_cache **alloc_alien_cache(int node, int limit, gfp_t gfp)
 {
 	return (struct array_cache **)BAD_ALIEN_MAGIC;
 }
@@ -1036,7 +1036,7 @@ static inline void *____cache_alloc_node(struct kmem_cache *cachep,
 static void *____cache_alloc_node(struct kmem_cache *, gfp_t, int);
 static void *alternate_node_alloc(struct kmem_cache *, gfp_t);
 
-static struct array_cache **alloc_alien_cache(int node, int limit)
+static struct array_cache **alloc_alien_cache(int node, int limit, gfp_t gfp)
 {
 	struct array_cache **ac_ptr;
 	int memsize = sizeof(void *) * nr_node_ids;
@@ -1044,14 +1044,14 @@ static struct array_cache **alloc_alien_cache(int node, int limit)
 
 	if (limit > 1)
 		limit = 12;
-	ac_ptr = kmalloc_node(memsize, GFP_KERNEL, node);
+	ac_ptr = kmalloc_node(memsize, gfp, node);
 	if (ac_ptr) {
 		for_each_node(i) {
 			if (i == node || !node_online(i)) {
 				ac_ptr[i] = NULL;
 				continue;
 			}
-			ac_ptr[i] = alloc_arraycache(node, limit, 0xbaadf00d);
+			ac_ptr[i] = alloc_arraycache(node, limit, 0xbaadf00d, gfp);
 			if (!ac_ptr[i]) {
 				for (i--; i >= 0; i--)
 					kfree(ac_ptr[i]);
@@ -1284,20 +1284,20 @@ static int __cpuinit cpuup_prepare(long cpu)
 		struct array_cache **alien = NULL;
 
 		nc = alloc_arraycache(node, cachep->limit,
-					cachep->batchcount);
+					cachep->batchcount, GFP_KERNEL);
 		if (!nc)
 			goto bad;
 		if (cachep->shared) {
 			shared = alloc_arraycache(node,
 				cachep->shared * cachep->batchcount,
-				0xbaadf00d);
+				0xbaadf00d, GFP_KERNEL);
 			if (!shared) {
 				kfree(nc);
 				goto bad;
 			}
 		}
 		if (use_alien_caches) {
-			alien = alloc_alien_cache(node, cachep->limit);
+			alien = alloc_alien_cache(node, cachep->limit, GFP_KERNEL);
 			if (!alien) {
 				kfree(shared);
 				kfree(nc);
@@ -1401,10 +1401,9 @@ static void init_list(struct kmem_cache *cachep, struct kmem_list3 *list,
 {
 	struct kmem_list3 *ptr;
 
-	ptr = kmalloc_node(sizeof(struct kmem_list3), GFP_KERNEL, nodeid);
+	ptr = kmalloc_node(sizeof(struct kmem_list3), GFP_NOWAIT, nodeid);
 	BUG_ON(!ptr);
 
-	local_irq_disable();
 	memcpy(ptr, list, sizeof(struct kmem_list3));
 	/*
 	 * Do not assume that spinlocks can be initialized via memcpy:
@@ -1413,7 +1412,6 @@ static void init_list(struct kmem_cache *cachep, struct kmem_list3 *list,
 
 	MAKE_ALL_LISTS(cachep, ptr, nodeid);
 	cachep->nodelists[nodeid] = ptr;
-	local_irq_enable();
 }
 
 /*
@@ -1577,9 +1575,8 @@ void __init kmem_cache_init(void)
 	{
 		struct array_cache *ptr;
 
-		ptr = kmalloc(sizeof(struct arraycache_init), GFP_KERNEL);
+		ptr = kmalloc(sizeof(struct arraycache_init), GFP_NOWAIT);
 
-		local_irq_disable();
 		BUG_ON(cpu_cache_get(&cache_cache) != &initarray_cache.cache);
 		memcpy(ptr, cpu_cache_get(&cache_cache),
 		       sizeof(struct arraycache_init));
@@ -1589,11 +1586,9 @@ void __init kmem_cache_init(void)
 		spin_lock_init(&ptr->lock);
 
 		cache_cache.array[smp_processor_id()] = ptr;
-		local_irq_enable();
 
-		ptr = kmalloc(sizeof(struct arraycache_init), GFP_KERNEL);
+		ptr = kmalloc(sizeof(struct arraycache_init), GFP_NOWAIT);
 
-		local_irq_disable();
 		BUG_ON(cpu_cache_get(malloc_sizes[INDEX_AC].cs_cachep)
 		       != &initarray_generic.cache);
 		memcpy(ptr, cpu_cache_get(malloc_sizes[INDEX_AC].cs_cachep),
@@ -1605,7 +1600,6 @@ void __init kmem_cache_init(void)
 
 		malloc_sizes[INDEX_AC].cs_cachep->array[smp_processor_id()] =
 		    ptr;
-		local_irq_enable();
 	}
 	/* 5) Replace the bootstrap kmem_list3's */
 	{
@@ -1629,7 +1623,7 @@ void __init kmem_cache_init(void)
 		struct kmem_cache *cachep;
 		mutex_lock(&cache_chain_mutex);
 		list_for_each_entry(cachep, &cache_chain, next)
-			if (enable_cpucache(cachep))
+			if (enable_cpucache(cachep, GFP_NOWAIT))
 				BUG();
 		mutex_unlock(&cache_chain_mutex);
 	}
@@ -1691,7 +1685,7 @@ static void *kmem_getpages(struct kmem_cache *cachep, gfp_t flags, int nodeid)
 	if (cachep->flags & SLAB_RECLAIM_ACCOUNT)
 		flags |= __GFP_RECLAIMABLE;
 
-	page = alloc_pages_node(nodeid, flags, cachep->gfporder);
+	page = alloc_pages_exact_node(nodeid, flags, cachep->gfporder);
 	if (!page)
 		return NULL;
 
@@ -2066,10 +2060,10 @@ static size_t calculate_slab_order(struct kmem_cache *cachep,
 	return left_over;
 }
 
-static int __init_refok setup_cpu_cache(struct kmem_cache *cachep)
+static int __init_refok setup_cpu_cache(struct kmem_cache *cachep, gfp_t gfp)
 {
 	if (g_cpucache_up == FULL)
-		return enable_cpucache(cachep);
+		return enable_cpucache(cachep, gfp);
 
 	if (g_cpucache_up == NONE) {
 		/*
@@ -2091,7 +2085,7 @@ static int __init_refok setup_cpu_cache(struct kmem_cache *cachep)
 			g_cpucache_up = PARTIAL_AC;
 	} else {
 		cachep->array[smp_processor_id()] =
-			kmalloc(sizeof(struct arraycache_init), GFP_KERNEL);
+			kmalloc(sizeof(struct arraycache_init), gfp);
 
 		if (g_cpucache_up == PARTIAL_AC) {
 			set_up_list3s(cachep, SIZE_L3);
@@ -2155,6 +2149,7 @@ kmem_cache_create (const char *name, size_t size, size_t align,
 {
 	size_t left_over, slab_size, ralign;
 	struct kmem_cache *cachep = NULL, *pc;
+	gfp_t gfp;
 
 	/*
 	 * Sanity checks... these are all serious usage bugs.
@@ -2170,8 +2165,10 @@ kmem_cache_create (const char *name, size_t size, size_t align,
 	 * We use cache_chain_mutex to ensure a consistent view of
 	 * cpu_online_mask as well.  Please see cpuup_callback
 	 */
-	get_online_cpus();
-	mutex_lock(&cache_chain_mutex);
+	if (slab_is_available()) {
+		get_online_cpus();
+		mutex_lock(&cache_chain_mutex);
+	}
 
 	list_for_each_entry(pc, &cache_chain, next) {
 		char tmp;
@@ -2279,9 +2276,14 @@ kmem_cache_create (const char *name, size_t size, size_t align,
 	 * 4) Store it.
 	 */
 	align = ralign;
+	
+	if (slab_is_available())
+		gfp = GFP_KERNEL;
+	else
+		gfp = GFP_NOWAIT;
 
 	/* Get cache's description obj. */
-	cachep = kmem_cache_zalloc(&cache_cache, GFP_KERNEL);
+	cachep = kmem_cache_zalloc(&cache_cache, gfp);
 	if (!cachep)
 		goto oops;
 
@@ -2384,7 +2386,7 @@ kmem_cache_create (const char *name, size_t size, size_t align,
 	cachep->ctor = ctor;
 	cachep->name = name;
 
-	if (setup_cpu_cache(cachep)) {
+	if (setup_cpu_cache(cachep, gfp)) {
 		__kmem_cache_destroy(cachep);
 		cachep = NULL;
 		goto oops;
@@ -2396,8 +2398,10 @@ oops:
 	if (!cachep && (flags & SLAB_PANIC))
 		panic("kmem_cache_create(): failed to create slab `%s'\n",
 		      name);
-	mutex_unlock(&cache_chain_mutex);
-	put_online_cpus();
+	if (slab_is_available()) {
+		mutex_unlock(&cache_chain_mutex);
+		put_online_cpus();
+	}
 	return cachep;
 }
 EXPORT_SYMBOL(kmem_cache_create);
@@ -3236,7 +3240,7 @@ retry:
 		if (local_flags & __GFP_WAIT)
 			local_irq_enable();
 		kmem_flagcheck(cache, flags);
-		obj = kmem_getpages(cache, local_flags, -1);
+		obj = kmem_getpages(cache, local_flags, numa_node_id());
 		if (local_flags & __GFP_WAIT)
 			local_irq_disable();
 		if (obj) {
@@ -3774,7 +3778,7 @@ EXPORT_SYMBOL_GPL(kmem_cache_name);
 /*
  * This initializes kmem_list3 or resizes various caches for all nodes.
  */
-static int alloc_kmemlist(struct kmem_cache *cachep)
+static int alloc_kmemlist(struct kmem_cache *cachep, gfp_t gfp)
 {
 	int node;
 	struct kmem_list3 *l3;
@@ -3784,7 +3788,7 @@ static int alloc_kmemlist(struct kmem_cache *cachep)
 	for_each_online_node(node) {
 
                 if (use_alien_caches) {
-                        new_alien = alloc_alien_cache(node, cachep->limit);
+                        new_alien = alloc_alien_cache(node, cachep->limit, gfp);
                         if (!new_alien)
                                 goto fail;
                 }
@@ -3793,7 +3797,7 @@ static int alloc_kmemlist(struct kmem_cache *cachep)
 		if (cachep->shared) {
 			new_shared = alloc_arraycache(node,
 				cachep->shared*cachep->batchcount,
-					0xbaadf00d);
+					0xbaadf00d, gfp);
 			if (!new_shared) {
 				free_alien_cache(new_alien);
 				goto fail;
@@ -3822,7 +3826,7 @@ static int alloc_kmemlist(struct kmem_cache *cachep)
 			free_alien_cache(new_alien);
 			continue;
 		}
-		l3 = kmalloc_node(sizeof(struct kmem_list3), GFP_KERNEL, node);
+		l3 = kmalloc_node(sizeof(struct kmem_list3), gfp, node);
 		if (!l3) {
 			free_alien_cache(new_alien);
 			kfree(new_shared);
@@ -3878,18 +3882,18 @@ static void do_ccupdate_local(void *info)
 
 /* Always called with the cache_chain_mutex held */
 static int do_tune_cpucache(struct kmem_cache *cachep, int limit,
-				int batchcount, int shared)
+				int batchcount, int shared, gfp_t gfp)
 {
 	struct ccupdate_struct *new;
 	int i;
 
-	new = kzalloc(sizeof(*new), GFP_KERNEL);
+	new = kzalloc(sizeof(*new), gfp);
 	if (!new)
 		return -ENOMEM;
 
 	for_each_online_cpu(i) {
 		new->new[i] = alloc_arraycache(cpu_to_node(i), limit,
-						batchcount);
+						batchcount, gfp);
 		if (!new->new[i]) {
 			for (i--; i >= 0; i--)
 				kfree(new->new[i]);
@@ -3916,11 +3920,11 @@ static int do_tune_cpucache(struct kmem_cache *cachep, int limit,
 		kfree(ccold);
 	}
 	kfree(new);
-	return alloc_kmemlist(cachep);
+	return alloc_kmemlist(cachep, gfp);
 }
 
 /* Called with cache_chain_mutex held always */
-static int enable_cpucache(struct kmem_cache *cachep)
+static int enable_cpucache(struct kmem_cache *cachep, gfp_t gfp)
 {
 	int err;
 	int limit, shared;
@@ -3966,7 +3970,7 @@ static int enable_cpucache(struct kmem_cache *cachep)
 	if (limit > 32)
 		limit = 32;
 #endif
-	err = do_tune_cpucache(cachep, limit, (limit + 1) / 2, shared);
+	err = do_tune_cpucache(cachep, limit, (limit + 1) / 2, shared, gfp);
 	if (err)
 		printk(KERN_ERR "enable_cpucache failed for %s, error %d.\n",
 		       cachep->name, -err);
@@ -4273,7 +4277,8 @@ ssize_t slabinfo_write(struct file *file, const char __user * buffer,
 				res = 0;
 			} else {
 				res = do_tune_cpucache(cachep, limit,
-						       batchcount, shared);
+						       batchcount, shared,
+							GFP_KERNEL);
 			}
 			break;
 		}
