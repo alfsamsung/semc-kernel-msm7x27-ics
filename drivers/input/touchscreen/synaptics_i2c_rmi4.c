@@ -332,7 +332,8 @@ static int synaptics_init_panel(struct synaptics_ts_data *ts)
 
 	// report mode : most info
 	ret = i2c_smbus_write_byte_data(ts->client, F11_2D_CTRL00_REPORT_MODE(ts->rmi4_func), 0x00);
-	printk(KERN_ERR ": switched to continuous reporting mode\n");
+	if (ret < 0)
+		printk(KERN_ERR "synaptics_ts: switched to continuous reporting mode\n");
 
 	return ret;
 }
