@@ -1,7 +1,7 @@
 /* arch/arm/mach-msm/proc_comm.c
  *
  * Copyright (C) 2007-2008 Google, Inc.
- * Copyright (c) 2009, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2009-2011, Code Aurora Forum. All rights reserved.
  * Author: Brian Swetland <swetland@google.com>
  *
  * This software is licensed under the terms of the GNU General Public
@@ -25,15 +25,15 @@
 
 #include "proc_comm.h"
 
-#if defined(CONFIG_ARCH_MSM7X30)
-#define MSM_TRIG_A2M_INT(n) (writel(1 << n, MSM_GCC_BASE + 0x8))
-#else
-#define MSM_TRIG_A2M_INT(n) (writel(1, MSM_CSR_BASE + 0x400 + (n) * 4))
-#endif
-
 static inline void notify_other_proc_comm(void)
 {
-	MSM_TRIG_A2M_INT(6);
+#if defined(CONFIG_ARCH_MSM7X30)
+	writel_relaxed(1 << 6, MSM_GCC_BASE + 0x8);
+#else
+	writel_relaxed(1, MSM_CSR_BASE + 0x400 + (6) * 4);
+#endif
+	/* Make sure the write completes before returning */
+	wmb();
 }
 
 #define APP_COMMAND 0x00
@@ -47,6 +47,7 @@ static inline void notify_other_proc_comm(void)
 #define MDM_DATA2   0x1C
 
 static DEFINE_SPINLOCK(proc_comm_lock);
+static int msm_proc_comm_disable;
 
 /* The higher level SMD support will install this to
  * provide a way to check for and handle modem restart?
@@ -64,7 +65,9 @@ int (*msm_check_for_modem_crash)(void);
 static int proc_comm_wait_for(unsigned addr, unsigned value)
 {
 	while (1) {
-		if (readl(addr) == value)
+		/* Barrier here prevents excessive spinning */
+		mb();
+		if (readl_relaxed(addr) == value)
 			return 0;
 
 		if (msm_check_for_modem_crash)
@@ -86,12 +89,14 @@ again:
 	if (proc_comm_wait_for(base + MDM_STATUS, PCOM_READY))
 		goto again;
 
-	writel(PCOM_RESET_MODEM, base + APP_COMMAND);
-	writel(0, base + APP_DATA1);
-	writel(0, base + APP_DATA2);
-
+	writel_relaxed(PCOM_RESET_MODEM, base + APP_COMMAND);
+	writel_relaxed(0, base + APP_DATA1);
+	writel_relaxed(0, base + APP_DATA2);
+	
 	spin_unlock_irqrestore(&proc_comm_lock, flags);
 
+	/* Make sure the writes complete before notifying the other side */
+	dsb();
 	notify_other_proc_comm();
 
 	return;
@@ -106,32 +111,51 @@ int msm_proc_comm(unsigned cmd, unsigned *data1, unsigned *data2)
 	int ret;
 
 	spin_lock_irqsave(&proc_comm_lock, flags);
+	
+	if (msm_proc_comm_disable) {
+		ret = -EIO;
+		goto end;
+	}
 
 again:
 	if (proc_comm_wait_for(base + MDM_STATUS, PCOM_READY))
 		goto again;
 
-	writel(cmd, base + APP_COMMAND);
-	writel(data1 ? *data1 : 0, base + APP_DATA1);
-	writel(data2 ? *data2 : 0, base + APP_DATA2);
+	writel_relaxed(cmd, base + APP_COMMAND);
+	writel_relaxed(data1 ? *data1 : 0, base + APP_DATA1);
+	writel_relaxed(data2 ? *data2 : 0, base + APP_DATA2);
 
+	/* Make sure the writes complete before notifying the other side */
+	dsb();
 	notify_other_proc_comm();
 
 	if (proc_comm_wait_for(base + APP_COMMAND, PCOM_CMD_DONE))
 		goto again;
 
-	if (readl(base + APP_STATUS) == PCOM_CMD_SUCCESS) {
+	if (readl_relaxed(base + APP_STATUS) == PCOM_CMD_SUCCESS) {
 		if (data1)
-			*data1 = readl(base + APP_DATA1);
+			*data1 = readl_relaxed(base + APP_DATA1);
 		if (data2)
-			*data2 = readl(base + APP_DATA2);
+			*data2 = readl_relaxed(base + APP_DATA2);
 		ret = 0;
 	} else {
 		ret = -EIO;
 	}
 
-	writel(PCOM_CMD_IDLE, base + APP_COMMAND);
+	writel_relaxed(PCOM_CMD_IDLE, base + APP_COMMAND);
+	
+	switch (cmd) {
+	case PCOM_RESET_CHIP:
+	case PCOM_RESET_CHIP_IMM:
+	case PCOM_RESET_APPS:
+		msm_proc_comm_disable = 1;
+		printk(KERN_ERR "msm: proc_comm: proc comm disabled\n");
+		break;
+	}
+end:
 
+	/* Make sure the writes complete before returning */
+	dsb();
 	spin_unlock_irqrestore(&proc_comm_lock, flags);
 	return ret;
 }
@@ -168,18 +192,3 @@ int msm_proc_comm(unsigned cmd, unsigned *data1, unsigned *data2)
 }
 #endif
 EXPORT_SYMBOL(msm_proc_comm);
-
-/*
- * We need to wait for the ARM9 to at least partially boot
- * up before we can continue. Since the ARM9 does resource
- * allocation, if we dont' wait we could end up crashing or in
- * and unknown state. This function should be called early to
- * wait on the ARM9.
- */
-void __init proc_comm_boot_wait(void)
-{
-	void __iomem *base = MSM_SHARED_RAM_BASE;
- 
-	proc_comm_wait_for(base + MDM_STATUS, PCOM_READY);
- 
-}
