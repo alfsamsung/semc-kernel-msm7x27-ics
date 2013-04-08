@@ -1,0 +1,30 @@
+
+#
+# Top-level generic files
+#
+tags
+TAGS
+vmlinux
+System.map
+Module.markers
+Module.symvers
+!.mailmap
+!.gitignore
+
+#
+# Generated include files
+#
+include/asm
+include/asm-*/asm-offsets.h
+include/config
+include/linux/autoconf.h
+include/linux/compile.h
+include/linux/version.h
+include/linux/utsrelease.h
+include/generated
+
+autoconf.h
+*.bak
+*.orig
+*~
+
