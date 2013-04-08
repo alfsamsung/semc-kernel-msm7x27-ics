@@ -60,10 +60,12 @@ static inline void synchronize_rcu_bh_expedited(void)
 	synchronize_sched();
 }
 
+#ifndef CONFIG_SCHED_BFS
 static inline void synchronize_sched_expedited(void)
 {
        synchronize_sched();
 }
+#endif
 
 #ifdef CONFIG_TINY_RCU
 

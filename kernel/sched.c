@@ -1,3 +1,6 @@
+#ifdef CONFIG_SCHED_BFS
+#include "sched_bfs.c"
+#else
 /*
  *  kernel/sched.c
  *
@@ -606,6 +609,9 @@ struct rq {
 	struct task_struct *migration_thread;
 	struct list_head migration_queue;
 #endif
+	/* calc_load related fields */
+	unsigned long calc_load_update;
+	long calc_load_active;
 
 #ifdef CONFIG_SCHED_HRTICK
 #ifdef CONFIG_SMP
@@ -693,15 +699,9 @@ static inline void update_rq_clock(struct rq *rq)
  * This interface allows printk to be called with the runqueue lock
  * held and know whether or not it is OK to wake up the klogd.
  */
-int runqueue_is_locked(void)
+int runqueue_is_locked(int cpu)
 {
-	int cpu = get_cpu();
-	struct rq *rq = cpu_rq(cpu);
-	int ret;
-
-	ret = spin_is_locked(&rq->lock);
-	put_cpu();
-	return ret;
+	return spin_is_locked(&cpu_rq(cpu)->lock);
 }
 
 /*
@@ -1659,6 +1659,8 @@ static void cfs_rq_set_shares(struct cfs_rq *cfs_rq, unsigned long shares)
 }
 #endif
 
+static void calc_load_account_active(struct rq *this_rq);
+
 #include "sched_stats.h"
 #include "sched_idletask.c"
 #include "sched_fair.c"
@@ -1832,6 +1834,38 @@ static inline void check_class_changed(struct rq *rq, struct task_struct *p,
 	} else
 		p->sched_class->prio_changed(rq, p, oldprio, running);
 }
+
+/**
+ * kthread_bind - bind a just-created kthread to a cpu.
+ * @k: thread created by kthread_create().
+ * @cpu: cpu (might not be online, must be possible) for @k to run on.
+ *
+ * Description: This function is equivalent to set_cpus_allowed(),
+ * except that @cpu doesn't need to be online, and the thread must be
+ * stopped (i.e., just returned from kthread_create()).
+ *
+ * Function lives here instead of kthread.c because it messes with
+ * scheduler internals which require locking.
+ */
+void kthread_bind(struct task_struct *p, unsigned int cpu)
+{
+	struct rq *rq = cpu_rq(cpu);
+	unsigned long flags;
+
+	/* Must have done schedule() in kthread() before we set_task_cpu */
+	if (!wait_task_inactive(p, TASK_UNINTERRUPTIBLE)) {
+		WARN_ON(1);
+		return;
+	}
+
+	spin_lock_irqsave(&rq->lock, flags);
+	set_task_cpu(p, cpu);
+	p->cpus_allowed = cpumask_of_cpu(cpu);
+	p->rt.nr_cpus_allowed = 1;
+	p->flags |= PF_THREAD_BOUND;
+	spin_unlock_irqrestore(&rq->lock, flags);
+}
+EXPORT_SYMBOL(kthread_bind);
 
 #ifdef CONFIG_SMP
 
@@ -2436,11 +2470,25 @@ void sched_fork(struct task_struct *p, int clone_flags)
 	set_task_cpu(p, cpu);
 
 	/*
-	 * Make sure we do not leak PI boosting priority to the child:
+	 * Revert to default priority/policy on fork if requested. Make sure we
+	 * do not leak PI boosting priority to the child.
 	 */
-	p->prio = current->normal_prio;
+	if (current->sched_reset_on_fork &&
+			(p->policy == SCHED_FIFO || p->policy == SCHED_RR))
+		p->policy = SCHED_NORMAL;
+
+	if (current->sched_reset_on_fork &&
+			(current->normal_prio < DEFAULT_PRIO))
+		p->prio = DEFAULT_PRIO;
+	else
+		p->prio = current->normal_prio;
+
 	if (!rt_prio(p->prio))
 		p->sched_class = &fair_sched_class;
+	
+	/* We don't need the reset flag anymore after the fork. It has
+	 * fulfilled its duty. */
+	p->sched_reset_on_fork = 0;
 
 #if defined(CONFIG_SCHEDSTATS) || defined(CONFIG_TASK_DELAY_ACCT)
 	if (likely(sched_info_on()))
@@ -2757,19 +2805,72 @@ unsigned long nr_iowait(void)
 	return sum;
 }
 
-unsigned long nr_active(void)
+/* Variables and functions for calc_load */
+static atomic_long_t calc_load_tasks;
+static unsigned long calc_load_update;
+unsigned long avenrun[3];
+EXPORT_SYMBOL(avenrun);
+
+/**
+ * get_avenrun - get the load average array
+ * @loads:     pointer to dest load array
+ * @offset:    offset to add
+ * @shift:     shift count to shift the result left
+ *
+ * These values are estimates at best, so no need for locking.
+ */
+void get_avenrun(unsigned long *loads, unsigned long offset, int shift)
 {
-	unsigned long i, running = 0, uninterruptible = 0;
+	loads[0] = (avenrun[0] + offset) << shift;
+	loads[1] = (avenrun[1] + offset) << shift;
+	loads[2] = (avenrun[2] + offset) << shift;
+}
 
-	for_each_online_cpu(i) {
-		running += cpu_rq(i)->nr_running;
-		uninterruptible += cpu_rq(i)->nr_uninterruptible;
+static unsigned long
+calc_load(unsigned long load, unsigned long exp, unsigned long active)
+{
+	load *= exp;
+	load += active * (FIXED_1 - exp);
+	return load >> FSHIFT;
+}
+
+/*
+ * calc_load - update the avenrun load estimates 10 ticks after the
+ * CPUs have updated calc_load_tasks.
+ */
+void calc_global_load(void)
+{
+	unsigned long upd = calc_load_update + 10;
+	long active;
+
+	if (time_before(jiffies, upd))
+		return;
+
+	active = atomic_long_read(&calc_load_tasks);
+	active = active > 0 ? active * FIXED_1 : 0;
+
+	avenrun[0] = calc_load(avenrun[0], EXP_1, active);
+	avenrun[1] = calc_load(avenrun[1], EXP_5, active);
+	avenrun[2] = calc_load(avenrun[2], EXP_15, active);
+
+	calc_load_update += LOAD_FREQ;
+}
+
+/*
+ * Either called from update_cpu_load() or from a cpu going idle
+ */
+static void calc_load_account_active(struct rq *this_rq)
+{
+	long nr_active, delta;
+
+	nr_active = this_rq->nr_running;
+	nr_active += (long) this_rq->nr_uninterruptible;
+
+	if (nr_active != this_rq->calc_load_active) {
+		delta = nr_active - this_rq->calc_load_active;
+		this_rq->calc_load_active = nr_active;
+		atomic_long_add(delta, &calc_load_tasks);
 	}
-
-	if (unlikely((long)uninterruptible < 0))
-		uninterruptible = 0;
-
-	return running + uninterruptible;
 }
 
 /*
@@ -2799,6 +2900,11 @@ static void update_cpu_load(struct rq *this_rq)
 		if (new_load > old_load)
 			new_load += scale-1;
 		this_rq->cpu_load[i] = (old_load*(scale-1) + new_load) >> i;
+	}
+	
+	if (time_after_eq(jiffies, this_rq->calc_load_update)) {
+		this_rq->calc_load_update += LOAD_FREQ;
+		calc_load_account_active(this_rq);
 	}
 }
 
@@ -5340,17 +5446,24 @@ static int __sched_setscheduler(struct task_struct *p, int policy,
 	unsigned long flags;
 	const struct sched_class *prev_class = p->sched_class;
 	struct rq *rq;
+	int reset_on_fork;
 
 	/* may grab non-irq protected spin_locks */
 	BUG_ON(in_interrupt());
 recheck:
 	/* double check policy once rq lock held */
-	if (policy < 0)
+	if (policy < 0) {
+		reset_on_fork = p->sched_reset_on_fork;
 		policy = oldpolicy = p->policy;
-	else if (policy != SCHED_FIFO && policy != SCHED_RR &&
-			policy != SCHED_NORMAL && policy != SCHED_BATCH &&
-			policy != SCHED_IDLE)
-		return -EINVAL;
+	} else {
+		reset_on_fork = !!(policy & SCHED_RESET_ON_FORK);
+		policy &= ~SCHED_RESET_ON_FORK;
+
+		if (policy != SCHED_FIFO && policy != SCHED_RR &&
+				policy != SCHED_NORMAL && policy != SCHED_BATCH &&
+				policy != SCHED_IDLE)
+			return -EINVAL;
+	}
 	/*
 	 * Valid priorities for SCHED_FIFO and SCHED_RR are
 	 * 1..MAX_USER_RT_PRIO-1, valid priority for SCHED_NORMAL,
@@ -5394,6 +5507,10 @@ recheck:
 		/* can't change other user's priorities */
 		if (!check_same_owner(p))
 			return -EPERM;
+		
+		/* normal users shall not reset the sched_reset_on_fork flag */
+		if (p->sched_reset_on_fork && !reset_on_fork)
+			return -EPERM;
 	}
 
 	if (user) {
@@ -5436,6 +5553,8 @@ recheck:
 		deactivate_task(rq, p, 0);
 	if (running)
 		p->sched_class->put_prev_task(rq, p);
+	
+	p->sched_reset_on_fork = reset_on_fork;
 
 	oldprio = p->prio;
 	__setscheduler(rq, p, policy, param->sched_priority);
@@ -5553,14 +5672,15 @@ SYSCALL_DEFINE1(sched_getscheduler, pid_t, pid)
 	if (p) {
 		retval = security_task_getscheduler(p);
 		if (!retval)
-			retval = p->policy;
+			retval = p->policy
+				| (p->sched_reset_on_fork ? SCHED_RESET_ON_FORK : 0);
 	}
 	read_unlock(&tasklist_lock);
 	return retval;
 }
 
 /**
- * sys_sched_getscheduler - get the RT priority of a thread
+ * sys_sched_getparam - get the RT priority of a thread
  * @pid: the pid in question.
  * @param: structure containing the RT priority.
  */
@@ -5783,9 +5903,6 @@ SYSCALL_DEFINE0(sched_yield)
 
 static void __cond_resched(void)
 {
-#ifdef CONFIG_DEBUG_SPINLOCK_SLEEP
-	__might_sleep(__FILE__, __LINE__);
-#endif
 	/*
 	 * The BKS might be reacquired before we have dropped
 	 * PREEMPT_ACTIVE, which could trigger a second
@@ -5810,17 +5927,19 @@ int __sched _cond_resched(void)
 EXPORT_SYMBOL(_cond_resched);
 
 /*
- * cond_resched_lock() - if a reschedule is pending, drop the given lock,
+ * __cond_resched_lock() - if a reschedule is pending, drop the given lock,
  * call schedule, and on return reacquire the lock.
  *
  * This works OK both with and without CONFIG_PREEMPT. We do strange low-level
  * operations here to prevent schedule() from being called twice (once via
  * spin_unlock(), once by hand).
  */
-int cond_resched_lock(spinlock_t *lock)
+int __cond_resched_lock(spinlock_t *lock)
 {
 	int resched = need_resched() && system_state == SYSTEM_RUNNING;
 	int ret = 0;
+	
+	lockdep_assert_held(lock);
 
 	if (spin_needbreak(lock) || resched) {
 		spin_unlock(lock);
@@ -5833,9 +5952,9 @@ int cond_resched_lock(spinlock_t *lock)
 	}
 	return ret;
 }
-EXPORT_SYMBOL(cond_resched_lock);
+EXPORT_SYMBOL(__cond_resched_lock);
 
-int __sched cond_resched_softirq(void)
+int __sched __cond_resched_softirq(void)
 {
 	BUG_ON(!in_softirq());
 
@@ -5847,7 +5966,7 @@ int __sched cond_resched_softirq(void)
 	}
 	return 0;
 }
-EXPORT_SYMBOL(cond_resched_softirq);
+EXPORT_SYMBOL(__cond_resched_softirq);
 
 /**
  * yield - yield the current processor to other threads.
@@ -5875,7 +5994,9 @@ void __sched io_schedule(void)
 
 	delayacct_blkio_start();
 	atomic_inc(&rq->nr_iowait);
+	current->in_iowait = 1;
 	schedule();
+	current->in_iowait = 0;
 	atomic_dec(&rq->nr_iowait);
 	delayacct_blkio_end();
 }
@@ -5888,7 +6009,9 @@ long __sched io_schedule_timeout(long timeout)
 
 	delayacct_blkio_start();
 	atomic_inc(&rq->nr_iowait);
+	current->in_iowait = 1;
 	ret = schedule_timeout(timeout);
+	current->in_iowait = 0;
 	atomic_dec(&rq->nr_iowait);
 	delayacct_blkio_end();
 	return ret;
@@ -6523,6 +6646,14 @@ static void migrate_dead_tasks(unsigned int dead_cpu)
 
 	}
 }
+
+/*
+ * remove the tasks which were accounted by rq from calc_load_tasks.
+ */
+static void calc_global_load_remove(struct rq *rq)
+{
+	atomic_long_sub(rq->calc_load_active, &calc_load_tasks);
+}
 #endif /* CONFIG_HOTPLUG_CPU */
 
 #if defined(CONFIG_SCHED_DEBUG) && defined(CONFIG_SYSCTL)
@@ -6757,6 +6888,8 @@ migration_call(struct notifier_block *nfb, unsigned long action, void *hcpu)
 		/* Update our root-domain */
 		rq = cpu_rq(cpu);
 		spin_lock_irqsave(&rq->lock, flags);
+		rq->calc_load_update = calc_load_update;
+		rq->calc_load_active = 0;
 		if (rq->rd) {
 			BUG_ON(!cpumask_test_cpu(cpu, rq->rd->span));
 
@@ -6796,7 +6929,8 @@ migration_call(struct notifier_block *nfb, unsigned long action, void *hcpu)
 		cpuset_unlock();
 		migrate_nr_uninterruptible(rq);
 		BUG_ON(rq->nr_running != 0);
-
+		
+		calc_global_load_remove(rq);
 		/*
 		 * No need to migrate the tasks: it was best-effort if
 		 * they didn't take sched_hotcpu_mutex. Just wake up
@@ -8238,6 +8372,7 @@ void __init sched_init_smp(void)
 	cpumask_var_t non_isolated_cpus;
 
 	alloc_cpumask_var(&non_isolated_cpus, GFP_KERNEL);
+	alloc_cpumask_var(&fallback_doms, GFP_KERNEL);
 
 #if defined(CONFIG_NUMA)
 	sched_group_nodes_bycpu = kzalloc(nr_cpu_ids * sizeof(void **),
@@ -8269,7 +8404,6 @@ void __init sched_init_smp(void)
 	sched_init_granularity();
 	free_cpumask_var(non_isolated_cpus);
 
-	alloc_cpumask_var(&fallback_doms, GFP_KERNEL);
 	init_sched_rt_class();
 }
 #else
@@ -8473,6 +8607,8 @@ void __init sched_init(void)
 		rq = cpu_rq(i);
 		spin_lock_init(&rq->lock);
 		rq->nr_running = 0;
+		rq->calc_load_active = 0;
+		rq->calc_load_update = jiffies + LOAD_FREQ;
 		init_cfs_rq(&rq->cfs, rq);
 		init_rt_rq(&rq->rt, rq);
 #ifdef CONFIG_FAIR_GROUP_SCHED
@@ -8580,6 +8716,9 @@ void __init sched_init(void)
 	 * when this runqueue becomes "idle".
 	 */
 	init_idle(current, smp_processor_id());
+	
+	calc_load_update = jiffies + LOAD_FREQ;
+	
 	/*
 	 * During early bootup we pretend to be a normal task:
 	 */
@@ -8606,15 +8745,20 @@ int __init __might_sleep_init(void)
 }
 early_initcall(__might_sleep_init);
 
-void __might_sleep(char *file, int line)
+static inline int preempt_count_equals(int preempt_offset)
+{
+	int nested = preempt_count() & ~PREEMPT_ACTIVE;
+
+	return (nested == PREEMPT_INATOMIC_BASE + preempt_offset);
+}
+
+void __might_sleep(char *file, int line, int preempt_offset)
 {
 #ifdef in_atomic
 	static unsigned long prev_jiffy;	/* ratelimiting */
 
-	if ((!in_atomic() && !irqs_disabled()) || oops_in_progress)
-		return;
-	if (system_state != SYSTEM_RUNNING &&
-	    (!__might_sleep_init_called || system_state != SYSTEM_BOOTING))
+	if ((preempt_count_equals(preempt_offset) && !irqs_disabled()) ||
+	    system_state != SYSTEM_RUNNING || oops_in_progress)
 		return;
 	if (time_before(jiffies, prev_jiffy + HZ) && prev_jiffy)
 		return;
@@ -9798,4 +9942,5 @@ late_initcall(sched_init_register_suspend);
 
 
 #endif // CONFIG_SCHED_HRTICK
+#endif /* CONFIG_SCHED_BFS */
 

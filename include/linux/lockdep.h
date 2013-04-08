@@ -314,6 +314,10 @@ extern void lock_acquire(struct lockdep_map *lock, unsigned int subclass,
 extern void lock_release(struct lockdep_map *lock, int nested,
 			 unsigned long ip);
 
+#define lockdep_is_held(lock)  lock_is_held(&(lock)->dep_map)
+
+extern int lock_is_held(struct lockdep_map *lock);
+
 extern void lock_set_class(struct lockdep_map *lock, const char *name,
 			   struct lock_class_key *key, unsigned int subclass,
 			   unsigned long ip);
@@ -331,6 +335,8 @@ extern void lockdep_trace_alloc(gfp_t mask);
 # define INIT_LOCKDEP				.lockdep_recursion = 0,
 
 #define lockdep_depth(tsk)	(debug_locks ? (tsk)->lockdep_depth : 0)
+
+#define lockdep_assert_held(l) WARN_ON(debug_locks && !lockdep_is_held(l))
 
 #else /* !LOCKDEP */
 
@@ -370,6 +376,8 @@ static inline void lockdep_on(void)
 struct lock_class_key { };
 
 #define lockdep_depth(tsk)	(0)
+
+#define lockdep_assert_held(l)                 do { } while (0)
 
 #endif /* !LOCKDEP */
 

@@ -2914,6 +2914,19 @@ __lock_release(struct lockdep_map *lock, int nested, unsigned long ip)
 	check_chain_key(curr);
 }
 
+static int __lock_is_held(struct lockdep_map *lock)
+{
+	struct task_struct *curr = current;
+	int i;
+
+	for (i = 0; i < curr->lockdep_depth; i++) {
+		if (curr->held_locks[i].instance == lock)
+			return 1;
+	}
+
+	return 0;
+}
+
 /*
  * Check whether we follow the irq-flags state precisely:
  */
@@ -3028,6 +3041,26 @@ int lock_is_held(struct lockdep_map *lock)
         raw_local_irq_restore(flags);
 
         return ret;
+}
+EXPORT_SYMBOL_GPL(lock_is_held);
+
+int lock_is_held(struct lockdep_map *lock)
+{
+	unsigned long flags;
+	int ret = 0;
+
+	if (unlikely(current->lockdep_recursion))
+		return ret;
+
+	raw_local_irq_save(flags);
+	check_flags(flags);
+
+	current->lockdep_recursion = 1;
+	ret = __lock_is_held(lock);
+	current->lockdep_recursion = 0;
+	raw_local_irq_restore(flags);
+
+	return ret;
 }
 EXPORT_SYMBOL_GPL(lock_is_held);
 
