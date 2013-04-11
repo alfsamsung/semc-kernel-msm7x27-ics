@@ -118,9 +118,9 @@ static void __exit_signal(struct task_struct *tsk)
 		 * We won't ever get here for the group leader, since it
 		 * will have been the last reference on the signal_struct.
 		 */
-		sig->utime = cputime_add(sig->utime, task_utime(tsk));
-		sig->stime = cputime_add(sig->stime, task_stime(tsk));
-		sig->gtime = cputime_add(sig->gtime, task_gtime(tsk));
+		sig->utime = cputime_add(sig->utime, tsk->utime);
+		sig->stime = cputime_add(sig->stime, tsk->stime);
+		sig->gtime = cputime_add(sig->gtime, tsk->gtime);
 		sig->min_flt += tsk->min_flt;
 		sig->maj_flt += tsk->maj_flt;
 		sig->nvcsw += tsk->nvcsw;
@@ -1271,7 +1271,8 @@ static int wait_task_zombie(struct task_struct *p, int options,
 	if (likely(!traced)) {
 		struct signal_struct *psig;
 		struct signal_struct *sig;
-		struct task_cputime cputime;
+		//struct task_cputime cputime;
+		cputime_t tgutime, tgstime;
 
 		/*
 		 * The resource counters for the group leader are in its
@@ -1292,17 +1293,17 @@ static int wait_task_zombie(struct task_struct *p, int options,
 		 * group, which consolidates times for all threads in the
 		 * group including the group leader.
 		 */
-		thread_group_cputime(p, &cputime);
+		thread_group_times(p, &tgutime, &tgstime);
 		spin_lock_irq(&p->parent->sighand->siglock);
 		psig = p->parent->signal;
 		sig = p->signal;
 		psig->cutime =
 			cputime_add(psig->cutime,
-			cputime_add(cputime.utime,
+			cputime_add(tgutime,
 				    sig->cutime));
 		psig->cstime =
 			cputime_add(psig->cstime,
-			cputime_add(cputime.stime,
+			cputime_add(tgstime,
 				    sig->cstime));
 		psig->cgtime =
 			cputime_add(psig->cgtime,

@@ -98,11 +98,11 @@ static int neg_one = -1;
 #endif
 
 #if defined(CONFIG_DETECT_SOFTLOCKUP) || defined(CONFIG_HIGHMEM) || defined(CONFIG_SCHED_BFS)
-static int one = 1;
+static int __maybe_unused one = 1;
 #endif
 
 #if defined(CONFIG_MMU) && defined(CONFIG_FILE_LOCKING)
-static int two = 2;
+static int __maybe_unused two = 2;
 #endif
 
 static int zero;

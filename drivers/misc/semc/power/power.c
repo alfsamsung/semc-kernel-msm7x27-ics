@@ -20,6 +20,7 @@
 #include <linux/miscdevice.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
+#include <linux/sched.h>
 #include <linux/poll.h>
 #include <linux/power_supply.h>
 #include <linux/semc/power/semc_power.h>

@@ -11,6 +11,13 @@
 #include <linux/securebits.h>
 #include <net/net_namespace.h>
 
+#ifdef CONFIG_SMP
+# define INIT_PUSHABLE_TASKS(tsk)                                      \
+       .pushable_tasks = PLIST_NODE_INIT(tsk.pushable_tasks, MAX_PRIO),
+#else
+# define INIT_PUSHABLE_TASKS(tsk)
+#endif
+
 extern struct files_struct init_files;
 extern struct fs_struct init_fs;
 
@@ -157,6 +164,7 @@ extern struct cred init_cred;
 	.run_list	= LIST_HEAD_INIT(tsk.run_list),			\
 	.time_slice	= HZ,					\
 	.tasks		= LIST_HEAD_INIT(tsk.tasks),			\
+	INIT_PUSHABLE_TASKS(tsk)					\
 	.ptraced	= LIST_HEAD_INIT(tsk.ptraced),			\
 	.ptrace_entry	= LIST_HEAD_INIT(tsk.ptrace_entry),		\
 	.real_parent	= &tsk,						\
@@ -165,7 +173,8 @@ extern struct cred init_cred;
 	.sibling	= LIST_HEAD_INIT(tsk.sibling),			\
 	.group_leader	= &tsk,						\
 	.real_cred	= &init_cred,					\
-	.cred		= &init_cred,					\
+	RCU_INIT_POINTER(.real_cred, &init_cred),			\
+	RCU_INIT_POINTER(.cred, &init_cred),				\
 	.comm		= "swapper",					\
 	.thread		= INIT_THREAD,					\
 	.fs		= &init_fs,					\
@@ -194,6 +203,10 @@ extern struct cred init_cred;
 	INIT_LOCKDEP							\
 	INIT_TASK_RCU_PREEMPT(tsk)					\
 }
+//.pi_lock	= __RAW_SPIN_LOCK_UNLOCKED(tsk.pi_lock),
+//INIT_PERF_EVENTS(tsk)
+//INIT_FTRACE_GRAPH
+//INIT_TRACE_RECURSION
 #else /* CONFIG_SCHED_BFS */
 #define INIT_TASK(tsk)	\
 {									\
@@ -218,6 +231,7 @@ extern struct cred init_cred;
 		.nr_cpus_allowed = NR_CPUS,				\
 	},								\
 	.tasks		= LIST_HEAD_INIT(tsk.tasks),			\
+	INIT_PUSHABLE_TASKS(tsk)					\
 	.ptraced	= LIST_HEAD_INIT(tsk.ptraced),			\
 	.ptrace_entry	= LIST_HEAD_INIT(tsk.ptrace_entry),		\
 	.real_parent	= &tsk,						\
@@ -266,5 +280,7 @@ extern struct cred init_cred;
 	LIST_HEAD_INIT(cpu_timers[2]),					\
 }
 
+/* Attach to the init_task data structure for proper alignment */
+#define __init_task_data __attribute__((__section__(".data.init_task")))
 
 #endif

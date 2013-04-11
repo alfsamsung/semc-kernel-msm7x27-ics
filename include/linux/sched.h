@@ -547,6 +547,9 @@ struct signal_struct {
 	cputime_t utime, stime, cutime, cstime;
 	cputime_t gtime;
 	cputime_t cgtime;
+#ifndef CONFIG_VIRT_CPU_ACCOUNTING
+	cputime_t prev_utime, prev_stime;
+#endif
 	unsigned long nvcsw, nivcsw, cnvcsw, cnivcsw;
 	unsigned long min_flt, maj_flt, cmin_flt, cmaj_flt;
 	unsigned long inblock, oublock, cinblock, coublock;
@@ -1119,12 +1122,14 @@ struct task_struct {
 	int prio, static_prio, normal_prio;
 	unsigned int rt_priority;
 #ifdef CONFIG_SCHED_BFS
-	int time_slice, first_time_slice;
-	unsigned long deadline;
+	int time_slice;
+	u64 deadline;
 	struct list_head run_list;
 	u64 last_ran;
 	u64 sched_time; /* sched_clock time spent running */
-
+#ifdef CONFIG_SMP
+	int sticky; /* Soft affined flag */
+#endif
 	unsigned long rt_timeout;
 #else /* CONFIG_SCHED_BFS */
 	const struct sched_class *sched_class;
@@ -1170,6 +1175,9 @@ struct task_struct {
 #endif
 
 	struct list_head tasks;
+#ifdef CONFIG_SMP
+	struct plist_node pushable_tasks;
+#endif
 
 	struct mm_struct *mm, *active_mm;
 	
@@ -1436,6 +1444,8 @@ struct task_struct {
 #ifdef CONFIG_SCHED_BFS
 extern int grunqueue_is_locked(void);
 extern void grq_unlock_wait(void);
+extern void cpu_scaling(int cpu);
+extern void cpu_nonscaling(int cpu);
 #define tsk_seruntime(t)		((t)->sched_time)
 #define tsk_rttimeout(t)		((t)->rt_timeout)
 #define task_rq_unlock_wait(tsk)	grq_unlock_wait()
@@ -1453,22 +1463,26 @@ static inline void tsk_cpus_current(struct task_struct *p)
 
 static inline void print_scheduler_version(void)
 {
-	printk(KERN_INFO"BFS CPU scheduler v0.318 by Con Kolivas.\n");
+	printk(KERN_INFO"BFS CPU scheduler v0.404 by Con Kolivas.\n");
 }
 
 static inline int iso_task(struct task_struct *p)
 {
 	return (p->policy == SCHED_ISO);
 }
-#else
+extern void remove_cpu(unsigned long cpu);
+#else /* CFS */
 extern int runqueue_is_locked(int cpu);
 extern void task_rq_unlock_wait(struct task_struct *p);
-#define tsk_seruntime(t)	((t)->se.sum_exec_runtime)
-#define tsk_rttimeout(t)	((t)->rt.timeout)
-
-static inline void sched_exit(struct task_struct *p)
+static inline void cpu_scaling(int cpu)
 {
 }
+
+static inline void cpu_nonscaling(int cpu)
+{
+}
+#define tsk_seruntime(t)	((t)->se.sum_exec_runtime)
+#define tsk_rttimeout(t)	((t)->rt.timeout)
 
 static inline void set_oom_timeslice(struct task_struct *p)
 {
@@ -1489,7 +1503,11 @@ static inline int iso_task(struct task_struct *p)
 {
 	return 0;
 }
-#endif
+
+static inline void remove_cpu(unsigned long cpu)
+{
+}
+#endif /* CONFIG_SCHED_BFS */
 
 /* Future-safe accessor for struct task_struct's cpus_allowed. */
 #define tsk_cpumask(tsk) (&(tsk)->cpus_allowed)
@@ -1508,9 +1526,9 @@ static inline int iso_task(struct task_struct *p)
  */
 
 #define MAX_USER_RT_PRIO	100
-#define MAX_RT_PRIO		MAX_USER_RT_PRIO
+#define MAX_RT_PRIO		(MAX_USER_RT_PRIO + 1)
 #define DEFAULT_PRIO		(MAX_RT_PRIO + 20)
-
+ 
 #ifdef CONFIG_SCHED_BFS
 #define PRIO_RANGE		(40)
 #define MAX_PRIO		(MAX_RT_PRIO + PRIO_RANGE)
@@ -1676,16 +1694,14 @@ static inline void put_task_struct(struct task_struct *t)
 		__put_task_struct(t);
 }
 
-extern cputime_t task_utime(struct task_struct *p);
-extern cputime_t task_stime(struct task_struct *p);
-extern cputime_t task_gtime(struct task_struct *p);
+extern void task_times(struct task_struct *p, cputime_t *ut, cputime_t *st);
+extern void thread_group_times(struct task_struct *p, cputime_t *ut, cputime_t *st);
 
 extern int task_free_register(struct notifier_block *n);
 extern int task_free_unregister(struct notifier_block *n);
 
 extern int task_fork_register(struct notifier_block *n);
 extern int task_fork_unregister(struct notifier_block *n);
-
 /*
  * Per process flags
  */
@@ -1695,6 +1711,9 @@ extern int task_fork_unregister(struct notifier_block *n);
 #define PF_EXITING	0x00000004	/* getting shut down */
 #define PF_EXITPIDONE	0x00000008	/* pi exit done on shut down */
 #define PF_VCPU		0x00000010	/* I'm a virtual CPU */
+#ifdef CONFIG_SCHED_BFS
+#define PF_WQ_WORKER	0x00000020	/* I'm a workqueue worker */
+#endif
 #define PF_FORKNOEXEC	0x00000040	/* forked but didn't exec */
 #define PF_SUPERPRIV	0x00000100	/* used super-user privileges */
 #define PF_DUMPCORE	0x00000200	/* dumped core */
