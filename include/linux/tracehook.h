@@ -1,7 +1,7 @@
 /*
  * Tracing hooks
  *
- * Copyright (C) 2008 Red Hat, Inc.  All rights reserved.
+ * Copyright (C) 2008-2009 Red Hat, Inc.  All rights reserved.
  *
  * This copyrighted material is made available to anyone wishing to use,
  * modify, copy, or redistribute it subject to the terms and conditions
@@ -134,6 +134,13 @@ static inline __must_check int tracehook_report_syscall_entry(
  */
 static inline void tracehook_report_syscall_exit(struct pt_regs *regs, int step)
 {
+	if (step) {
+		siginfo_t info;
+		user_single_step_siginfo(current, regs, &info);
+		force_sig_info(SIGTRAP, &info, current);
+		return;
+	}
+
 	ptrace_report_syscall(regs);
 }
 
@@ -143,7 +150,7 @@ static inline void tracehook_report_syscall_exit(struct pt_regs *regs, int step)
  *
  * Return %LSM_UNSAFE_* bits applied to an exec because of tracing.
  *
- * Called with task_lock() held on @task.
+ * @task->cred_guard_mutex is held by the caller through the do_execve().
  */
 static inline int tracehook_unsafe_exec(struct task_struct *task)
 {
@@ -387,17 +394,14 @@ static inline void tracehook_signal_handler(int sig, siginfo_t *info,
  * tracehook_consider_ignored_signal - suppress short-circuit of ignored signal
  * @task:		task receiving the signal
  * @sig:		signal number being sent
- * @handler:		%SIG_IGN or %SIG_DFL
  *
  * Return zero iff tracing doesn't care to examine this ignored signal,
  * so it can short-circuit normal delivery and never even get queued.
- * Either @handler is %SIG_DFL and @sig's default is ignore, or it's %SIG_IGN.
  *
  * Called with @task->sighand->siglock held.
  */
 static inline int tracehook_consider_ignored_signal(struct task_struct *task,
-						    int sig,
-						    void __user *handler)
+						    int sig)
 {
 	return (task_ptrace(task) & PT_PTRACED) != 0;
 }
@@ -406,19 +410,17 @@ static inline int tracehook_consider_ignored_signal(struct task_struct *task,
  * tracehook_consider_fatal_signal - suppress special handling of fatal signal
  * @task:		task receiving the signal
  * @sig:		signal number being sent
- * @handler:		%SIG_DFL or %SIG_IGN
  *
  * Return nonzero to prevent special handling of this termination signal.
- * Normally @handler is %SIG_DFL.  It can be %SIG_IGN if @sig is ignored,
- * in which case force_sig() is about to reset it to %SIG_DFL.
+ * Normally handler for signal is %SIG_DFL.  It can be %SIG_IGN if @sig is
+ * ignored, in which case force_sig() is about to reset it to %SIG_DFL.
  * When this returns zero, this signal might cause a quick termination
  * that does not give the debugger a chance to intercept the signal.
  *
  * Called with or without @task->sighand->siglock held.
  */
 static inline int tracehook_consider_fatal_signal(struct task_struct *task,
-						  int sig,
-						  void __user *handler)
+						  int sig)
 {
 	return (task_ptrace(task) & PT_PTRACED) != 0;
 }
@@ -468,22 +470,38 @@ static inline int tracehook_get_signal(struct task_struct *task,
 
 /**
  * tracehook_notify_jctl - report about job control stop/continue
- * @notify:		nonzero if this is the last thread in the group to stop
+ * @notify:            zero, %CLD_STOPPED or %CLD_CONTINUED
  * @why:		%CLD_STOPPED or %CLD_CONTINUED
  *
  * This is called when we might call do_notify_parent_cldstop().
- * It's called when about to stop for job control; we are already in
- * %TASK_STOPPED state, about to call schedule().  It's also called when
- * a delayed %CLD_STOPPED or %CLD_CONTINUED report is ready to be made.
+ * 
+ * @notify is zero if we would not ordinarily send a %SIGCHLD,
+ * or is the %CLD_STOPPED or %CLD_CONTINUED .si_code for %SIGCHLD.
+ * 
+ *  @why is %CLD_STOPPED when about to stop for job control;
+ * we are already in %TASK_STOPPED state, about to call schedule().
+ * It might also be that we have just exited (check %PF_EXITING),
+ * but need to report that a group-wide stop is complete.
  *
- * Return nonzero to generate a %SIGCHLD with @why, which is
- * normal if @notify is nonzero.
+ * @why is %CLD_CONTINUED when waking up after job control stop and
+ * ready to make a delayed @notify report.
  *
- * Called with no locks held.
+ * Return the %CLD_* value for %SIGCHLD, or zero to generate no signal.
+ *
+ * Called with the siglock held.
  */
 static inline int tracehook_notify_jctl(int notify, int why)
 {
-	return notify || (current->ptrace & PT_PTRACED);
+	return notify ?: (current->ptrace & PT_PTRACED) ? why : 0;
+}
+
+/**
+ * tracehook_finish_jctl - report about return from job control stop
+ *
+ * This is called by do_signal_stop() after wakeup.
+ */
+static inline void tracehook_finish_jctl(void)
+{
 }
 
 #define DEATH_REAP			-1
@@ -506,7 +524,7 @@ static inline int tracehook_notify_jctl(int notify, int why)
 static inline int tracehook_notify_death(struct task_struct *task,
 					 void **death_cookie, int group_dead)
 {
-	if (task->exit_signal == -1)
+	if (task_detached(task))
 		return task->ptrace ? SIGCHLD : DEATH_REAP;
 
 	/*

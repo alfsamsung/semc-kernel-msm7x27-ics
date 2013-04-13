@@ -225,9 +225,57 @@ out:
 	return retval;
 }
 
+/*
+ * Called with irqs disabled, returns true if childs should reap themselves.
+ */
+static int ignoring_children(struct sighand_struct *sigh)
+{
+	int ret;
+	spin_lock(&sigh->siglock);
+	ret = (sigh->action[SIGCHLD-1].sa.sa_handler == SIG_IGN) ||
+	      (sigh->action[SIGCHLD-1].sa.sa_flags & SA_NOCLDWAIT);
+	spin_unlock(&sigh->siglock);
+	return ret;
+}
+
+/*
+ * Called with tasklist_lock held for writing.
+ * Unlink a traced task, and clean it up if it was a traced zombie.
+ * Return true if it needs to be reaped with release_task().
+ * (We can't call release_task() here because we already hold tasklist_lock.)
+ *
+ * If it's a zombie, our attachedness prevented normal parent notification
+ * or self-reaping.  Do notification now if it would have happened earlier.
+ * If it should reap itself, return true.
+ *
+ * If it's our own child, there is no notification to do.
+ * But if our normal children self-reap, then this child
+ * was prevented by ptrace and we must reap it now.
+ */
+static bool __ptrace_detach(struct task_struct *tracer, struct task_struct *p)
+{
+	__ptrace_unlink(p);
+
+	if (p->exit_state == EXIT_ZOMBIE) {
+		if (!task_detached(p) && thread_group_empty(p)) {
+			if (!same_thread_group(p->real_parent, tracer))
+				do_notify_parent(p, p->exit_signal);
+			else if (ignoring_children(tracer->sighand))
+				p->exit_signal = -1;
+		}
+		if (task_detached(p)) {
+			/* Mark it as in the process of being reaped. */
+			p->exit_state = EXIT_DEAD;
+			return true;
+		}
+	}
+
+	return false;
+}
+
 int ptrace_detach(struct task_struct *child, unsigned int data)
 {
-	int dead = 0;
+	bool dead = false;
   
 	if (!valid_signal(data))
 		return -EIO;
@@ -237,7 +285,10 @@ int ptrace_detach(struct task_struct *child, unsigned int data)
 	clear_tsk_thread_flag(child, TIF_SYSCALL_TRACE);
 
 	write_lock_irq(&tasklist_lock);
-	/* protect against de_thread()->release_task() */
+	/*
+	 * This child can be already killed. Make sure de_thread() or
+	 * our sub-thread doing do_wait() didn't do release_task() yet.
+	 */
 	if (child->ptrace) {
 		child->exit_code = data;
 
@@ -252,6 +303,29 @@ int ptrace_detach(struct task_struct *child, unsigned int data)
 		release_task(child);
 
 	return 0;
+}
+
+/*
+ * Detach all tasks we were using ptrace on.
+ */
+void exit_ptrace(struct task_struct *tracer)
+{
+	struct task_struct *p, *n;
+	LIST_HEAD(ptrace_dead);
+
+	write_lock_irq(&tasklist_lock);
+	list_for_each_entry_safe(p, n, &tracer->ptraced, ptrace_entry) {
+		if (__ptrace_detach(tracer, p))
+			list_add(&p->ptrace_entry, &ptrace_dead);
+	}
+	write_unlock_irq(&tasklist_lock);
+
+	BUG_ON(!list_empty(&tracer->ptraced));
+
+	list_for_each_entry_safe(p, n, &ptrace_dead, ptrace_entry) {
+		list_del_init(&p->ptrace_entry);
+		release_task(p);
+	}
 }
 
 int ptrace_readdata(struct task_struct *tsk, unsigned long src, char __user *dst, int len)
@@ -536,26 +610,16 @@ repeat:
 	return ret;
 }
 
-/**
- * ptrace_get_task_struct  --  grab a task struct reference for ptrace
- * @pid:       process id to grab a task_struct reference of
- *
- * This function is a helper for ptrace implementations.  It checks
- * permissions and then grabs a task struct for use of the actual
- * ptrace implementation.
- *
- * Returns the task_struct for @pid or an ERR_PTR() on failure.
- */
-struct task_struct *ptrace_get_task_struct(pid_t pid)
+static struct task_struct *ptrace_get_task_struct(pid_t pid)
 {
 	struct task_struct *child;
 
-	read_lock(&tasklist_lock);
+	rcu_read_lock();
 	child = find_task_by_vpid(pid);
 	if (child)
 		get_task_struct(child);
+	rcu_read_unlock();
 
-	read_unlock(&tasklist_lock);
 	if (!child)
 		return ERR_PTR(-ESRCH);
 	return child;

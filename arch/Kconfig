@@ -78,6 +78,13 @@ config HAVE_KPROBES
 config HAVE_KRETPROBES
 	bool
 
+config USER_RETURN_NOTIFIER
+	bool
+	depends on HAVE_USER_RETURN_NOTIFIER
+	help
+	  Provide a kernel-internal notification when a cpu is about to
+	  switch to user mode.	
+
 #
 # An arch should select this if it provides all these things:
 #
@@ -106,3 +113,5 @@ config HAVE_CLK
 	  The <linux/clk.h> calls support software clock gating and
 	  thus are a key power management tool on many systems.
 
+config HAVE_USER_RETURN_NOTIFIER
+	bool
