@@ -1525,7 +1525,7 @@ int may_open(struct path *path, int acc_mode, int flag)
 	if (error)
 		return error;
 
-	error = ima_path_check(&nd->path,
+	error = ima_path_check(path,
 			       acc_mode & (MAY_READ | MAY_WRITE | MAY_EXEC));
 	if (error)
 		return error;
