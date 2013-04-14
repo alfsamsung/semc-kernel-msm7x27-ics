@@ -86,10 +86,6 @@ extern char elf_platform[];
 
 struct elf32_hdr;
 
-struct task_struct;
-
-extern int dump_task_regs (struct task_struct *, elf_gregset_t *);
-
 /*
  * This is used to ensure we don't load something for the wrong architecture.
  */
@@ -99,7 +95,10 @@ extern int elf_check_arch(const struct elf32_hdr *);
 extern int arm_elf_read_implies_exec(const struct elf32_hdr *, int);
 #define elf_read_implies_exec(ex,stk) arm_elf_read_implies_exec(&(ex), stk)
 
-#define USE_ELF_CORE_DUMP
+struct task_struct;
+int dump_task_regs(struct task_struct *t, elf_gregset_t *elfregs);
+#define ELF_CORE_COPY_TASK_REGS dump_task_regs
+
 #define ELF_EXEC_PAGESIZE	4096
 
 /* This is the location that an ET_DYN program is loaded if exec'ed.  Typical
@@ -116,7 +115,5 @@ extern int arm_elf_read_implies_exec(const struct elf32_hdr *, int);
 
 extern void elf_set_personality(const struct elf32_hdr *);
 #define SET_PERSONALITY(ex)	elf_set_personality(&(ex))
-
-#define ELF_CORE_COPY_TASK_REGS(tsk, elf_regs) dump_task_regs(tsk, elf_regs)
 
 #endif
