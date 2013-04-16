@@ -317,26 +317,6 @@ int filemap_fdatawait_range(struct address_space *mapping, loff_t start_byte,
 EXPORT_SYMBOL(filemap_fdatawait_range);
 
 /**
- * filemap_fdatawait_range - wait for all under-writeback pages to complete in a given range
- * @mapping: address space structure to wait for
- * @start:	offset in bytes where the range starts
- * @end:	offset in bytes where the range ends (inclusive)
- *
- * Walk the list of under-writeback pages of the given address space
- * in the given range and wait for all of them.
- *
- * This is just a simple wrapper so that callers don't have to convert offsets
- * to page indexes themselves
- */
-int filemap_fdatawait_range(struct address_space *mapping, loff_t start,
-			    loff_t end)
-{
-	return wait_on_page_writeback_range(mapping, start >> PAGE_CACHE_SHIFT,
-					    end >> PAGE_CACHE_SHIFT);
-}
-EXPORT_SYMBOL(filemap_fdatawait_range);
-
-/**
  * filemap_fdatawait - wait for all under-writeback pages to complete
  * @mapping: address space structure to wait for
  *
@@ -2484,6 +2464,9 @@ EXPORT_SYMBOL(generic_file_aio_write);
  * The address_space is to try to release any data against the page
  * (presumably at page->private).  If the release was successful, return `1'.
  * Otherwise return zero.
+ * 
+ * This may also be called if PG_fscache is set on a page, indicating that the
+ * page is known to the local caching routines.
  *
  * The @gfp_mask argument specifies whether I/O may be performed to release
  * this page (__GFP_IO), and whether the call may block (__GFP_WAIT & __GFP_FS).

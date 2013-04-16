@@ -20,13 +20,6 @@ static inline struct quota_info *sb_dqopt(struct super_block *sb)
 /*
  * declaration of quota_function calls in kernel.
  */
-void sync_quota_sb(struct super_block *sb, int type);
-static inline void writeout_quota_sb(struct super_block *sb, int type)
-{
-       if (sb->s_qcop->quota_sync)
-               sb->s_qcop->quota_sync(sb, type);
-}
-
 int dquot_initialize(struct inode *inode, int type);
 int dquot_drop(struct inode *inode);
 struct dquot *dqget(struct super_block *sb, unsigned int id, int type);
@@ -65,7 +58,7 @@ int vfs_quota_on_mount(struct super_block *sb, char *qf_name,
  	int format_id, int type);
 int vfs_quota_off(struct super_block *sb, int type, int remount);
 int vfs_quota_disable(struct super_block *sb, int type, unsigned int flags);
-int vfs_quota_sync(struct super_block *sb, int type);
+int vfs_quota_sync(struct super_block *sb, int type, int wait);
 int vfs_get_dqinfo(struct super_block *sb, int type, struct if_dqinfo *ii);
 int vfs_set_dqinfo(struct super_block *sb, int type, struct if_dqinfo *ii);
 int vfs_get_dqblk(struct super_block *sb, int type, qid_t id, struct if_dqblk *di);
@@ -331,14 +324,6 @@ static inline int vfs_dq_alloc_inode(struct inode *inode)
 }
 
 static inline void vfs_dq_free_inode(struct inode *inode)
-{
-}
-
-static inline void sync_quota_sb(struct super_block *sb, int type)
-{
-}
-
-static inline void writeout_quota_sb(struct super_block *sb, int type)
 {
 }
 

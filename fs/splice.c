@@ -58,7 +58,8 @@ static int page_cache_pipe_buf_steal(struct pipe_inode_info *pipe,
 		 */
 		wait_on_page_writeback(page);
 
-		if (PagePrivate(page) && !try_to_release_page(page, GFP_KERNEL))
+		if (page_has_private(page) &&
+		    !try_to_release_page(page, GFP_KERNEL))
 			goto out_unlock;
 
 		/*
@@ -500,8 +501,10 @@ ssize_t generic_file_splice_read(struct file *in, loff_t *ppos,
 		len = left;
 
 	ret = __generic_file_splice_read(in, ppos, pipe, len, flags);
-	if (ret > 0)
+	if (ret > 0) {
 		*ppos += ret;
+		file_accessed(in);
+	}
 
 	return ret;
 }
@@ -528,6 +531,21 @@ static ssize_t kernel_readv(struct file *file, const struct iovec *vec,
 	set_fs(get_ds());
 	/* The cast to a user pointer is valid due to the set_fs() */
 	res = vfs_readv(file, (const struct iovec __user *)vec, vlen, &pos);
+	set_fs(old_fs);
+
+	return res;
+}
+
+static ssize_t kernel_write(struct file *file, const char *buf, size_t count,
+			    loff_t pos)
+{
+	mm_segment_t old_fs;
+	ssize_t res;
+
+	old_fs = get_fs();
+	set_fs(get_ds());
+	/* The cast to a user pointer is valid due to the set_fs() */
+	res = vfs_write(file, (const char __user *)buf, count, &pos);
 	set_fs(old_fs);
 
 	return res;
@@ -563,13 +581,13 @@ ssize_t default_file_splice_read(struct file *in, loff_t *ppos,
 	for (i = 0; i < nr_pages && i < PIPE_BUFFERS && len; i++) {
 		struct page *page;
 
-		page = alloc_page(GFP_HIGHUSER);
+		page = alloc_page(GFP_USER);
 		error = -ENOMEM;
 		if (!page)
 			goto err;
 
 		this_len = min_t(size_t, len, PAGE_CACHE_SIZE - offset);
-		vec[i].iov_base = (void __user *) kmap(page);
+		vec[i].iov_base = (void __user *) page_address(page);
 		vec[i].iov_len = this_len;
 		pages[i] = page;
 		spd.nr_pages++;
@@ -578,8 +596,10 @@ ssize_t default_file_splice_read(struct file *in, loff_t *ppos,
 	}
 
 	res = kernel_readv(in, vec, spd.nr_pages, *ppos);
-	if (res < 0)
+	if (res < 0) {
+		error = res;
 		goto err;
+	}
 
 	error = 0;
 	if (!res)
@@ -587,7 +607,6 @@ ssize_t default_file_splice_read(struct file *in, loff_t *ppos,
 
 	nr_freed = 0;
 	for (i = 0; i < spd.nr_pages; i++) {
-		kunmap(pages[i]);
 		this_len = min_t(size_t, vec[i].iov_len, res);
 		partial[i].offset = 0;
 		partial[i].len = this_len;
@@ -607,10 +626,9 @@ ssize_t default_file_splice_read(struct file *in, loff_t *ppos,
 	return res;
 
 err:
-	for (i = 0; i < spd.nr_pages; i++) {
-		kunmap(pages[i]);
+	for (i = 0; i < spd.nr_pages; i++)
 		__free_page(pages[i]);
-	}
+
 	return error;
 }
 EXPORT_SYMBOL(default_file_splice_read);
@@ -719,7 +737,6 @@ static void wakeup_pipe_writers(struct pipe_inode_info *pipe)
  * @actor:	handler that splices the data
  *
  * Description:
-
  *    This function loops over the pipe and calls @actor to do the
  *    actual moving of a single struct pipe_buffer to the desired
  *    destination.  It returns when there's no more buffers left in
@@ -816,7 +833,7 @@ EXPORT_SYMBOL(splice_from_pipe_next);
 
 /**
  * splice_from_pipe_begin - start splicing from pipe
- * @pipe:	pipe to splice from
+ * @sd:                information about the splice operation
  *
  * Description:
  *    This function should be called before a loop containing
@@ -911,65 +928,6 @@ ssize_t splice_from_pipe(struct pipe_inode_info *pipe, struct file *out,
 }
 
 /**
- * generic_file_splice_write_nolock - generic_file_splice_write without mutexes
- * @pipe:	pipe info
- * @out:	file to write to
- * @ppos:	position in @out
- * @len:	number of bytes to splice
- * @flags:	splice modifier flags
- *
- * Description:
- *    Will either move or copy pages (determined by @flags options) from
- *    the given pipe inode to the given file. The caller is responsible
- *    for acquiring i_mutex on both inodes.
- *
- */
-ssize_t
-generic_file_splice_write_nolock(struct pipe_inode_info *pipe, struct file *out,
-				 loff_t *ppos, size_t len, unsigned int flags)
-{
-	struct address_space *mapping = out->f_mapping;
-	struct inode *inode = mapping->host;
-	struct splice_desc sd = {
-		.total_len = len,
-		.flags = flags,
-		.pos = *ppos,
-		.u.file = out,
-	};
-	ssize_t ret;
-	int err;
-
-	err = file_remove_suid(out);
-	if (unlikely(err))
-		return err;
-
-	ret = __splice_from_pipe(pipe, &sd, pipe_to_file);
-	if (ret > 0) {
-		unsigned long nr_pages;
-
-		*ppos += ret;
-		nr_pages = (ret + PAGE_CACHE_SIZE - 1) >> PAGE_CACHE_SHIFT;
-
-		/*
-		 * If file or inode is SYNC and we actually wrote some data,
-		 * sync it.
-		 */
-		if (unlikely((out->f_flags & O_SYNC) || IS_SYNC(inode))) {
-			err = generic_osync_inode(inode, mapping,
-						  OSYNC_METADATA|OSYNC_DATA);
-
-			if (err)
-				ret = err;
-		}
-		balance_dirty_pages_ratelimited_nr(mapping, nr_pages);
-	}
-
-	return ret;
-}
-
-EXPORT_SYMBOL(generic_file_splice_write_nolock);
-
-/**
  * generic_file_splice_write - splice data from a pipe to a file
  * @pipe:	pipe info
  * @out:	file to write to
@@ -1006,8 +964,10 @@ generic_file_splice_write(struct pipe_inode_info *pipe, struct file *out,
 
 		mutex_lock_nested(&inode->i_mutex, I_MUTEX_CHILD);
 		ret = file_remove_suid(out);
-		if (!ret)
+		if (!ret) {
+			file_update_time(out);
 			ret = splice_from_pipe_feed(pipe, &sd, pipe_to_file);
+		}
 		mutex_unlock(&inode->i_mutex);
 	} while (ret > 0);
 	splice_from_pipe_end(pipe, &sd);
@@ -1019,25 +979,15 @@ generic_file_splice_write(struct pipe_inode_info *pipe, struct file *out,
 
 	if (ret > 0) {
 		unsigned long nr_pages;
+		int err;
 
-		*ppos += ret;
 		nr_pages = (ret + PAGE_CACHE_SIZE - 1) >> PAGE_CACHE_SHIFT;
 
-		/*
-		 * If file or inode is SYNC and we actually wrote some data,
-		 * sync it.
-		 */
-		if (unlikely((out->f_flags & O_SYNC) || IS_SYNC(inode))) {
-			int err;
-
-			mutex_lock(&inode->i_mutex);
-			err = generic_osync_inode(inode, mapping,
-						  OSYNC_METADATA|OSYNC_DATA);
-			mutex_unlock(&inode->i_mutex);
-
-			if (err)
-				ret = err;
-		}
+		err = generic_write_sync(out, *ppos, ret);
+		if (err)
+			ret = err;
+		else
+			*ppos += ret;
 		balance_dirty_pages_ratelimited_nr(mapping, nr_pages);
 	}
 
@@ -1045,6 +995,36 @@ generic_file_splice_write(struct pipe_inode_info *pipe, struct file *out,
 }
 
 EXPORT_SYMBOL(generic_file_splice_write);
+
+static int write_pipe_buf(struct pipe_inode_info *pipe, struct pipe_buffer *buf,
+			  struct splice_desc *sd)
+{
+	int ret;
+	void *data;
+
+	ret = buf->ops->confirm(pipe, buf);
+	if (ret)
+		return ret;
+
+	data = buf->ops->map(pipe, buf, 0);
+	ret = kernel_write(sd->u.file, data + buf->offset, sd->len, sd->pos);
+	buf->ops->unmap(pipe, buf, data);
+
+	return ret;
+}
+
+static ssize_t default_file_splice_write(struct pipe_inode_info *pipe,
+					  struct file *out, loff_t *ppos,
+					  size_t len, unsigned int flags)
+{
+	ssize_t ret;
+
+	ret = splice_from_pipe(pipe, out, ppos, len, flags, write_pipe_buf);
+	if (ret > 0)
+		*ppos += ret;
+
+	return ret;
+}
 
 /**
  * generic_splice_sendpage - splice data from a pipe to a socket
@@ -1073,10 +1053,9 @@ EXPORT_SYMBOL(generic_splice_sendpage);
 static long do_splice_from(struct pipe_inode_info *pipe, struct file *out,
 			   loff_t *ppos, size_t len, unsigned int flags)
 {
+	ssize_t (*splice_write)(struct pipe_inode_info *, struct file *,
+				loff_t *, size_t, unsigned int);
 	int ret;
-
-	if (unlikely(!out->f_op || !out->f_op->splice_write))
-		return -EINVAL;
 
 	if (unlikely(!(out->f_mode & FMODE_WRITE)))
 		return -EBADF;
@@ -1088,7 +1067,11 @@ static long do_splice_from(struct pipe_inode_info *pipe, struct file *out,
 	if (unlikely(ret < 0))
 		return ret;
 
-	return out->f_op->splice_write(pipe, out, ppos, len, flags);
+	splice_write = out->f_op->splice_write;
+	if (!splice_write)
+		splice_write = default_file_splice_write;
+
+	return splice_write(pipe, out, ppos, len, flags);
 }
 
 /*
@@ -1280,6 +1263,9 @@ long do_splice_direct(struct file *in, loff_t *ppos, struct file *out,
 	return ret;
 }
 
+static int splice_pipe_to_pipe(struct pipe_inode_info *ipipe,
+				struct pipe_inode_info *opipe,
+				size_t len, unsigned int flags);
 /*
  * After the inode slimming patch, i_pipe/i_bdev/i_cdev share the same
  * location, so checking ->i_pipe is not enough to verify that this is a
@@ -1300,12 +1286,32 @@ static long do_splice(struct file *in, loff_t __user *off_in,
 		      struct file *out, loff_t __user *off_out,
 		      size_t len, unsigned int flags)
 {
-	struct pipe_inode_info *pipe;
+	struct pipe_inode_info *ipipe;
+	struct pipe_inode_info *opipe;
 	loff_t offset, *off;
 	long ret;
 
-	pipe = pipe_info(in->f_path.dentry->d_inode);
-	if (pipe) {
+	ipipe = pipe_info(in->f_path.dentry->d_inode);
+	opipe = pipe_info(out->f_path.dentry->d_inode);
+
+	if (ipipe && opipe) {
+		if (off_in || off_out)
+			return -ESPIPE;
+
+		if (!(in->f_mode & FMODE_READ))
+			return -EBADF;
+
+		if (!(out->f_mode & FMODE_WRITE))
+			return -EBADF;
+
+		/* Splicing to self would be fun, but... */
+		if (ipipe == opipe)
+			return -EINVAL;
+
+		return splice_pipe_to_pipe(ipipe, opipe, len, flags);
+	}
+
+	if (ipipe) {
 		if (off_in)
 			return -ESPIPE;
 		if (off_out) {
@@ -1317,7 +1323,7 @@ static long do_splice(struct file *in, loff_t __user *off_in,
 		} else
 			off = &out->f_pos;
 
-		ret = do_splice_from(pipe, out, off, len, flags);
+		ret = do_splice_from(ipipe, out, off, len, flags);
 
 		if (off_out && copy_to_user(off_out, off, sizeof(loff_t)))
 			ret = -EFAULT;
@@ -1325,8 +1331,7 @@ static long do_splice(struct file *in, loff_t __user *off_in,
 		return ret;
 	}
 
-	pipe = pipe_info(out->f_path.dentry->d_inode);
-	if (pipe) {
+	if (opipe) {
 		if (off_out)
 			return -ESPIPE;
 		if (off_in) {
@@ -1338,7 +1343,7 @@ static long do_splice(struct file *in, loff_t __user *off_in,
 		} else
 			off = &in->f_pos;
 
-		ret = do_splice_to(in, off, pipe, len, flags);
+		ret = do_splice_to(in, off, opipe, len, flags);
 
 		if (off_in && copy_to_user(off_in, off, sizeof(loff_t)))
 			ret = -EFAULT;
@@ -1679,7 +1684,7 @@ SYSCALL_DEFINE6(splice, int, fd_in, loff_t __user *, off_in,
  * Make sure there's data to read. Wait for input if we can, otherwise
  * return an appropriate error.
  */
-static int link_ipipe_prep(struct pipe_inode_info *pipe, unsigned int flags)
+static int ipipe_prep(struct pipe_inode_info *pipe, unsigned int flags)
 {
 	int ret;
 
@@ -1717,7 +1722,7 @@ static int link_ipipe_prep(struct pipe_inode_info *pipe, unsigned int flags)
  * Make sure there's writeable room. Wait for room if we can, otherwise
  * return an appropriate error.
  */
-static int link_opipe_prep(struct pipe_inode_info *pipe, unsigned int flags)
+static int opipe_prep(struct pipe_inode_info *pipe, unsigned int flags)
 {
 	int ret;
 
@@ -1751,6 +1756,123 @@ static int link_opipe_prep(struct pipe_inode_info *pipe, unsigned int flags)
 	}
 
 	pipe_unlock(pipe);
+	return ret;
+}
+
+/*
+ * Splice contents of ipipe to opipe.
+ */
+static int splice_pipe_to_pipe(struct pipe_inode_info *ipipe,
+				struct pipe_inode_info *opipe,
+				size_t len, unsigned int flags)
+{
+	struct pipe_buffer *ibuf, *obuf;
+	int ret = 0, nbuf;
+	bool input_wakeup = false;
+
+retry:
+	ret = ipipe_prep(ipipe, flags);
+	if (ret)
+		return ret;
+
+	ret = opipe_prep(opipe, flags);
+	if (ret)
+		return ret;
+
+	/*
+	 * Potential ABBA deadlock, work around it by ordering lock
+	 * grabbing by pipe info address. Otherwise two different processes
+	 * could deadlock (one doing tee from A -> B, the other from B -> A).
+	 */
+	pipe_double_lock(ipipe, opipe);
+
+	do {
+		if (!opipe->readers) {
+			send_sig(SIGPIPE, current, 0);
+			if (!ret)
+				ret = -EPIPE;
+			break;
+		}
+
+		if (!ipipe->nrbufs && !ipipe->writers)
+			break;
+
+		/*
+		 * Cannot make any progress, because either the input
+		 * pipe is empty or the output pipe is full.
+		 */
+		if (!ipipe->nrbufs || opipe->nrbufs >= PIPE_BUFFERS) {
+			/* Already processed some buffers, break */
+			if (ret)
+				break;
+
+			if (flags & SPLICE_F_NONBLOCK) {
+				ret = -EAGAIN;
+				break;
+			}
+
+			/*
+			 * We raced with another reader/writer and haven't
+			 * managed to process any buffers.  A zero return
+			 * value means EOF, so retry instead.
+			 */
+			pipe_unlock(ipipe);
+			pipe_unlock(opipe);
+			goto retry;
+		}
+
+		ibuf = ipipe->bufs + ipipe->curbuf;
+		nbuf = (opipe->curbuf + opipe->nrbufs) % PIPE_BUFFERS;
+		obuf = opipe->bufs + nbuf;
+
+		if (len >= ibuf->len) {
+			/*
+			 * Simply move the whole buffer from ipipe to opipe
+			 */
+			*obuf = *ibuf;
+			ibuf->ops = NULL;
+			opipe->nrbufs++;
+			ipipe->curbuf = (ipipe->curbuf + 1) % PIPE_BUFFERS;
+			ipipe->nrbufs--;
+			input_wakeup = true;
+		} else {
+			/*
+			 * Get a reference to this pipe buffer,
+			 * so we can copy the contents over.
+			 */
+			ibuf->ops->get(ipipe, ibuf);
+			*obuf = *ibuf;
+
+			/*
+			 * Don't inherit the gift flag, we need to
+			 * prevent multiple steals of this page.
+			 */
+			obuf->flags &= ~PIPE_BUF_FLAG_GIFT;
+
+			obuf->len = len;
+			opipe->nrbufs++;
+			ibuf->offset += obuf->len;
+			ibuf->len -= obuf->len;
+		}
+		ret += obuf->len;
+		len -= obuf->len;
+	} while (len);
+
+	pipe_unlock(ipipe);
+	pipe_unlock(opipe);
+
+	/*
+	 * If we put data in the output pipe, wakeup any potential readers.
+	 */
+	if (ret > 0) {
+		smp_mb();
+		if (waitqueue_active(&opipe->wait))
+			wake_up_interruptible(&opipe->wait);
+		kill_fasync(&opipe->fasync_readers, SIGIO, POLL_IN);
+	}
+	if (input_wakeup)
+		wakeup_pipe_writers(ipipe);
+
 	return ret;
 }
 
@@ -1858,9 +1980,9 @@ static long do_tee(struct file *in, struct file *out, size_t len,
 		 * Keep going, unless we encounter an error. The ipipe/opipe
 		 * ordering doesn't really matter.
 		 */
-		ret = link_ipipe_prep(ipipe, flags);
+		ret = ipipe_prep(ipipe, flags);
 		if (!ret) {
-			ret = link_opipe_prep(opipe, flags);
+			ret = opipe_prep(opipe, flags);
 			if (!ret)
 				ret = link_pipe(ipipe, opipe, len, flags);
 		}

@@ -1158,7 +1158,6 @@ struct super_block {
 	struct rw_semaphore	s_umount;
 	struct mutex		s_lock;
 	int			s_count;
-	int			s_need_sync;
 	atomic_t		s_active;
 #ifdef CONFIG_SECURITY
 	void                    *s_security;
@@ -1584,6 +1583,7 @@ extern int get_sb_pseudo(struct file_system_type *, char *,
 	struct vfsmount *mnt);
 extern void simple_set_mnt(struct vfsmount *mnt, struct super_block *sb);
 int __put_super_and_need_restart(struct super_block *sb);
+int __put_super(struct super_block *sb);
 void put_super(struct super_block *sb);
 
 /* Alas, no aliases. Too much hassle with bringing module.h everywhere */
@@ -1974,8 +1974,6 @@ extern ssize_t generic_file_splice_read(struct file *, loff_t *,
 extern ssize_t default_file_splice_read(struct file *, loff_t *,
 		struct pipe_inode_info *, size_t, unsigned int);
 extern ssize_t generic_file_splice_write(struct pipe_inode_info *,
-		struct file *, loff_t *, size_t, unsigned int);
-extern ssize_t generic_file_splice_write_nolock(struct pipe_inode_info *,
 		struct file *, loff_t *, size_t, unsigned int);
 extern ssize_t generic_splice_sendpage(struct pipe_inode_info *pipe,
 		struct file *out, loff_t *, size_t len, unsigned int flags);

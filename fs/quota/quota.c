@@ -159,44 +159,6 @@ static int check_quotactl_valid(struct super_block *sb, int type, int cmd,
 	return error;
 }
 
-#ifdef CONFIG_QUOTA
-void sync_quota_sb(struct super_block *sb, int type)
-{
-	int cnt;
-
-	if (!sb->s_qcop->quota_sync)
-		return;
-
-	sb->s_qcop->quota_sync(sb, type);
-
-	if (sb_dqopt(sb)->flags & DQUOT_QUOTA_SYS_FILE)
-		return;
-	/* This is not very clever (and fast) but currently I don't know about
-	 * any other simple way of getting quota data to disk and we must get
-	 * them there for userspace to be visible... */
-	if (sb->s_op->sync_fs)
-		sb->s_op->sync_fs(sb, 1);
-	sync_blockdev(sb->s_bdev);
-
-	/*
-	 * Now when everything is written we can discard the pagecache so
-	 * that userspace sees the changes.
-	 */
-	mutex_lock(&sb_dqopt(sb)->dqonoff_mutex);
-	for (cnt = 0; cnt < MAXQUOTAS; cnt++) {
-		if (type != -1 && cnt != type)
-			continue;
-		if (!sb_has_quota_active(sb, cnt))
-			continue;
-		mutex_lock_nested(&sb_dqopt(sb)->files[cnt]->i_mutex,
-				  I_MUTEX_QUOTA);
-		truncate_inode_pages(&sb_dqopt(sb)->files[cnt]->i_data, 0);
-		mutex_unlock(&sb_dqopt(sb)->files[cnt]->i_mutex);
-	}
-	mutex_unlock(&sb_dqopt(sb)->dqonoff_mutex);
-}
-#endif
-
 static void sync_dquots(int type)
 {
 	struct super_block *sb;
@@ -205,6 +167,8 @@ static void sync_dquots(int type)
 	spin_lock(&sb_lock);
 restart:
 	list_for_each_entry(sb, &super_blocks, s_list) {
+		if (!sb->s_qcop || !sb->s_qcop->quota_sync)
+			continue;
 		/* This test just improves performance so it needn't be
 		 * reliable... */
 		for (cnt = 0; cnt < MAXQUOTAS; cnt++) {
@@ -223,7 +187,7 @@ restart:
 		spin_unlock(&sb_lock);
 		down_read(&sb->s_umount);
 		if (sb->s_root)
-			sync_quota_sb(sb, type);
+			sb->s_qcop->quota_sync(sb, type, 1);
 		up_read(&sb->s_umount);
 		spin_lock(&sb_lock);
 		if (__put_super_and_need_restart(sb))
@@ -301,12 +265,9 @@ static int do_quotactl(struct super_block *sb, int type, int cmd, qid_t id,
 			return sb->s_qcop->set_dqblk(sb, type, id, &idq);
 		}
 		case Q_SYNC:
-			if (sb)
-				sync_quota_sb(sb, type);
-			else
-				sync_dquots(type);
-			return 0;
-
+			if (!sb->s_qcop->quota_sync)
+				return -ENOSYS;
+			return sb->s_qcop->quota_sync(sb, type, 1);
 		case Q_XQUOTAON:
 		case Q_XQUOTAOFF:
 		case Q_XQUOTARM: {
