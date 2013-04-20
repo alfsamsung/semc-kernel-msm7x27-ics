@@ -39,7 +39,7 @@ static  __cacheline_aligned_in_smp DEFINE_SPINLOCK(kernel_flag);
 int __lockfunc __reacquire_kernel_lock(void)
 {
 	while (!_raw_spin_trylock(&kernel_flag)) {
-		if (test_thread_flag(TIF_NEED_RESCHED))
+		if (need_resched())
 			return -EAGAIN;
 		cpu_relax();
 	}
@@ -116,8 +116,10 @@ static inline void __unlock_kernel(void)
 void __lockfunc lock_kernel(void)
 {
 	int depth = current->lock_depth+1;
-	if (likely(!depth))
+	if (likely(!depth)) {
+		might_sleep();
 		__lock_kernel();
+	}
 	current->lock_depth = depth;
 }
 

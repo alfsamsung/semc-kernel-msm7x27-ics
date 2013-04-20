@@ -1112,10 +1112,10 @@ static void resched_task(struct task_struct *p)
 
 	assert_spin_locked(&grq.lock);
 
-	if (unlikely(test_tsk_thread_flag(p, TIF_NEED_RESCHED)))
+	if (test_tsk_need_resched(p))
 		return;
 
-	set_tsk_thread_flag(p, TIF_NEED_RESCHED);
+	set_tsk_need_resched(p);
 
 	cpu = task_cpu(p);
 	if (cpu == smp_processor_id())
