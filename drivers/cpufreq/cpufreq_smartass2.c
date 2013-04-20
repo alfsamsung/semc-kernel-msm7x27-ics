@@ -844,7 +844,8 @@ static int __init cpufreq_smartass_init(void)
 	}
 
 	// Scale up is high priority
-	up_wq = create_rt_workqueue("ksmartass_up");
+	//up_wq = create_rt_workqueue("ksmartass_up");
+	up_wq = create_singlethread_workqueue("ksmartass_up");
 	down_wq = create_workqueue("ksmartass_down");
 	if (!up_wq || !down_wq)
 		return -EFAULT;

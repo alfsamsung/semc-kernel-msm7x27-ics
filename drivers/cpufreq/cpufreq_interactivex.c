@@ -365,7 +365,8 @@ static int __init cpufreq_interactivex_init(void)
 	}
 
 	/* Scale up is high priority */
-	up_wq = create_rt_workqueue("kinteractivex_up");
+	//up_wq = create_rt_workqueue("kinteractivex_up");
+	up_wq = create_singlethread_workqueue("kinteractivex_up");
 	down_wq = create_workqueue("kinteractivex_down");
 
 	INIT_WORK(&freq_scale_work, cpufreq_interactivex_freq_change_time_work);
