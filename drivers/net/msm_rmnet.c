@@ -57,16 +57,16 @@ module_param_named(debug_enable, msm_rmnet_debug_mask,
 #define DBG2(x...) DBG(DEBUG_MASK_LVL2, x)
 
 /* Configure device instances */
-#define RMNET_DEVICE_COUNT (8)
+#define RMNET_DEVICE_COUNT (3)
 static const char *ch_name[RMNET_DEVICE_COUNT] = {
 	"DATA5",
 	"DATA6",
 	"DATA7",
-	"DATA8",
-	"DATA9",
-	"DATA12",
-	"DATA13",
-	"DATA14",
+//	"DATA8",
+//	"DATA9",
+//	"DATA12",
+//	"DATA13",
+//	"DATA14",
 };
 
 /* XXX should come from smd headers */
