@@ -40,7 +40,7 @@
 #include <mach/misc_modem_api.h>
 #endif
 
-#define DEBUG	0
+//#define DEBUG	0
 #define DEV_NAME "lightsensor"
 #define DRV_NAME "pmic-lightsensor"
 
@@ -89,7 +89,7 @@ static u16 ls_read_adc_value(void)
 		printk(KERN_ERR "%s msm_adc_read returnd error %d\n", DEV_NAME, rc);
 		value = 0;
 	}
-#if DEBUG
+#ifdef DEBUG
 	printk(KERN_DEBUG "%s (PM_ADC) %d\n", DEV_NAME, value);
 #endif
 #endif
@@ -140,7 +140,7 @@ value_updated:
 
 	ls.state = (ls.state & ~LS_DATA_UNDEF) | LS_DATA_READY;
 	ls.sensor_value = value;
-#if DEBUG
+#ifdef DEBUG
 	printk("%s sensor value updated: %d\n", DEV_NAME, value);
 #endif
 	return 1;
@@ -173,7 +173,7 @@ static void timer_callback(unsigned long d)
 static int ls_open(struct inode *inode, struct file *file)
 {
 	int rc = 0;
-#if DEBUG
+#ifdef DEBUG
 	printk(KERN_DEBUG "%s open request\n", DEV_NAME);
 #endif
 	mutex_lock(&ls.update_lock);
@@ -187,7 +187,7 @@ static int ls_open(struct inode *inode, struct file *file)
 
 static int ls_close(struct inode *inode, struct file *file)
 {
-#if DEBUG
+#ifdef DEBUG
 	printk(KERN_DEBUG  "%s closed.\n", DEV_NAME);
 #endif
 	mutex_lock(&ls.update_lock);
@@ -201,14 +201,14 @@ static ssize_t ls_read(struct file *file, char __user *buf,
 {
 	int ok;
 
-#if DEBUG
+#ifdef DEBUG
 	printk("%s read request.\n", DEV_NAME);
 #endif
 
 	mutex_lock(&ls.update_lock);
 
 	if (ls.state & LS_SUSPEND) {
-#if DEBUG
+#ifdef DEBUG
 		printk(KERN_ERR "%s:  is suspended!\n", DEV_NAME);
 #endif
 		mutex_unlock(&ls.update_lock);
@@ -227,7 +227,7 @@ static ssize_t ls_read(struct file *file, char __user *buf,
 
 	mutex_unlock(&ls.update_lock);
 
-#if DEBUG
+#ifdef DEBUG
 	printk("%s read request in a wait queue\n", DEV_NAME);
 #endif
 	if (-ERESTARTSYS ==
@@ -237,7 +237,7 @@ static ssize_t ls_read(struct file *file, char __user *buf,
 	mutex_lock(&ls.update_lock);
 
 data_ready:
-#if DEBUG
+#ifdef DEBUG
 	printk("%s sensor value %d\n", DEV_NAME, ls.sensor_value);
 #endif
 	ls.state &= ~LS_DATA_READY;
@@ -253,7 +253,7 @@ static unsigned int ls_poll(struct file *filp, poll_table *wait)
 {
 	unsigned int mask = 0;
 
-#if DEBUG
+#ifdef DEBUG
 	printk("%s poll request\n", DEV_NAME);
 #endif
 
@@ -267,7 +267,7 @@ static unsigned int ls_poll(struct file *filp, poll_table *wait)
 		goto data_not_ready;
 	}
 
-#if DEBUG
+#ifdef DEBUG
 	printk("%s poll request - data ready\n", DEV_NAME);
 #endif
 	mask |= POLLIN | POLLRDNORM; /* readable */
@@ -280,7 +280,7 @@ data_not_ready:
 /* write command for PROXIMITY */
 static ssize_t ls_write(struct file *file, const char __user *buf, size_t count, loff_t *offset)
 {
-#if DEBUG
+#ifdef DEBUG
 	printk("%s write request.\n", DEV_NAME);
 #endif
 
@@ -296,14 +296,14 @@ static int ls_ioctl(struct inode *inode, struct file *file,
 	/* check cmd */
 	if	(_IOC_TYPE(cmd) != LIGHTSENSOR_IOC_MAGIC)
 	{
-		#if DEBUG
+		#ifdef DEBUG
 		printk("cmd magic type error\n");
 		#endif
 		return -ENOTTY;
 	}
 	if	(_IOC_NR(cmd) > LIGHTSENSOR_IOC_MAXNR)
 	{
-		#if DEBUG
+		#ifdef DEBUG
 		printk("cmd number error\n");
 		#endif
 		return -ENOTTY;
@@ -345,7 +345,7 @@ static int ls_ioctl(struct inode *inode, struct file *file,
 			ls.resolution_mask	= ~((1 << d.resolution) - 1);
 			ls.state &= ~LS_USE_THRESHOLD;
 		}
-		#if DEBUG
+		#ifdef DEBUG
 		printk(KERN_DEBUG "%s: polling period %d ms, "
 					 "threshold %d, resolution mask 0x%02X\n",
 					 DEV_NAME,
@@ -365,7 +365,7 @@ static int ls_ioctl(struct inode *inode, struct file *file,
 		break;
 
 	default:
-		#if DEBUG
+		#ifdef DEBUG
 		printk("%s IOCTL unknown.\n", DEV_NAME);
 		#endif
 		break;
@@ -376,7 +376,7 @@ static int ls_ioctl(struct inode *inode, struct file *file,
 
 fault:
 	mutex_unlock(&ls.update_lock);
-#if DEBUG
+#ifdef DEBUG
 	printk("%s IOCTL copy to user error.\n", DEV_NAME);
 #endif
 	return -EFAULT;
