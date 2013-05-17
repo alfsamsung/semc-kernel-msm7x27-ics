@@ -62,6 +62,8 @@ static int pdev_list_cnt;
 
 #ifdef CONFIG_MSM7X27_VSYNC_ENABLE
 int vsync_mode = 1;
+//alfs test:see if we can turn on/off vsync via this
+module_param(vsync_mode, int, 0644);
 #else
 int vsync_mode = 0;
 #endif
@@ -431,7 +433,15 @@ static int msm_fb_suspend_sub(struct msm_fb_data_type *mfd)
 			}
 		}
 	}
-
+#ifdef CONFIG_MSM7X27_VSYNC_ENABLE
+	if (vsync_mode) {
+		mfd->panel_info.lcd.vsync_enable = TRUE;
+	} else {
+		mfd->panel_info.lcd.vsync_enable = FALSE;
+	}
+	//pr_info("vsync_enable is %d\n",
+	//		mfd->panel_info.lcd.vsync_enable);
+#endif
 	return 0;
 }
 
@@ -647,7 +657,7 @@ static int msm_fb_blank_sub(int blank_mode, struct fb_info *info,
 					pdata->panel_ext->backlight_ctrl;
 				msm_fb_resume_backlight_workqueue(100);
 #endif
-
+				
 /* ToDo: possible conflict with android which doesn't expect sw refresher */
 /*
 	  if (!mfd->hw_refresh)
