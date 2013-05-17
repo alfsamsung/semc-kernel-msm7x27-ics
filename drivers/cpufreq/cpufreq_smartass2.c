@@ -696,7 +696,7 @@ static void smartass_suspend(int cpu, int suspend)
 
 static void smartass_early_suspend(struct early_suspend *handler) {
 	int i;
-	printk(KERN_INFO "[smartass2] %s\n", __func__);
+	dprintk(SMARTASS_DEBUG_JUMPS, "[smartass2] %s\n", __func__);
 	if (suspended || sleep_ideal_freq==0) // disable behavior for sleep_ideal_freq==0
 		return;
 	suspended = 1;
@@ -844,9 +844,8 @@ static int __init cpufreq_smartass_init(void)
 	}
 
 	// Scale up is high priority
-	//up_wq = create_rt_workqueue("ksmartass_up");
-	up_wq = create_singlethread_workqueue("ksmartass_up");
-	down_wq = create_workqueue("ksmartass_down");
+	up_wq = alloc_workqueue("ksmartass_up", WQ_HIGHPRI, 1);
+	down_wq = alloc_workqueue("ksmartass_down", 0, 1); 
 	if (!up_wq || !down_wq)
 		return -EFAULT;
 
